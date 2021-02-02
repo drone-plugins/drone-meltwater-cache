@@ -1,6 +1,6 @@
 repository:
-  name: kaniko-docker
-  description: Drone plugin for publishing Docker images
+  name: docker-cache
+  description: Drone plugin for caching
   homepage:  http://plugins.drone.io/drone-plugins/drone-cache
   topics: drone, drone-plugin
 
