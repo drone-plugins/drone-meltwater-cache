@@ -90,6 +90,10 @@ func roundTrip(t *testing.T, backend *Backend) {
 	test.Ok(t, err)
 
 	test.Equals(t, true, exists)
+
+	entries, err := backend.List(context.TODO(), "")
+	test.Ok(t, err)
+	test.Equals(t, 1, len(entries))
 }
 
 // Helpers

@@ -185,11 +185,13 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 	})
 
 	var entries []common.FileEntry
+
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {
 			break
 		}
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to iterate objects present at path %s/%s with err: %v",
 				b.bucket, p, err)
@@ -201,6 +203,7 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 			LastModified: attrs.Updated,
 		})
 	}
+
 	return entries, nil
 }
 

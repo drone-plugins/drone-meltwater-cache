@@ -156,6 +156,7 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 	}
 
 	var entries []common.FileEntry
+
 	err := b.client.ListObjectsPagesWithContext(ctx, in, func(page *s3.ListObjectsOutput, lastPage bool) bool {
 		for _, item := range page.Contents {
 			entries = append(entries, common.FileEntry{
@@ -164,7 +165,7 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 				LastModified: *item.LastModified,
 			})
 		}
-		return lastPage != true
+		return !lastPage
 	})
 
 	return entries, err
