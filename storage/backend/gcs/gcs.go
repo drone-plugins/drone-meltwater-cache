@@ -178,7 +178,7 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 	}
 }
 
-// List all the entries present at prefixed path.
+// List contents of the given directory by given key from remote storage.
 func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
 	it := b.client.Bucket(b.bucket).Objects(ctx, &gcstorage.Query{
 		Prefix: p,

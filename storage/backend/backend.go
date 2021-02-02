@@ -41,7 +41,7 @@ type Backend interface {
 	// Exists checks if path already exists.
 	Exists(ctx context.Context, p string) (bool, error)
 
-	// Implement me!
+	// List contents of the given directory by given key from remote storage.
 	List(ctx context.Context, p string) ([]common.FileEntry, error)
 
 	// Implement me!
