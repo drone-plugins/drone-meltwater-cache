@@ -199,6 +199,7 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 			target = filepath.Join(dst, name)
 		}
+
 		level.Info(a.logger).Log("msg", "extracting archive", "path", target)
 
 		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
