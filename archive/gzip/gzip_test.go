@@ -89,7 +89,7 @@ func TestCreate(t *testing.T) {
 			err:     nil,
 		},
 	} {
-		tc := tc // NOTICE: https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
+		tc := tc // NOTE: https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
