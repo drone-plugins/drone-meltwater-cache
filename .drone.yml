@@ -24,7 +24,7 @@ steps:
       - mc admin policy add minio userpolicy /tmp/policy.json
       - mc admin policy set minio userpolicy user=foo
   - name: build
-    image: golang:1.17.3-alpine3.15
+    image: golang:1.17.3-alpine3.13
     commands:
       - apk add --update make git
       - make drone-cache
@@ -32,7 +32,7 @@ steps:
       CGO_ENABLED: 0
 
   - name: lint
-    image: golang:1.17.3-alpine3.15
+    image: golang:1.17.3-alpine3.13
     commands:
       - apk add --update make git curl
       - make lint
@@ -40,7 +40,7 @@ steps:
       CGO_ENABLED: 0
 
   - name: test
-    image: golang:1.17.3-alpine3.15
+    image: golang:1.17.3-alpine3.13
     commands:
       - go test -mod=vendor -short -cover -tags=integration ./...
     environment:
