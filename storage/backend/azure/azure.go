@@ -88,7 +88,8 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) (err error) {
 
 		blobURL := b.containerURL.NewBlockBlobURL(p)
 
-		resp, err := blobURL.Download(ctx, 0, azblob.CountToEnd, azblob.BlobAccessConditions{}, false, azblob.ClientProvidedKeyOptions{})
+		resp, err := blobURL.Download(ctx, 0, azblob.CountToEnd, azblob.BlobAccessConditions{}, false,
+			azblob.ClientProvidedKeyOptions{})
 		if err != nil {
 			errCh <- fmt.Errorf("get the object, %w", err)
 			return
