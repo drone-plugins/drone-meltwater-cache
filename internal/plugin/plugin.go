@@ -76,11 +76,11 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	}
 
 	var options []cache.Option
-	if p.Config.RemoteRoot != "" {
-		options = append(options, cache.WithNamespace(p.Config.RemoteRoot))
-	} else {
-		options = append(options, cache.WithNamespace(p.Metadata.Repo.Name))
-	}
+	// if p.Config.RemoteRoot != "" {
+	// 	options = append(options, cache.WithNamespace(p.Config.RemoteRoot))
+	// } else {
+	// 	options = append(options, cache.WithNamespace(p.Metadata.Repo.Name))
+	// }
 
 	var generator key.Generator
 	if cfg.CacheKeyTemplate != "" {
