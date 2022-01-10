@@ -141,11 +141,11 @@ func relative(parent string, path string) (string, error) {
 }
 
 func getRootPathPrefix() string {
-	prefix := "/"
 	if runtime.GOOS == "windows" {
-		prefix = `C:\`
+		return `C:\`
 	}
-	return prefix
+
+	return "/"
 }
 
 func createSymlinkHeader(fi os.FileInfo, path string) (*tar.Header, error) {

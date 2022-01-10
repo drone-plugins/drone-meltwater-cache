@@ -63,11 +63,7 @@ func (r restorer) Restore(dsts []string) error {
 			}
 
 			for _, e := range entries {
-				separator := "/"
-				if runtime.GOOS == "windows" {
-					separator = `\`
-				}
-				dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+separator))
+				dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
 			}
 		} else if err != common.ErrNotImplemented {
 			return err
@@ -158,4 +154,11 @@ func (r restorer) generateKey(parts ...string) (string, error) {
 	}
 
 	return "", err
+}
+
+func getSeparator() string {
+	if runtime.GOOS == "windows" {
+		return `\`
+	}
+	return "/"
 }
