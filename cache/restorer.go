@@ -160,5 +160,6 @@ func getSeparator() string {
 	if runtime.GOOS == "windows" {
 		return `\`
 	}
+
 	return "/"
 }
