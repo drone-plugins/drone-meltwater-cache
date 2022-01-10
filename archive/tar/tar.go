@@ -88,7 +88,7 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 		}
 
 		var name string
-		if strings.HasPrefix(path, getSeparator()) {
+		if strings.HasPrefix(path, getRootPathPrefix()) {
 			name, err = filepath.Abs(path)
 		} else {
 			name, err = relative(root, path)
@@ -137,15 +137,15 @@ func relative(parent string, path string) (string, error) {
 
 	rel = filepath.ToSlash(rel)
 
-	return strings.TrimPrefix(filepath.Join(rel, name), getSeparator()), nil
+	return strings.TrimPrefix(filepath.Join(rel, name), "/"), nil
 }
 
-func getSeparator() string {
-	separator := "/"
+func getRootPathPrefix() string {
+	prefix := "/"
 	if runtime.GOOS == "windows" {
-		separator = `\`
+		prefix = `C:\`
 	}
-	return separator
+	return prefix
 }
 
 func createSymlinkHeader(fi os.FileInfo, path string) (*tar.Header, error) {
@@ -198,7 +198,7 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 		}
 
 		var target string
-		if dst == h.Name || strings.HasPrefix(h.Name, getSeparator()) {
+		if dst == h.Name || strings.HasPrefix(h.Name, getRootPathPrefix()) {
 			target = h.Name
 		} else {
 			name, err := relative(dst, h.Name)
