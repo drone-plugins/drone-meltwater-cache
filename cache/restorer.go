@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -62,7 +63,11 @@ func (r restorer) Restore(dsts []string) error {
 			}
 
 			for _, e := range entries {
-				dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+"/"))
+				separator := "/"
+				if runtime.GOOS == "windows" {
+					separator = `\`
+				}
+				dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+separator))
 			}
 		} else if err != common.ErrNotImplemented {
 			return err

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/go-kit/kit/log"
@@ -87,7 +88,7 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 		}
 
 		var name string
-		if strings.HasPrefix(path, "/") {
+		if strings.HasPrefix(path, getSeparator()) {
 			name, err = filepath.Abs(path)
 		} else {
 			name, err = relative(root, path)
@@ -136,7 +137,15 @@ func relative(parent string, path string) (string, error) {
 
 	rel = filepath.ToSlash(rel)
 
-	return strings.TrimPrefix(filepath.Join(rel, name), "/"), nil
+	return strings.TrimPrefix(filepath.Join(rel, name), getSeparator()), nil
+}
+
+func getSeparator() string {
+	separator := "/"
+	if runtime.GOOS == "windows" {
+		separator = `\`
+	}
+	return separator
 }
 
 func createSymlinkHeader(fi os.FileInfo, path string) (*tar.Header, error) {
@@ -189,7 +198,7 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 		}
 
 		var target string
-		if dst == h.Name || strings.HasPrefix(h.Name, "/") {
+		if dst == h.Name || strings.HasPrefix(h.Name, getSeparator()) {
 			target = h.Name
 		} else {
 			name, err := relative(dst, h.Name)
