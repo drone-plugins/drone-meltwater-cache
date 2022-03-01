@@ -33,7 +33,7 @@ steps:
       CGO_ENABLED: 0
 
   - name: lint
-    image: golang:1.17.7-alpine3.15
+    image: golang:1.17.3-alpine3.13
     commands:
       - apk add --update make git curl
       - make lint
