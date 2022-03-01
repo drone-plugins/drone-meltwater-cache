@@ -24,7 +24,7 @@ steps:
       - mc admin policy add minio userpolicy /tmp/policy.json
       - mc admin policy set minio userpolicy user=foo
   - name: build
-    image: golang:1.17.3-alpine3.13
+    image: golang:1.17.7-alpine3.15
     commands:
       - apk add --update make git
       - make drone-cache
@@ -32,7 +32,7 @@ steps:
       CGO_ENABLED: 0
 
   - name: lint
-    image: golang:1.17.3-alpine3.13
+    image: golang:1.17.7-alpine3.15
     commands:
       - apk add --update make git curl
       - make lint
@@ -40,7 +40,7 @@ steps:
       CGO_ENABLED: 0
 
   - name: test
-    image: golang:1.17.3-alpine3.13
+    image: golang:1.17.7-alpine3.15
     commands:
       - go test -mod=vendor -short -cover -tags=integration ./...
     environment:
@@ -251,7 +251,7 @@ platform:
 steps:
 - name: build-push
   pull: always
-  image: golang:1.17.3
+  image: golang:1.17.7
   commands:
   - "go build -v -ldflags \"-X main.build=${DRONE_BUILD_NUMBER}\" -a -o release/linux/amd64/drone-cache"
   environment:
@@ -264,7 +264,7 @@ steps:
 
 - name: build-tag
   pull: always
-  image: golang:1.17.3
+  image: golang:1.17.7
   commands:
   - "go build -v -ldflags \"-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}\" -a -o release/linux/amd64/drone-cache"
   environment:
@@ -309,7 +309,7 @@ platform:
 steps:
 - name: build-push
   pull: always
-  image: golang:1.17.3
+  image: golang:1.17.7
   commands:
   - "go build -v -ldflags \"-X main.build=${DRONE_BUILD_NUMBER}\" -a -o release/linux/arm64/drone-cache"
   environment:
@@ -322,7 +322,7 @@ steps:
 
 - name: build-tag
   pull: always
-  image: golang:1.17.3
+  image: golang:1.17.7
   commands:
   - "go build -v -ldflags \"-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}\" -a -o release/linux/arm64/drone-cache"
   environment:
@@ -367,7 +367,7 @@ platform:
 steps:
 - name: build
   pull: always
-  image: golang:1.17.3
+  image: golang:1.17.7
   commands:
   - "go build -v -ldflags \"-X main.build=${DRONE_BUILD_NUMBER}\" -a -o release/linux/arm/drone-cache"
   environment:
@@ -380,7 +380,7 @@ steps:
 
 - name: build-tag
   pull: always
-  image: golang:1.17.3
+  image: golang:1.17.7
   commands:
   - "go build -v -ldflags \"-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}\" -a -o release/linux/arm/drone-cache"
   environment:
