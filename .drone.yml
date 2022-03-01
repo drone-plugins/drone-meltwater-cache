@@ -25,7 +25,7 @@ steps:
       - mc admin policy set minio userpolicy user=foo
   - name: build
     # there is an issue in golang 1.17.7 -- with make files so using 1.17.3 here   
-    image: 1.17.3-alpine3.13
+    image: golang:1.17.3-alpine3.13
     commands:
       - apk add --update make git
       - make drone-cache
