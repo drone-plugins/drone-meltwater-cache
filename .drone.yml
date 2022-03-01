@@ -24,7 +24,8 @@ steps:
       - mc admin policy add minio userpolicy /tmp/policy.json
       - mc admin policy set minio userpolicy user=foo
   - name: build
-    # there is an issue in golang 1.17.7 -- with make files so using 1.17.3 here   
+    # there is an issue in golang 1.17.7-alpine3.15 -- with make files so using 1.17.3 here 
+    # https://gitlab.alpinelinux.org/alpine/aports/-/issues/12396
     image: golang:1.17.3-alpine3.13
     commands:
       - apk add --update make git
