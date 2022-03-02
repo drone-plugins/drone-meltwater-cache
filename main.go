@@ -380,7 +380,7 @@ func main() {
 			Name:    "assume-role-arn",
 			Usage:   "AWS IAM role ARN to assume",
 			Value:   "",
-			EnvVars: []string{"PLUGIN_ASSUME_ROLE_ARN", "AWS_ASSUME_ROLE_ARN"},
+			EnvVars: []string{"PLUGIN_ASSUME_ROLE_ARN", "PLUGIN_ASSUME_ROLE", "AWS_ASSUME_ROLE_ARN"},
 		},
 		&cli.StringFlag{
 			Name:    "assume-role-session-name",
