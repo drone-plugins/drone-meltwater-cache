@@ -41,7 +41,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		S3ForcePathStyle: aws.Bool(c.PathStyle),
 	}
 
-	if c.Key != "" && c.Secret != "" {
+	if c.Key != "" && c.Secret != "" { // nolint:gocritic
 		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
 	} else if c.AssumeRoleARN != "" {
 		conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
@@ -49,13 +49,13 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		level.Warn(l).Log("msg", "aws key and/or Secret not provided (falling back to anonymous credentials)")
 	}
 
-	var client *s3.S3
 	sess, err := session.NewSession(conf)
 	if err != nil {
 		level.Warn(l).Log("msg", "could not instantiate session", "error", err)
 		return nil, err
 	}
 
+	var client *s3.S3
 	// If user role ARN is set then assume role here
 	if len(c.UserRoleArn) > 0 {
 		confRoleArn := aws.Config{
@@ -179,7 +179,7 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 }
 
 func assumeRole(roleArn, roleSessionName string) *credentials.Credentials {
-	client := sts.New(session.New())
+	client := sts.New(session.New()) // nolint:staticcheck
 	duration := time.Hour * 1
 	stsProvider := &stscreds.AssumeRoleProvider{
 		Client:          client,
