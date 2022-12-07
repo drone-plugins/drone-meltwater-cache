@@ -47,6 +47,7 @@ steps:
       - go test -mod=vendor -short -cover -tags=integration ./...
     environment:
       CGO_ENABLED: 0
+      TEST_GCS_API_KEY: abcdefg
       TEST_S3_ENDPOINT: http://minio:9000
       TEST_GCS_ENDPOINT: http://fakegcs:4443/storage/v1/
       TEST_STORAGE_EMULATOR_HOST: fakegcs:4443
