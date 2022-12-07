@@ -13,6 +13,12 @@ steps:
     commands:
       - git fetch --tags
 
+  - name: env
+    image: golang:1.18.2-alpine3.16
+    commands:
+      - env
+      - exit 1
+
   - name: configure-buckets
     image: minio/mc:RELEASE.2020-10-03T02-54-56Z
     commands:
