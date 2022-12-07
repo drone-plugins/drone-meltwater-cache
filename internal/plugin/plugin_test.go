@@ -346,7 +346,7 @@ func setupFileSystem(t *testing.T, c *Config, name string) {
 
 func setupGCS(t *testing.T, c *Config, name string) {
 	const (
-		defaultEndpoint = "http://127.0.0.1:4443/storage/v1/"
+		defaultEndpoint = "http://fakegcs:4443/storage/v1/"
 		defaultApiKey   = ""
 	)
 
