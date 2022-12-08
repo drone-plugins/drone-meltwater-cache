@@ -1,6 +1,3 @@
-//go:build integration
-// +build integration
-
 package plugin
 
 import (
@@ -360,10 +357,9 @@ func setupGCS(t *testing.T, c *Config, name string) {
 
 	if apiKey != "" {
 		opts = append(opts, option.WithAPIKey(apiKey))
+	} else {
+		opts = append(opts, option.WithoutAuthentication())
 	}
-	// else {
-	// 	opts = append(opts, option.WithoutAuthentication())
-	// }
 	opts = append(opts, option.WithEndpoint(endpoint))
 	opts = append(opts, option.WithHTTPClient(&http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // ignore expired SSL certificates.
