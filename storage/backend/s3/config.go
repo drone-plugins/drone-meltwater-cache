@@ -10,13 +10,15 @@ type Config struct {
 	//     authenticated-read
 	//     bucket-owner-read
 	//     bucket-owner-full-control
-	ACL         string
-	Bucket      string
-	Encryption  string // if not "", enables server-side encryption. valid values are: AES256, aws:kms.
-	Endpoint    string
-	Key         string
-	StsEndpoint string
-	RoleArn     string // if "", do not assume IAM role i.e. use the IAM user.
+	ACL                   string
+	Bucket                string
+	Encryption            string // if not "", enables server-side encryption. valid values are: AES256, aws:kms.
+	Endpoint              string
+	Key                   string
+	StsEndpoint           string
+	AssumeRoleARN         string // if "", do not assume IAM role i.e. use the IAM user.
+	AssumeRoleSessionName string
+	UserRoleArn           string
 
 	// us-east-1
 	// us-west-1
@@ -29,7 +31,5 @@ type Config struct {
 	Region string
 	Secret string
 
-	PathStyle  bool // Use path style instead of domain style. Should be true for minio and false for AWS.
-	DisableSSL bool // Set SSL mode for connection to AWS S3. default is false.
-	Public     bool
+	PathStyle bool // Use path style instead of domain style. Should be true for minio and false for AWS.
 }

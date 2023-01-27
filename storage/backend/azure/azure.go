@@ -9,9 +9,11 @@ import (
 	"net/url"
 
 	"github.com/Azure/azure-storage-blob-go/azblob"
-	"github.com/go-kit/log"
+	"github.com/go-kit/kit/log"
 	"github.com/go-kit/log/level"
+
 	"github.com/meltwater/drone-cache/internal"
+	"github.com/meltwater/drone-cache/storage/common"
 )
 
 const (
@@ -64,7 +66,6 @@ func New(l log.Logger, c Config) (*Backend, error) {
 
 	_, err = containerURL.Create(ctx, azblob.Metadata{}, azblob.PublicAccessNone)
 	if err != nil {
-		// nolint: errorlint
 		ret, ok := err.(azblob.StorageError)
 		if !ok {
 			return nil, fmt.Errorf("azure, unexpected error, %w", err)
@@ -79,7 +80,7 @@ func New(l log.Logger, c Config) (*Backend, error) {
 }
 
 // Get writes downloaded content to the given writer.
-func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
+func (b *Backend) Get(ctx context.Context, p string, w io.Writer) (err error) {
 	errCh := make(chan error)
 
 	go func() {
@@ -87,11 +88,10 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 
 		blobURL := b.containerURL.NewBlockBlobURL(p)
 
-		// nolint: lll
-		resp, err := blobURL.Download(ctx, 0, azblob.CountToEnd, azblob.BlobAccessConditions{}, false, azblob.ClientProvidedKeyOptions{})
+		resp, err := blobURL.Download(ctx, 0, azblob.CountToEnd, azblob.BlobAccessConditions{}, false,
+			azblob.ClientProvidedKeyOptions{})
 		if err != nil {
 			errCh <- fmt.Errorf("get the object, %w", err)
-
 			return
 		}
 
@@ -108,7 +108,6 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// nolint: wrapcheck
 		return ctx.Err()
 	}
 }
@@ -142,4 +141,9 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 	}
 
 	return get.StatusCode() == http.StatusOK, nil
+}
+
+// List contents of the given directory by given key from remote storage.
+func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
+	return nil, common.ErrNotImplemented
 }

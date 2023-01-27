@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/meltwater/drone-cache/internal"
 	"github.com/meltwater/drone-cache/key"
 	"github.com/meltwater/drone-cache/storage"
+	"github.com/meltwater/drone-cache/storage/common"
 )
 
 type restorer struct {
@@ -23,17 +26,18 @@ type restorer struct {
 	g  key.Generator
 	fg key.Generator
 
-	namespace string
+	namespace           string
+	failIfKeyNotPresent bool
 }
 
 // NewRestorer creates a new cache.Restorer.
-func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string) Restorer { // nolint:lll
-	return restorer{logger, a, s, g, fg, namespace}
+func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool) Restorer { // nolint:lll
+	return restorer{logger, a, s, g, fg, namespace, failIfKeyNotPresent}
 }
 
 // Restore restores files from the cache provided with given paths.
 func (r restorer) Restore(dsts []string) error {
-	level.Info(r.logger).Log("msg", "restoring  cache")
+	level.Info(r.logger).Log("msg", "restoring cache")
 
 	now := time.Now()
 
@@ -47,6 +51,23 @@ func (r restorer) Restore(dsts []string) error {
 		errs      = &internal.MultiError{}
 		namespace = filepath.ToSlash(filepath.Clean(r.namespace))
 	)
+
+	if len(dsts) == 0 {
+		prefix := filepath.Join(namespace, key)
+		entries, err := r.s.List(prefix)
+
+		if err == nil {
+			if r.failIfKeyNotPresent && len(entries) == 0 {
+				return fmt.Errorf("key %s does not exist", prefix)
+			}
+
+			for _, e := range entries {
+				dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
+			}
+		} else if err != common.ErrNotImplemented {
+			return err
+		}
+	}
 
 	for _, dst := range dsts {
 		src := filepath.Join(namespace, key, dst)
@@ -76,9 +97,7 @@ func (r restorer) Restore(dsts []string) error {
 }
 
 // restore fetches the archived file from the cache and restores to the host machine's file system.
-func (r restorer) restore(src, dst string) error {
-	var err error
-
+func (r restorer) restore(src, dst string) (err error) {
 	pr, pw := io.Pipe()
 	defer internal.CloseWithErrCapturef(&err, pr, "rebuild, pr close <%s>", dst)
 
@@ -133,5 +152,13 @@ func (r restorer) generateKey(parts ...string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("restorer generate key, %w", err)
+	return "", err
+}
+
+func getSeparator() string {
+	if runtime.GOOS == "windows" {
+		return `\`
+	}
+
+	return "/"
 }

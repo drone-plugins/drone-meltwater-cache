@@ -25,7 +25,9 @@ func New(logger log.Logger, root string, skipSymlinks bool, compressionLevel int
 }
 
 // Create writes content of the given source to an archive, returns written bytes.
-func (a *Archive) Create(srcs []string, w io.Writer) (int64, error) {
+// If isRelativePath is true, it clones using the path, else it clones using a path
+// combining archive's root with the path.
+func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64, error) {
 	gw, err := gzip.NewWriterLevel(w, a.compressionLevel)
 	if err != nil {
 		return 0, fmt.Errorf("create archive writer, %w", err)
@@ -33,7 +35,7 @@ func (a *Archive) Create(srcs []string, w io.Writer) (int64, error) {
 
 	defer internal.CloseWithErrLogf(a.logger, gw, "gzip writer")
 
-	wBytes, err := tar.New(a.logger, a.root, a.skipSymlinks).Create(srcs, gw)
+	wBytes, err := tar.New(a.logger, a.root, a.skipSymlinks).Create(srcs, gw, isRelativePath)
 	if err != nil {
 		return 0, fmt.Errorf("writing create archive bytes: %w", err)
 	}

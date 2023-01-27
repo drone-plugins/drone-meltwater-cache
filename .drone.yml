@@ -1,10 +1,14 @@
 ---
 kind: pipeline
-name: default
+type: vm
+name: testing
 
 platform:
   os: linux
   arch: amd64
+
+pool:
+  use: ubuntu
 
 clone:
   depth: 50
@@ -23,31 +27,34 @@ steps:
       - mc config host add minio http://minio:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
       - mc mb --region=eu-west-1 minio/drone-cache-bucket
       - mc admin user add minio foo barbarbar
-      - "echo '{\"Version\": \"2012-10-17\", \"Statement\": [ { \"Action\": [ \"s3:GetObject\", \"s3:PutObject\", \"s3:DeleteObject\", \"s3:CreateBucket\", \"s3:DeleteBucket\" ], \"Effect\": \"Allow\", \"Resource\": [ \"arn:aws:s3:::s3-round-trip-with-role/*\", \"arn:aws:s3:::s3-round-trip-with-role\" ], \"Sid\": \"\" } ] }' >> /tmp/policy.json"
+      - 'echo ''{"Version": "2012-10-17", "Statement": [ { "Action": [ "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:CreateBucket", "s3:DeleteBucket", "s3:ListBucket" ], "Effect": "Allow", "Resource": [ "arn:aws:s3:::s3-round-trip-with-role/*", "arn:aws:s3:::s3-round-trip-with-role" ], "Sid": "" } ] }'' >> /tmp/policy.json'
       - mc admin policy add minio userpolicy /tmp/policy.json
       - mc admin policy set minio userpolicy user=foo
-
   - name: build
-    image: golang:1.18.4
+    # there is an issue in golang 1.17.7-alpine3.15 -- with make files so using 1.17.3 here
+    # https://gitlab.alpinelinux.org/alpine/aports/-/issues/12396
+    image: golang:1.19-alpine3.16
     commands:
+      - apk add --update make git
       - make drone-cache
     environment:
       CGO_ENABLED: 0
 
   - name: lint
-    image: docker.io/golangci/golangci-lint:v1.46.2
+    image: golang:1.19
+    pull: always
     commands:
-      - make lint
-    environment:
-      CGO_ENABLED: 0
-
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - golangci-lint version
+      - golangci-lint run  --timeout 500s --new-from-rev=HEAD~
+    
   - name: test
-    image: golang:1.18.4
+    image: golang:1.19-alpine3.16
     commands:
       - go test -mod=vendor -short -cover -tags=integration ./...
     environment:
       CGO_ENABLED: 0
-      TEST_S3_ENDPOINT: minio:9000
+      TEST_S3_ENDPOINT: http://minio:9000
       TEST_GCS_ENDPOINT: http://fakegcs:4443/storage/v1/
       TEST_STORAGE_EMULATOR_HOST: fakegcs:4443
       TEST_SFTP_HOST: sftp
@@ -56,8 +63,17 @@ steps:
       - name: testdata
         path: /drone/src/tmp/testdata/cache
 
+  # - name: generate
+  #   image: golang:1.14.1-alpine3.11
+  #   commands:
+  #     - apk add --update make git
+  #     # Following environment tricks are because of unintended variable capture by flag library.
+  #     # This mitigates contamination happens when generating CLI flag documentation.
+  #     - env -i make PATH=$(which go):$PATH HOME=$HOME PWD=$PWD GO=$(which go) GOPATH=$(go env GOPATH) generate
+  #     - git diff --exit-code
+
   - name: rebuild-cache
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       bucket: drone-cache-bucket
@@ -71,14 +87,13 @@ steps:
     environment:
       AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
       AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
 
   - name: rebuild-cache-with-key
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       bucket: drone-cache-bucket
-      cache_key: "{{ .Repo.Name }}_{{ checksum \"go.mod\" }}_{{ checksum \"go.sum\" }}_{{ arch }}_{{ os }}"
+      cache_key: '{{ .Repo.Name }}_{{ checksum "go.mod" }}_{{ checksum "go.sum" }}_{{ arch }}_{{ os }}'
       mount:
         - vendor
       rebuild: true
@@ -89,10 +104,9 @@ steps:
     environment:
       AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
       AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
 
   - name: rebuild-cache-with-gzip
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       archive_format: gzip
@@ -108,29 +122,9 @@ steps:
     environment:
       AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
       AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
-
-  - name: rebuild-cache-with-zstd
-    image: meltwater/drone-cache:v1.2.2
-    pull: always
-    settings:
-      archive_format: zstd
-      bucket: drone-cache-bucket
-      cache_key: zstd
-      mount:
-        - vendor
-      rebuild: true
-      region: eu-west-1
-      path_style: true
-      endpoint: minio:9000
-      exit_code: true
-    environment:
-      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
-      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
 
   - name: rebuild-cache-with-filesystem
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       archive_format: gzip
@@ -145,11 +139,11 @@ steps:
         path: /tmp/cache
 
   - name: restore-cache-with-key
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       bucket: drone-cache-bucket
-      cache_key: "{{ .Repo.Name }}_{{ checksum \"go.mod\" }}_{{ checksum \"go.sum\" }}_{{ arch }}_{{ os }}"
+      cache_key: '{{ .Repo.Name }}_{{ checksum "go.mod" }}_{{ checksum "go.sum" }}_{{ arch }}_{{ os }}'
       mount:
         - vendor
       region: eu-west-1
@@ -161,10 +155,9 @@ steps:
     environment:
       AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
       AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
 
   - name: restore-cache-with-gzip
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       archive_format: gzip
@@ -180,29 +173,9 @@ steps:
     environment:
       AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
       AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
-
-  - name: restore-cache-with-zstd
-    image: meltwater/drone-cache:v1.2.2
-    pull: always
-    settings:
-      archive_format: zstd
-      bucket: drone-cache-bucket
-      cache_key: zstd
-      mount:
-        - vendor
-      region: eu-west-1
-      restore: true
-      path_style: true
-      endpoint: minio:9000
-      exit_code: true
-    environment:
-      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
-      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
 
   - name: restore-cache-with-filesystem
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       archive_format: gzip
@@ -217,7 +190,7 @@ steps:
         path: /tmp/cache
 
   - name: restore-cache-debug
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       debug: true
@@ -225,7 +198,7 @@ steps:
       pull: always
 
   - name: restore-cache
-    image: meltwater/drone-cache:v1.2.2
+    image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
     settings:
       bucket: drone-cache-bucket
@@ -239,11 +212,10 @@ steps:
     environment:
       AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
       AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_DISABLESSL: true
 
 services:
   - name: minio
-    image: minio/minio:RELEASE.2022-07-15T03-44-22Z
+    image: minio/minio:RELEASE.2020-11-06T23-17-07Z
     commands:
       - minio server /data
     environment:
@@ -253,7 +225,7 @@ services:
     ports:
       - 9000
   - name: fakegcs
-    image: fsouza/fake-gcs-server:1.38.3
+    image: fsouza/fake-gcs-server:1.18.3
     ports:
       - 4443
     commands:
@@ -265,7 +237,7 @@ services:
     commands:
       - /entrypoint foo:pass:::sftp_test bar:pass:::plugin_test
   - name: azurite
-    image: mcr.microsoft.com/azure-storage/azurite:3.18.0
+    image: mcr.microsoft.com/azure-storage/azurite
     commands:
       - azurite-blob --blobHost 0.0.0.0
     ports:
@@ -277,11 +249,272 @@ volumes:
   - name: testdata
     temp: {}
 
-trigger:
-  branch:
-    - master
-  event:
-    - push
-    - pull_request
+---
+kind: pipeline
+type: vm
+name: linux-amd64
 
-...
+pool:
+  use: ubuntu
+
+platform:
+  os: linux
+  arch: amd64
+
+steps:
+  - name: build-push
+    pull: always
+    image: golang:1.18
+    commands:
+      - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
+    environment:
+      CGO_ENABLED: 0
+      GO111MODULE: on
+  - name: build-tag
+    pull: always
+    image: golang:1.18
+    commands:
+      - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
+    environment:
+      CGO_ENABLED: 0
+      GO111MODULE: on
+  - name: publish
+    pull: always
+    image: plugins/docker:linux-amd64
+    settings:
+      auto_tag: true
+      auto_tag_suffix: linux-amd64
+      dockerfile: docker/Dockerfile.linux.amd64
+      password:
+        from_secret: docker_password
+      repo: plugins/cache
+      username:
+        from_secret: docker_username
+    when:
+      ref:
+        - refs/heads/master
+        - refs/tags/**
+
+trigger:
+  ref:
+    - refs/heads/master
+    - refs/tags/**
+    - refs/pull/**
+
+depends_on:
+  - testing
+
+---
+kind: pipeline
+name: linux-arm64
+type: vm
+
+pool:
+  use: ubuntu_arm64
+
+platform:
+  os: linux
+  arch: arm64
+
+steps:
+  - name: build-push
+    pull: always
+    image: golang:1.18
+    commands:
+      - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
+    environment:
+      CGO_ENABLED: 0
+      GO111MODULE: on
+  - name: build-tag
+    pull: always
+    image: golang:1.18
+    commands:
+      - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
+    environment:
+      CGO_ENABLED: 0
+      GO111MODULE: on
+  - name: publish
+    pull: always
+    image: plugins/docker:linux-arm64
+    settings:
+      auto_tag: true
+      auto_tag_suffix: linux-arm64
+      dockerfile: docker/Dockerfile.linux.arm64
+      password:
+        from_secret: docker_password
+      repo: plugins/cache
+      username:
+        from_secret: docker_username
+    when:
+      ref:
+        - refs/heads/master
+        - refs/tags/**
+
+trigger:
+  ref:
+    - refs/heads/master
+    - refs/tags/**
+    - refs/pull/**
+
+depends_on:
+  - testing
+
+---
+kind: pipeline
+type: vm
+name: windows-1809
+
+pool:
+  use: windows
+
+platform:
+  os: windows
+  arch: amd64
+
+steps:
+  - name: build
+    image: golang:1.19
+    commands:
+      - echo $env:DRONE_SEMVER_SHORT
+      - go build -o release/windows/amd64/drone-cache.exe
+    environment:
+      CGO_ENABLED: "0"
+  - name: docker
+    image: plugins/docker@sha256:f0233d950ae87ee6cb5500b2d5497fe02aa338201c0bdce2619f443fd174cfa4
+    settings:
+      dockerfile: docker/Dockerfile.windows.1809
+      repo: plugins/cache
+      username:
+        from_secret: docker_username
+      password:
+        from_secret: docker_password
+      auto_tag: true
+      auto_tag_suffix: windows-1809-amd64
+      daemon_off: true
+      purge: false
+    when:
+      ref:
+        - refs/heads/master
+        - refs/tags/**
+
+trigger:
+  ref:
+    - refs/heads/master
+    - refs/tags/**
+    - refs/pull/**
+
+depends_on:
+  - testing
+
+---
+kind: pipeline
+type: vm
+name: windows-ltsc2022
+
+pool:
+  use: windows-2022
+
+platform:
+  os: windows
+  arch: amd64
+
+steps:
+  - name: build
+    image: golang:1.19
+    commands:
+      - echo $env:DRONE_SEMVER_SHORT
+      - go build -o release/windows/amd64/drone-cache.exe
+    environment:
+      CGO_ENABLED: "0"
+  - name: docker
+    image: plugins/docker
+    settings:
+      dockerfile: docker/Dockerfile.windows.ltsc2022
+      repo: plugins/cache
+      username:
+        from_secret: docker_username
+      password:
+        from_secret: docker_password
+      auto_tag: true
+      auto_tag_suffix: windows-ltsc2022-amd64
+      daemon_off: true
+      purge: false
+    when:
+      ref:
+        - refs/heads/master
+        - refs/tags/**
+
+trigger:
+  ref:
+    - refs/heads/master
+    - refs/tags/**
+    - refs/pull/**
+
+depends_on:
+  - testing
+
+---
+kind: pipeline
+type: docker
+name: notifications
+
+platform:
+  os: linux
+  arch: amd64
+
+steps:
+  - name: manifest
+    pull: always
+    image: plugins/manifest
+    settings:
+      ignore_missing: "true"
+      auto_tag: "true"
+      password:
+        from_secret: docker_password
+      spec: docker/manifest.tmpl
+      username:
+        from_secret: docker_username
+
+trigger:
+  ref:
+    - refs/heads/master
+    - refs/tags/**
+
+depends_on:
+  - linux-amd64
+  - linux-arm64
+  - windows-1809
+  - windows-ltsc2022
+
+---
+kind: pipeline
+type: docker
+name: release artifacts
+
+steps:
+  - name: build
+    image: golang:1.19
+    commands:
+      - GOOS=linux   GOARCH=amd64   go build -ldflags "-X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
+      - GOOS=linux   GOARCH=arm64   go build -ldflags "-X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
+      - GOOS=darwin  GOARCH=amd64   go build -ldflags "-X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-amd64
+      - GOOS=darwin  GOARCH=arm64   go build -ldflags "-X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
+      - GOOS=windows GOARCH=amd64   go build -ldflags "-X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64.exe
+
+  - name: release
+    image: plugins/github-release
+    settings:
+      files:
+        - release/plugin-linux-amd64
+        - release/plugin-linux-arm64
+        - release/plugin-darwin-amd64
+        - release/plugin-darwin-arm64
+        - release/plugin-windows-amd64.exe
+      api_key:
+        from_secret: github_token
+trigger:
+  event:
+    - tag
+
+depends_on:
+  - notifications

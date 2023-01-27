@@ -25,7 +25,7 @@ func New(logger log.Logger, root string, skipSymlinks bool, compressionLevel int
 }
 
 // Create writes content of the given source to an archive, returns written bytes.
-func (a *Archive) Create(srcs []string, w io.Writer) (int64, error) {
+func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64, error) {
 	zw, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(a.compressionLevel)))
 	if err != nil {
 		return 0, fmt.Errorf("zstd create archive writer, %w", err)
@@ -33,7 +33,7 @@ func (a *Archive) Create(srcs []string, w io.Writer) (int64, error) {
 
 	defer internal.CloseWithErrLogf(a.logger, zw, "zstd writer")
 
-	wBytes, err := tar.New(a.logger, a.root, a.skipSymlinks).Create(srcs, zw)
+	wBytes, err := tar.New(a.logger, a.root, a.skipSymlinks).Create(srcs, zw, isRelativePath)
 	if err != nil {
 		return 0, fmt.Errorf("zstd create archive, %w", err)
 	}

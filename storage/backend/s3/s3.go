@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -13,9 +14,12 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"github.com/go-kit/log"
+	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/go-kit/kit/log"
 	"github.com/go-kit/log/level"
+
 	"github.com/meltwater/drone-cache/internal"
+	"github.com/meltwater/drone-cache/storage/common"
 )
 
 // Backend implements storage.Backend for AWs S3.
@@ -30,51 +34,39 @@ type Backend struct {
 
 // New creates an S3 backend.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
-	// Set SSL mode (enable/disable) using configuration flags
-	sslMode := setSSLMode(l, c)
-
 	conf := &aws.Config{
 		Region:           aws.String(c.Region),
 		Endpoint:         &c.Endpoint,
-		DisableSSL:       aws.Bool(sslMode),
+		DisableSSL:       aws.Bool(strings.HasPrefix(c.Endpoint, "http://")),
 		S3ForcePathStyle: aws.Bool(c.PathStyle),
 	}
 
-	// Use anonymous credentials if the S3 bucket is public
-	if c.Public {
-		conf.Credentials = credentials.AnonymousCredentials
-	}
-
-	if c.Key != "" && c.Secret != "" {
+	if c.Key != "" && c.Secret != "" { // nolint:gocritic
 		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
+	} else if c.AssumeRoleARN != "" {
+		conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
 	} else {
 		level.Warn(l).Log("msg", "aws key and/or Secret not provided (falling back to anonymous credentials)")
 	}
 
-	if c.RoleArn != "" {
-		stsConf := conf
-		if c.StsEndpoint != "" {
-			stsConf = conf.Copy(&aws.Config{
-				Endpoint:   &c.StsEndpoint,
-				DisableSSL: aws.Bool(sslMode),
-			})
-		} else {
-			stsConf.Endpoint = nil
-			stsConf.DisableSSL = nil
+	sess, err := session.NewSession(conf)
+	if err != nil {
+		level.Warn(l).Log("msg", "could not instantiate session", "error", err)
+		return nil, err
+	}
+
+	var client *s3.S3
+	// If user role ARN is set then assume role here
+	if len(c.UserRoleArn) > 0 {
+		confRoleArn := aws.Config{
+			Region:      aws.String(c.Region),
+			Credentials: stscreds.NewCredentials(sess, c.UserRoleArn),
 		}
 
-		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
-		crds := assumeRole(l, stsConf, c.RoleArn)
-		conf.Credentials = credentials.NewStaticCredentials(crds.AccessKeyID, crds.SecretAccessKey, crds.SessionToken)
+		client = s3.New(sess, &confRoleArn)
+	} else {
+		client = s3.New(sess)
 	}
-
-	level.Debug(l).Log("msg", "s3 backend", "config", fmt.Sprintf("%#v", c))
-
-	if debug {
-		conf.WithLogLevel(aws.LogDebugWithHTTPBody)
-	}
-
-	client := s3.New(session.Must(session.NewSessionWithOptions(session.Options{})), conf)
 
 	return &Backend{
 		logger:     l,
@@ -100,7 +92,6 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 		out, err := b.client.GetObjectWithContext(ctx, in)
 		if err != nil {
 			errCh <- fmt.Errorf("get the object, %w", err)
-
 			return
 		}
 
@@ -116,7 +107,6 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// nolint: wrapcheck
 		return ctx.Err()
 	}
 }
@@ -153,7 +143,6 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 
 	out, err := b.client.HeadObjectWithContext(ctx, in)
 	if err != nil {
-		// nolint: errorlint
 		if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() == s3.ErrCodeNoSuchKey || awsErr.Code() == "NotFound" {
 			return false, nil
 		}
@@ -166,50 +155,38 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 	return *out.ETag != "", nil
 }
 
-func assumeRole(l log.Logger, c *aws.Config, roleArn string) credentials.Value {
-	sess, err := session.NewSession(&aws.Config{
-		Credentials:                   c.Credentials,
-		Region:                        c.Region,
-		Endpoint:                      c.Endpoint,
-		DisableSSL:                    c.DisableSSL,
-		CredentialsChainVerboseErrors: aws.Bool(true),
+// List contents of the given directory by given key from remote storage.
+func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
+	in := &s3.ListObjectsInput{
+		Bucket: aws.String(b.bucket),
+		Prefix: aws.String(p),
+	}
+
+	var entries []common.FileEntry
+
+	err := b.client.ListObjectsPagesWithContext(ctx, in, func(page *s3.ListObjectsOutput, lastPage bool) bool {
+		for _, item := range page.Contents {
+			entries = append(entries, common.FileEntry{
+				Path:         *item.Key,
+				Size:         *item.Size,
+				LastModified: *item.LastModified,
+			})
+		}
+		return !lastPage
 	})
-	if err != nil {
-		level.Error(l).Log("msg", "s3 backend", "assume-role", err.Error())
-	}
 
-	creds, err := stscreds.NewCredentials(sess, roleArn, func(p *stscreds.AssumeRoleProvider) {
-		p.RoleSessionName = "drone-cache"
-	}).Get()
-	if err != nil {
-		level.Error(l).Log("msg", "s3 backend", "assume-role", err.Error())
-	}
-
-	return creds
+	return entries, err
 }
 
-// Set the mode for SSL for S3 connectivity. Default mode is enabled.
-// if DisableSSL flag was set to true, then return DisableSSL=true.
-// if a custom stsEndpoint was specified without https, set mode to true (disableSSL=true)
-//  enable SSL for all other conditions. set disableSSL=false
-
-func setSSLMode(l log.Logger, c Config) bool {
-	level.Info(l).Log("msg", "Setting SSL mode from config")
-
-	switch {
-	case c.DisableSSL:
-		level.Info(l).Log("msg", "DisableSSL flag was set to true. disabling SSL")
-
-		return true
-
-	case c.StsEndpoint != "" && !strings.HasPrefix(c.StsEndpoint, "https://"):
-		level.Info(l).Log("msg", "DisableSSL flag was set to true. disabling SSL")
-
-		return true
-
-	default:
-		level.Info(l).Log("msg", "DisableSSL flag was set to false. enabling SSL")
-
-		return false
+func assumeRole(roleArn, roleSessionName string) *credentials.Credentials {
+	client := sts.New(session.New()) // nolint:staticcheck
+	duration := time.Hour * 1
+	stsProvider := &stscreds.AssumeRoleProvider{
+		Client:          client,
+		Duration:        duration,
+		RoleARN:         roleArn,
+		RoleSessionName: roleSessionName,
 	}
+
+	return credentials.NewCredentials(stsProvider)
 }

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	gcstorage "cloud.google.com/go/storage"
-	"github.com/go-kit/log"
+	"github.com/go-kit/kit/log"
 	"github.com/meltwater/drone-cache/test"
 	"google.golang.org/api/option"
 )
@@ -57,6 +57,10 @@ func TestRoundTrip(t *testing.T) {
 	test.Ok(t, err)
 
 	test.Equals(t, true, exists)
+
+	entries, err := backend.List(context.TODO(), "")
+	test.Ok(t, err)
+	test.Equals(t, 1, len(entries))
 }
 
 // Helpers

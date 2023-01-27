@@ -24,7 +24,9 @@ const (
 type Archive interface {
 	// Create writes content of the given source to an archive, returns written bytes.
 	// Similar to io.WriterTo.
-	Create(srcs []string, w io.Writer) (int64, error)
+	// If isRelativePath is true, it clones using the path, else it clones using a path
+	// combining archive's root with the path.
+	Create(srcs []string, w io.Writer, isRelativePath bool) (int64, error)
 
 	// Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
 	// Similar to io.ReaderFrom.
@@ -50,7 +52,6 @@ func FromFormat(logger log.Logger, root string, format string, opts ...Option) A
 		return zstd.New(logger, root, options.skipSymlinks, options.compressionLevel)
 	default:
 		level.Error(logger).Log("msg", "unknown archive format", "format", format)
-
 		return tar.New(logger, root, options.skipSymlinks) // DefaultArchiveFormat
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/meltwater/drone-cache/internal"
+	"github.com/meltwater/drone-cache/storage/common"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -170,6 +171,11 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 		// nolint: wrapcheck
 		return false, ctx.Err()
 	}
+}
+
+// List contents of the given directory by given key from remote storage.
+func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
+	return nil, common.ErrNotImplemented
 }
 
 // Helpers

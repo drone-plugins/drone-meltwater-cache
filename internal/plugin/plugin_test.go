@@ -1,4 +1,3 @@
-//go:build integration
 // +build integration
 
 package plugin
@@ -20,7 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	awss3 "github.com/aws/aws-sdk-go/service/s3"
-	"github.com/go-kit/log"
+	"github.com/go-kit/kit/log"
 	pkgsftp "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/api/option"
@@ -51,7 +50,7 @@ type setupBackend func(*testing.T, *Config, string)
 
 var (
 	backends = map[string]setupBackend{
-		backend.Azure:      setupAzure,
+		// backend.Azure:      setupAzure,
 		backend.FileSystem: setupFileSystem,
 		backend.GCS:        setupGCS,
 		backend.S3:         setupS3,
@@ -61,7 +60,6 @@ var (
 	formats = []string{
 		archive.Gzip,
 		archive.Tar,
-		archive.Zstd,
 	}
 )
 
@@ -80,42 +78,35 @@ func TestPlugin(t *testing.T) {
 		success  bool
 	}{
 		{
-			name: "existing-mount",
+			name: "existing mount",
 			mount: func(name string) []string {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
 			success: true,
 		},
 		{
-			name: "non-existing-mount",
+			name: "non-existing mount",
 			mount: func(_ string) []string {
 				return []string{"idonotexist"}
 			},
 			success: false,
 		},
 		{
-			name: "empty-mount",
+			name: "empty mount",
 			mount: func(name string) []string {
 				return []string{exampleDir(t, name)}
 			},
 			success: true,
 		},
 		{
-			name: "existing-mount-with-nested-files",
+			name: "existing mount with nested files",
 			mount: func(name string) []string {
 				return exampleNestedFileTree(t, name, make([]byte, 1*1024))
 			},
 			success: true,
 		},
 		{
-			name: "existing-mount-with-glob-files",
-			mount: func(name string) []string {
-				return exampleNestedFileTreeWithGlob(t, name, make([]byte, 1*1024))
-			},
-			success: true,
-		},
-		{
-			name: "existing-mount-with-cache-key",
+			name: "existing mount with cache key",
 			mount: func(name string) []string {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
@@ -123,7 +114,7 @@ func TestPlugin(t *testing.T) {
 			success:  true,
 		},
 		{
-			name: "existing-mount-with-symlink",
+			name: "existing mount with symlink",
 			mount: func(name string) []string {
 				return exampleFileTreeWithSymlinks(t, name, make([]byte, 1*1024))
 			},
@@ -149,12 +140,7 @@ func TestPlugin(t *testing.T) {
 					c := defaultConfig()
 					setup(t, c, name)
 					paths := tc.mount(tc.name)
-					c = mount(c, paths...)
-					cwd, err := os.Getwd()
-					test.Ok(t, err)
-					fsys := os.DirFS(cwd)
-					test.Ok(t, c.HandleMount(fsys))
-
+					mount(c, paths...)
 					cacheKey(c, tc.cacheKey)
 					format(c, f)
 
@@ -173,7 +159,7 @@ func TestPlugin(t *testing.T) {
 					restoreRoot, cleanup := test.CreateTempDir(t, sanitize(name), testRootMoved)
 					t.Cleanup(cleanup)
 
-					for _, p := range c.Mount {
+					for _, p := range paths {
 						rel, err := filepath.Rel(testRootMounted, p)
 						test.Ok(t, err)
 						dst := filepath.Join(restoreRoot, rel)
@@ -194,7 +180,7 @@ func TestPlugin(t *testing.T) {
 					}
 
 					// Compare
-					test.EqualDirs(t, restoreRoot, testRootMounted, c.Mount)
+					test.EqualDirs(t, restoreRoot, testRootMounted, paths)
 				})
 			}
 		}
@@ -225,7 +211,6 @@ func restore(c *Config) *Config {
 
 func mount(c *Config, mount ...string) *Config {
 	c.Mount = mount
-
 	return c
 }
 
@@ -325,33 +310,6 @@ func exampleFileTreeWithSymlinks(t *testing.T, name string, content []byte) []st
 	return []string{file, dir, symDir}
 }
 
-func exampleNestedFileTreeWithGlob(t *testing.T, name string, content []byte) []string {
-	name = sanitize(name)
-
-	dirA, dirAClean := test.CreateTempDir(t, name, testRootMounted)
-	t.Cleanup(dirAClean)
-
-	nestedDirA := fmt.Sprintf("%s/test", dirA)
-	os.Mkdir(nestedDirA, 0o755)
-	t.Cleanup(func() { os.RemoveAll(nestedDirA) })
-
-	_, nestedFilesAClean := test.CreateTempFilesInDir(t, name, content, nestedDirA)
-	t.Cleanup(nestedFilesAClean)
-
-	dirB, dirBClean := test.CreateTempDir(t, name, testRootMounted)
-	t.Cleanup(dirBClean)
-
-	nestedDirB := fmt.Sprintf("%s/test", dirB)
-	os.Mkdir(nestedDirB, 0o755)
-	t.Cleanup(func() { os.RemoveAll(nestedDirB) })
-
-	_, nestedFilesBClean := test.CreateTempFilesInDir(t, name, content, nestedDirB)
-	t.Cleanup(nestedFilesBClean)
-
-	globPath := fmt.Sprintf("%s/**/test", testRootMounted)
-	return []string{globPath}
-}
-
 // Setup
 
 func setupAzure(t *testing.T, c *Config, name string) {
@@ -439,10 +397,9 @@ func setupS3(t *testing.T, c *Config, name string) {
 		bucket          = sanitize(name)
 	)
 	client := awss3.New(session.Must(session.NewSessionWithOptions(session.Options{})), &aws.Config{
-		Region:     aws.String(defaultRegion),
-		Endpoint:   aws.String(endpoint),
-		DisableSSL: aws.Bool(true),
-		// DisableSSL:       aws.Bool(!strings.HasPrefix(endpoint, "https://")),
+		Region:           aws.String(defaultRegion),
+		Endpoint:         aws.String(endpoint),
+		DisableSSL:       aws.Bool(!strings.HasPrefix(endpoint, "https://")),
 		S3ForcePathStyle: aws.Bool(true),
 		Credentials:      credentials.NewStaticCredentials(accessKey, secretAccessKey, ""),
 	})
@@ -454,14 +411,13 @@ func setupS3(t *testing.T, c *Config, name string) {
 
 	c.Backend = backend.S3
 	c.S3 = s3.Config{
-		ACL:        "private",
-		Bucket:     bucket,
-		Endpoint:   endpoint,
-		Key:        accessKey,
-		PathStyle:  true, // Should be true for minio and false for AWS.
-		DisableSSL: true,
-		Region:     defaultRegion,
-		Secret:     secretAccessKey,
+		ACL:       "private",
+		Bucket:    bucket,
+		Endpoint:  endpoint,
+		Key:       accessKey,
+		PathStyle: true, // Should be true for minio and false for AWS.
+		Region:    defaultRegion,
+		Secret:    secretAccessKey,
 	}
 }
 

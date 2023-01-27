@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-kit/log"
+	"github.com/go-kit/kit/log"
 	"github.com/go-kit/log/level"
+
 	"github.com/meltwater/drone-cache/internal"
+	"github.com/meltwater/drone-cache/storage/common"
 )
 
-const defaultFileMode = 0o755
+const defaultFileMode = 0755
 
 // Backend is an file system implementation of the Backend.
 type Backend struct {
@@ -53,7 +55,6 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 		rc, err := os.Open(path)
 		if err != nil {
 			errCh <- fmt.Errorf("get the object, %w", err)
-
 			return
 		}
 
@@ -62,7 +63,6 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 		_, err = io.Copy(w, rc)
 		if err != nil {
 			errCh <- fmt.Errorf("copy the object, %w", err)
-
 			return
 		}
 	}()
@@ -71,7 +71,6 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// nolint: wrapcheck
 		return ctx.Err()
 	}
 }
@@ -96,7 +95,6 @@ func (b *Backend) Put(ctx context.Context, p string, r io.Reader) error {
 		w, err := os.Create(path)
 		if err != nil {
 			errCh <- fmt.Errorf("create cache file, %w", err)
-
 			return
 		}
 
@@ -115,7 +113,6 @@ func (b *Backend) Put(ctx context.Context, p string, r io.Reader) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// nolint: wrapcheck
 		return ctx.Err()
 	}
 }
@@ -133,4 +130,9 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 	}
 
 	return err == nil, nil
+}
+
+// List contents of the given directory by given key from remote storage.
+func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
+	return nil, common.ErrNotImplemented
 }

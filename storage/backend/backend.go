@@ -9,12 +9,12 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/meltwater/drone-cache/storage/backend/alioss"
 	"github.com/meltwater/drone-cache/storage/backend/azure"
 	"github.com/meltwater/drone-cache/storage/backend/filesystem"
 	"github.com/meltwater/drone-cache/storage/backend/gcs"
 	"github.com/meltwater/drone-cache/storage/backend/s3"
 	"github.com/meltwater/drone-cache/storage/backend/sftp"
+	"github.com/meltwater/drone-cache/storage/common"
 )
 
 const (
@@ -52,8 +52,8 @@ type Backend interface {
 	// Exists checks if path already exists.
 	Exists(ctx context.Context, p string) (bool, error)
 
-	// Implement me!
-	// List(ctx context.Context, p string) ([]FileEntry, error)
+	// List contents of the given directory by given key from remote storage.
+	List(ctx context.Context, p string) ([]common.FileEntry, error)
 
 	// Implement me!
 	// Delete(ctx context.Context, p string) error
@@ -68,23 +68,20 @@ func FromConfig(l log.Logger, backedType string, cfg Config) (Backend, error) {
 
 	switch backedType {
 	case Azure:
-		level.Warn(l).Log("msg", "using azure blob as backend")
+		level.Debug(l).Log("msg", "using azure blob as backend")
 		b, err = azure.New(log.With(l, "backend", Azure), cfg.Azure)
 	case S3:
-		level.Warn(l).Log("msg", "using aws s3 as backend")
+		level.Debug(l).Log("msg", "using aws s3 as backend")
 		b, err = s3.New(log.With(l, "backend", S3), cfg.S3, cfg.Debug)
 	case GCS:
-		level.Warn(l).Log("msg", "using gc storage as backend")
+		level.Debug(l).Log("msg", "using gc storage as backend")
 		b, err = gcs.New(log.With(l, "backend", GCS), cfg.GCS)
 	case FileSystem:
-		level.Warn(l).Log("msg", "using filesystem as backend")
+		level.Debug(l).Log("msg", "using filesystem as backend")
 		b, err = filesystem.New(log.With(l, "backend", FileSystem), cfg.FileSystem)
 	case SFTP:
-		level.Warn(l).Log("msg", "using sftp as backend")
+		level.Debug(l).Log("msg", "using sftp as backend")
 		b, err = sftp.New(log.With(l, "backend", SFTP), cfg.SFTP)
-	case AliOSS:
-		level.Warn(l).Log("msg", "using Alibaba OSS storage as backend")
-		b, err = alioss.New(log.With(l, "backend", AliOSS), cfg.Alioss, cfg.Debug)
 	default:
 		return nil, errors.New("unknown backend")
 	}

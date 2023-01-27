@@ -22,17 +22,20 @@ type Config struct {
 	CacheKeyTemplate string
 	RemoteRoot       string
 	LocalRoot        string
+	AccountID        string
 
 	// Modes
-	Debug   bool
-	Rebuild bool
-	Restore bool
+	Debug      bool
+	Rebuild    bool
+	Restore    bool
+	AutoDetect bool
 
 	// Optional
-	SkipSymlinks            bool
-	Override                bool
-	CompressionLevel        int
-	StorageOperationTimeout time.Duration
+	SkipSymlinks               bool
+	Override                   bool
+	FailRestoreIfKeyNotPresent bool
+	CompressionLevel           int
+	StorageOperationTimeout    time.Duration
 
 	Mount []string
 

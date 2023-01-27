@@ -2,11 +2,12 @@
 package plugin
 
 import (
-	"crypto/md5" // #nosec
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -14,6 +15,7 @@ import (
 	"github.com/meltwater/drone-cache/archive"
 	"github.com/meltwater/drone-cache/cache"
 	"github.com/meltwater/drone-cache/internal/metadata"
+	"github.com/meltwater/drone-cache/internal/plugin/autodetect"
 	"github.com/meltwater/drone-cache/key"
 	keygen "github.com/meltwater/drone-cache/key/generator"
 	"github.com/meltwater/drone-cache/storage"
@@ -43,7 +45,7 @@ func New(logger log.Logger) *Plugin {
 }
 
 // Exec entry point of Plugin, where the magic happens.
-func (p *Plugin) Exec() error { // nolint: funlen,cyclop
+func (p *Plugin) Exec() error { // nolint:funlen
 	cfg := p.Config
 
 	// 1. Check parameters
@@ -77,26 +79,51 @@ func (p *Plugin) Exec() error { // nolint: funlen,cyclop
 	}
 
 	var options []cache.Option
-	if p.Config.RemoteRoot != "" {
-		options = append(options, cache.WithNamespace(p.Config.RemoteRoot))
-	} else {
-		options = append(options, cache.WithNamespace(p.Metadata.Repo.Name))
-	}
+	// Removing below namespace from cache path so that saved cache path is same for PR and manual runs.
+	// if p.Config.RemoteRoot != "" {
+	// 	options = append(options, cache.WithNamespace(p.Config.RemoteRoot))
+	// } else {
+	// 	options = append(options, cache.WithNamespace(p.Metadata.Repo.Name))
+	// }
 
 	var generator key.Generator
-	if cfg.CacheKeyTemplate != "" {
-		generator = keygen.NewMetadata(p.logger, cfg.CacheKeyTemplate, p.Metadata, time.Now)
-		if err := generator.Check(); err != nil {
-			return fmt.Errorf("parse failed, falling back to default, %w", err)
-		}
 
-		options = append(options, cache.WithFallbackGenerator(keygen.NewHash(md5.New, p.Metadata.Commit.Branch)))
-	} else {
-		generator = keygen.NewHash(md5.New, p.Metadata.Commit.Branch)
-		options = append(options, cache.WithFallbackGenerator(keygen.NewStatic(p.Metadata.Commit.Branch)))
+	switch {
+	case cfg.CacheKeyTemplate != "":
+		{
+			generator = keygen.NewMetadata(p.logger, cfg.CacheKeyTemplate, p.Metadata, time.Now)
+			if err := generator.Check(); err != nil {
+				return fmt.Errorf("parse failed, falling back to default, %w", err)
+			}
+
+			options = append(options, cache.WithFallbackGenerator(keygen.NewHash(md5.New, p.Metadata.Commit.Branch)))
+		}
+	case cfg.AutoDetect:
+		{
+			dirs, buildTools, hash, err := autodetect.DetectDirectoriesToCache()
+			if err != nil {
+				return fmt.Errorf("autodetect enabled but failed to detect, falling back to default, %w", err)
+			}
+			p.logger.Log("msg", "build tools detected: "+strings.Join(buildTools, ", "))
+			if len(p.Config.Mount) == 0 {
+				p.Config.Mount = dirs
+			}
+			generator = keygen.NewMetadata(p.logger, cfg.AccountID+"/"+hash, p.Metadata, time.Now)
+			if err := generator.Check(); err != nil {
+				return fmt.Errorf("parse failed, falling back to default, %w", err)
+			}
+
+			options = append(options, cache.WithFallbackGenerator(keygen.NewHash(md5.New, p.Metadata.Commit.Branch)))
+		}
+	default:
+		{
+			generator = keygen.NewHash(md5.New, p.Metadata.Commit.Branch)
+			options = append(options, cache.WithFallbackGenerator(keygen.NewStatic(p.Metadata.Commit.Branch)))
+		}
 	}
 
-	options = append(options, cache.WithOverride(p.Config.Override))
+	options = append(options, cache.WithOverride(p.Config.Override),
+		cache.WithFailRestoreIfKeyNotPresent(p.Config.FailRestoreIfKeyNotPresent))
 
 	// 2. Initialize storage backend.
 	b, err := backend.FromConfig(p.logger, cfg.Backend, backend.Config{

@@ -227,7 +227,7 @@ func create(a *Archive, srcs []string, dst string) (int64, error) {
 	go func(w *int64) {
 		defer pw.Close()
 
-		written, err := a.Create(srcs, pw)
+		written, err := a.Create(srcs, pw, false)
 		if err != nil {
 			pw.CloseWithError(err)
 		}

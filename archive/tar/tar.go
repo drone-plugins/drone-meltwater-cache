@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/meltwater/drone-cache/internal"
 )
 
@@ -36,7 +38,9 @@ func New(logger log.Logger, root string, skipSymlinks bool) *Archive {
 }
 
 // Create writes content of the given source to an archive, returns written bytes.
-func (a *Archive) Create(srcs []string, w io.Writer) (int64, error) {
+// If isRelativePath is true, it clones using the path, else it clones using a path
+// combining archive's root with the path.
+func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64, error) {
 	tw := tar.NewWriter(w)
 	defer internal.CloseWithErrLogf(a.logger, tw, "tar writer")
 
@@ -48,7 +52,7 @@ func (a *Archive) Create(srcs []string, w io.Writer) (int64, error) {
 			return written, fmt.Errorf("make sure file or directory readable <%s>: %v,, %w", src, err, ErrSourceNotReachable)
 		}
 
-		if err := filepath.Walk(src, writeToArchive(tw, a.root, a.skipSymlinks, &written)); err != nil {
+		if err := filepath.Walk(src, writeToArchive(tw, a.root, a.skipSymlinks, &written, isRelativePath, a.logger)); err != nil {
 			return written, fmt.Errorf("walk, add all files to archive, %w", err)
 		}
 	}
@@ -56,9 +60,11 @@ func (a *Archive) Create(srcs []string, w io.Writer) (int64, error) {
 	return written, nil
 }
 
-// nolint: lll, cyclop
-func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int64) func(string, os.FileInfo, error) error {
+// nolint: lll
+func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int64, isRelativePath bool, logger log.Logger) func(string, os.FileInfo, error) error {
 	return func(path string, fi os.FileInfo, err error) error {
+		level.Info(logger).Log("path", path, "root", root) //nolint: errcheck
+
 		if err != nil {
 			return err
 		}
@@ -85,9 +91,10 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 		}
 
 		var name string
-
-		if strings.HasPrefix(path, "/") {
+		if strings.HasPrefix(path, getRootPathPrefix()) {
 			name, err = filepath.Abs(path)
+		} else if isRelativePath {
+			name = path
 		} else {
 			name, err = relative(root, path)
 		}
@@ -139,6 +146,14 @@ func relative(parent string, path string) (string, error) {
 	return strings.TrimPrefix(filepath.Join(rel, name), "/"), nil
 }
 
+func getRootPathPrefix() string {
+	if runtime.GOOS == "windows" {
+		return `C:\`
+	}
+
+	return "/"
+}
+
 func createSymlinkHeader(fi os.FileInfo, path string) (*tar.Header, error) {
 	lnk, err := os.Readlink(path)
 	if err != nil {
@@ -153,7 +168,7 @@ func createSymlinkHeader(fi os.FileInfo, path string) (*tar.Header, error) {
 	return h, nil
 }
 
-func writeFileToArchive(tw io.Writer, path string) (int64, error) {
+func writeFileToArchive(tw io.Writer, path string) (n int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, fmt.Errorf("open file <%s>, %w", path, err)
@@ -170,7 +185,6 @@ func writeFileToArchive(tw io.Writer, path string) (int64, error) {
 }
 
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
-// nolint: cyclop
 func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 	var (
 		written int64
@@ -190,7 +204,7 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 		}
 
 		var target string
-		if dst == h.Name || strings.HasPrefix(h.Name, "/") {
+		if dst == h.Name || strings.HasPrefix(h.Name, getRootPathPrefix()) {
 			target = h.Name
 		} else {
 			name, err := relative(dst, h.Name)
@@ -200,6 +214,8 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 			target = filepath.Join(dst, name)
 		}
+
+		level.Debug(a.logger).Log("msg", "extracting archive", "path", target)
 
 		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
 			return 0, fmt.Errorf("ensure directory <%s>, %w", target, err)
@@ -249,7 +265,7 @@ func extractDir(h *tar.Header, target string) error {
 	return nil
 }
 
-func extractRegular(h *tar.Header, tr io.Reader, target string) (int64, error) {
+func extractRegular(h *tar.Header, tr io.Reader, target string) (n int64, err error) {
 	f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(h.Mode))
 	if err != nil {
 		return 0, fmt.Errorf("open extracted file for writing <%s>, %w", target, err)

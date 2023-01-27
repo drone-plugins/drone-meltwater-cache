@@ -10,7 +10,7 @@ import (
 
 	"github.com/meltwater/drone-cache/test"
 
-	"github.com/go-kit/log"
+	"github.com/go-kit/kit/log"
 )
 
 var (
@@ -126,6 +126,7 @@ func TestCreate(t *testing.T) {
 
 			_, err = extract(tc.ta, archivePath, extDir)
 			test.Ok(t, err)
+
 			test.EqualDirs(t, extDir, testRootMounted, relativeSrcs)
 
 			for _, src := range absSrcs {
@@ -316,7 +317,7 @@ func create(a *Archive, srcs []string, dst string) (int64, error) {
 	go func(w *int64) {
 		defer pw.Close()
 
-		written, err := a.Create(srcs, pw)
+		written, err := a.Create(srcs, pw, false)
 		if err != nil {
 			pw.CloseWithError(err)
 		}

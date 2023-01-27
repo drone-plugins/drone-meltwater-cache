@@ -228,7 +228,7 @@ func main() {
 
 		&cli.StringFlag{
 			Name:    "backend, b",
-			Usage:   "cache backend to use in plugin (s3, filesystem, sftp, azure, gcs, alibaba)",
+			Usage:   "cache backend to use in plugin (s3, filesystem, sftp, azure, gcs)",
 			Value:   backend.S3,
 			EnvVars: []string{"PLUGIN_BACKEND"},
 		},
@@ -268,6 +268,17 @@ func main() {
 			Value:   true,
 			EnvVars: []string{"PLUGIN_OVERRIDE"},
 		},
+		&cli.BoolFlag{
+			Name:    "auto-detect",
+			Usage:   "automatically detect the cache directory and generate cache key",
+			Value:   false,
+			EnvVars: []string{"PLUGIN_AUTO_CACHE"},
+		},
+		&cli.StringFlag{
+			Name:    "account-id",
+			Usage:   "account-id used for automatic key generation",
+			EnvVars: []string{"PLUGIN_ACCOUNT_ID"},
+		},
 		// CACHE-KEYS
 		// REBUILD-KEYS
 		// RESTORE-KEYS
@@ -300,6 +311,13 @@ func main() {
 			Usage:   "always exit with exit code, disable silent fails for known errors",
 			Hidden:  true,
 			EnvVars: []string{"PLUGIN_EXIT_CODE", "EXIT_CODE"},
+		},
+		&cli.BoolFlag{
+			Name:    "fail-restore-if-key-not-present",
+			Usage:   "fail cache restore if provided key does not exist",
+			Hidden:  true,
+			Value:   false,
+			EnvVars: []string{"PLUGIN_FAIL_RESTORE_IF_KEY_NOT_PRESENT"},
 		},
 
 		// Backends Configs
@@ -377,15 +395,21 @@ func main() {
 			EnvVars: []string{"PLUGIN_STS_ENDPOINT", "AWS_STS_ENDPOINT"},
 		},
 		&cli.StringFlag{
-			Name:    "role-arn",
+			Name:    "assume-role-arn",
 			Usage:   "AWS IAM role ARN to assume",
 			Value:   "",
-			EnvVars: []string{"PLUGIN_ASSUME_ROLE_ARN", "AWS_ASSUME_ROLE_ARN"},
+			EnvVars: []string{"PLUGIN_ASSUME_ROLE_ARN", "PLUGIN_ASSUME_ROLE", "AWS_ASSUME_ROLE_ARN"},
 		},
-		&cli.BoolFlag{
-			Name:    "disable-ssl",
-			Usage:   "Set SSL mode for connections to S3. Default is false (DisableSSL=false)",
-			EnvVars: []string{"PLUGIN_DISABLESSL", "AWS_DISABLESSL"},
+		&cli.StringFlag{
+			Name:    "assume-role-session-name",
+			Usage:   "aws iam role session name to assume",
+			Value:   "drone-cache",
+			EnvVars: []string{"PLUGIN_ASSUME_ROLE_SESSION_NAME", "ASSUME_ROLE_SESSION_NAME"},
+		},
+		&cli.StringFlag{
+			Name:    "user-role-arn",
+			Usage:   "AWS user role",
+			EnvVars: []string{"PLUGIN_USER_ROLE_ARN", "AWS_USER_ROLE_ARN"},
 		},
 
 		// GCS specific Configs flags
@@ -508,7 +532,7 @@ func run(c *cli.Context) error {
 	}
 
 	logger := internal.NewLogger(logLevel, c.String("log.format"), "drone-cache")
-	level.Info(logger).Log("version", version, "commit", commit, "date", date)
+	level.Debug(logger).Log("version", version, "commit", commit, "date", date)
 
 	plg := plugin.New(log.With(logger, "component", "plugin"))
 	plg.Metadata = metadata.Metadata{
@@ -548,35 +572,37 @@ func run(c *cli.Context) error {
 	}
 
 	plg.Config = plugin.Config{
-		ArchiveFormat:    c.String("archive-format"),
-		Backend:          c.String("backend"),
-		CacheKeyTemplate: c.String("cache-key"),
-		CompressionLevel: c.Int("compression-level"),
-		Debug:            c.Bool("debug"),
-		Mount:            c.StringSlice("mount"),
-		Rebuild:          c.Bool("rebuild"),
-		Restore:          c.Bool("restore"),
-		RemoteRoot:       c.String("remote-root"),
-		LocalRoot:        c.String("local-root"),
-		Override:         c.Bool("override"),
+		ArchiveFormat:              c.String("archive-format"),
+		Backend:                    c.String("backend"),
+		CacheKeyTemplate:           c.String("cache-key"),
+		CompressionLevel:           c.Int("compression-level"),
+		Debug:                      c.Bool("debug"),
+		Mount:                      c.StringSlice("mount"),
+		Rebuild:                    c.Bool("rebuild"),
+		Restore:                    c.Bool("restore"),
+		AutoDetect:                 c.Bool("auto-detect"),
+		AccountID:                  c.String("account-id"),
+		RemoteRoot:                 c.String("remote-root"),
+		LocalRoot:                  c.String("local-root"),
+		Override:                   c.Bool("override"),
+		FailRestoreIfKeyNotPresent: c.Bool("fail-restore-if-key-not-present"),
 
 		StorageOperationTimeout: c.Duration("backend.operation-timeout"),
 		FileSystem: filesystem.Config{
 			CacheRoot: c.String("filesystem.cache-root"),
 		},
 		S3: s3.Config{
-			ACL:         c.String("acl"),
-			Bucket:      c.String("bucket"),
-			Encryption:  c.String("encryption"),
-			Endpoint:    c.String("endpoint"),
-			Key:         c.String("access-key"),
-			PathStyle:   c.Bool("path-style"),
-			Public:      c.Bool("s3-bucket-public"),
-			Region:      c.String("region"),
-			Secret:      c.String("secret-key"),
-			StsEndpoint: c.String("sts-endpoint"),
-			RoleArn:     c.String("role-arn"),
-			DisableSSL:  c.Bool("disable-ssl"),
+			ACL:           c.String("acl"),
+			Bucket:        c.String("bucket"),
+			Encryption:    c.String("encryption"),
+			Endpoint:      c.String("endpoint"),
+			Key:           c.String("access-key"),
+			PathStyle:     c.Bool("path-style"),
+			Region:        c.String("region"),
+			Secret:        c.String("secret-key"),
+			StsEndpoint:   c.String("sts-endpoint"),
+			AssumeRoleARN: c.String("assume-role-arn"),
+			UserRoleArn:   c.String("user-role-arn"),
 		},
 		Azure: azure.Config{
 			AccountName:    c.String("azure.account-name"),

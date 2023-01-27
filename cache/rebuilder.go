@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,10 +96,16 @@ func (r rebuilder) Rebuild(srcs []string) error {
 }
 
 // rebuild pushes the archived file to the cache.
-func (r rebuilder) rebuild(src, dst string) error {
-	src, err := filepath.Abs(filepath.Clean(src))
-	if err != nil {
-		return fmt.Errorf("clean source path, %w", err)
+func (r rebuilder) rebuild(src, dst string) (err error) {
+	isRelativePath := strings.HasPrefix(src, "./")
+	level.Info(r.logger).Log("msg", "rebuild", "src", src, "relativePath", isRelativePath) //nolint: errcheck
+	src = filepath.Clean(src)
+	if !isRelativePath {
+		src, err = filepath.Abs(src)
+		if err != nil {
+			return fmt.Errorf("clean source path, %w", err)
+		}
+		level.Info(r.logger).Log("msg", "src is adjusted", "src", src) //nolint: errcheck
 	}
 
 	pr, pw := io.Pipe()
@@ -109,9 +116,9 @@ func (r rebuilder) rebuild(src, dst string) error {
 	go func(wrt *int64) {
 		defer internal.CloseWithErrLogf(r.logger, pw, "pw close defer")
 
-		level.Info(r.logger).Log("msg", "archiving directory", "src", src)
+		level.Info(r.logger).Log("msg", "caching paths", "src", src)
 
-		written, err := r.a.Create([]string{src}, pw)
+		written, err := r.a.Create([]string{src}, pw, isRelativePath)
 		if err != nil {
 			if err := pw.CloseWithError(fmt.Errorf("archive write, pipe writer failed, %w", err)); err != nil {
 				level.Error(r.logger).Log("msg", "pw close", "err", err)

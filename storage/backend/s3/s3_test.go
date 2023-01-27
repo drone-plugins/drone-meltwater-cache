@@ -15,13 +15,13 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/go-kit/log"
+	"github.com/go-kit/kit/log"
 
 	"github.com/meltwater/drone-cache/test"
 )
 
 const (
-	defaultEndpoint            = "127.0.0.1:9000"
+	defaultEndpoint            = "http://127.0.0.1:9000"
 	defaultAccessKey           = "AKIAIOSFODNN7EXAMPLE"
 	defaultSecretAccessKey     = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 	defaultRegion              = "eu-west-1"
@@ -43,14 +43,13 @@ func TestRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	backend, cleanUp := setup(t, Config{
-		ACL:        acl,
-		Bucket:     "s3-round-trip",
-		Endpoint:   endpoint,
-		Key:        accessKey,
-		PathStyle:  true, // Should be true for minio and false for AWS.
-		Region:     defaultRegion,
-		Secret:     secretAccessKey,
-		DisableSSL: true, // minio unable to handle https requests
+		ACL:       acl,
+		Bucket:    "s3-round-trip",
+		Endpoint:  endpoint,
+		Key:       accessKey,
+		PathStyle: true, // Should be true for minio and false for AWS.
+		Region:    defaultRegion,
+		Secret:    secretAccessKey,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
@@ -60,16 +59,16 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 	t.Parallel()
 
 	backend, cleanUp := setup(t, Config{
-		ACL:         acl,
-		Bucket:      "s3-round-trip-with-role",
-		Endpoint:    endpoint,
-		StsEndpoint: endpoint,
-		Key:         userAccessKey,
-		PathStyle:   true, // Should be true for minio and false for AWS.
-		Region:      defaultRegion,
-		Secret:      userSecretAccessKey,
-		RoleArn:     "arn:aws:iam::account-id:role/TestRole",
-		DisableSSL:  true, // setting to true so minio doesn't crash
+		ACL:                   acl,
+		Bucket:                "s3-round-trip-with-role",
+		Endpoint:              endpoint,
+		StsEndpoint:           endpoint,
+		Key:                   userAccessKey,
+		PathStyle:             true, // Should be true for minio and false for AWS.
+		Region:                defaultRegion,
+		Secret:                userSecretAccessKey,
+		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
+		AssumeRoleSessionName: "drone-cache",
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
@@ -94,6 +93,10 @@ func roundTrip(t *testing.T, backend *Backend) {
 	test.Ok(t, err)
 
 	test.Equals(t, true, exists)
+
+	entries, err := backend.List(context.TODO(), "")
+	test.Ok(t, err)
+	test.Equals(t, 1, len(entries))
 }
 
 // Helpers
@@ -122,10 +125,9 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 
 func newClient(config Config) *s3.S3 {
 	conf := &aws.Config{
-		Region:   aws.String(defaultRegion),
-		Endpoint: aws.String(endpoint),
-		// DisableSSL:       aws.Bool(!strings.HasPrefix(endpoint, "https://")),
-		DisableSSL:       aws.Bool(true),
+		Region:           aws.String(defaultRegion),
+		Endpoint:         aws.String(endpoint),
+		DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
 		S3ForcePathStyle: aws.Bool(true),
 		Credentials:      credentials.NewStaticCredentials(config.Key, config.Secret, ""),
 	}

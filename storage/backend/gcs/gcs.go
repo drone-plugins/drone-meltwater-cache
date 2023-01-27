@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"strings"
 
-	gcstorage "cloud.google.com/go/storage"
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/meltwater/drone-cache/internal"
+	"github.com/meltwater/drone-cache/storage/common"
+
+	gcstorage "cloud.google.com/go/storage"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log/level"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -96,7 +99,6 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// nolint: wrapcheck
 		return ctx.Err()
 	}
 }
@@ -138,7 +140,6 @@ func (b *Backend) Put(ctx context.Context, p string, r io.Reader) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// nolint: wrapcheck
 		return ctx.Err()
 	}
 }
@@ -165,7 +166,6 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 		attrs, err := obj.Attrs(ctx)
 		if err != nil && !errors.Is(err, gcstorage.ErrObjectNotExist) {
 			resCh <- &result{err: fmt.Errorf("get the object attrs, %w", err)}
-
 			return
 		}
 
@@ -176,9 +176,37 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 	case res := <-resCh:
 		return res.val, res.err
 	case <-ctx.Done():
-		// nolint: wrapcheck
 		return false, ctx.Err()
 	}
+}
+
+// List contents of the given directory by given key from remote storage.
+func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
+	it := b.client.Bucket(b.bucket).Objects(ctx, &gcstorage.Query{
+		Prefix: p,
+	})
+
+	var entries []common.FileEntry
+
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to iterate objects present at path %s/%s with err: %v",
+				b.bucket, p, err)
+		}
+
+		entries = append(entries, common.FileEntry{
+			Path:         attrs.Name,
+			Size:         attrs.Size,
+			LastModified: attrs.Updated,
+		})
+	}
+
+	return entries, nil
 }
 
 // Helpers
@@ -186,14 +214,12 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 func setAuthenticationMethod(l log.Logger, c Config, opts []option.ClientOption) []option.ClientOption {
 	if c.APIKey != "" {
 		opts = append(opts, option.WithAPIKey(c.APIKey))
-
 		return opts
 	}
 
 	creds, err := credentials(l, c)
 	if err == nil {
 		opts = append(opts, option.WithCredentials(creds))
-
 		return opts
 	}
 
@@ -209,16 +235,20 @@ func credentials(l log.Logger, c Config) (*google.Credentials, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
 	defer cancel()
 
-	creds, err := google.CredentialsFromJSON(ctx, []byte(c.JSONKey), gcstorage.ScopeFullControl)
-	if err == nil {
-		return creds, nil
+	if c.JSONKey != "" {
+		creds, err := google.CredentialsFromJSON(ctx, []byte(c.JSONKey), gcstorage.ScopeFullControl)
+		if err == nil {
+			return creds, nil
+		}
+
+		level.Error(l).Log("msg", "gc storage credentials from api-key", "err", err)
 	}
 
-	level.Error(l).Log("msg", "gc storage credentials from api-key", "err", err)
+	level.Info(l).Log("msg", "json key not present, falling back to anonymous credentials")
 
-	creds, err = google.FindDefaultCredentials(ctx, gcstorage.ScopeFullControl)
+	creds, err := google.FindDefaultCredentials(ctx, gcstorage.ScopeFullControl)
 	if err != nil {
-		return nil, fmt.Errorf("gcs credentials not found, %w", err)
+		return nil, err
 	}
 
 	return creds, nil
