@@ -1,9 +1,9 @@
 module github.com/meltwater/drone-cache
 
 require (
-	cloud.google.com/go/storage v1.30.0
+	cloud.google.com/go/storage v1.30.1
 	github.com/Azure/azure-storage-blob-go v0.15.0
-	github.com/aws/aws-sdk-go v1.44.222
+	github.com/aws/aws-sdk-go v1.44.226
 	github.com/dustin/go-humanize v1.0.1
 	github.com/go-kit/kit v0.12.0
 	github.com/go-kit/log v0.2.1
@@ -13,7 +13,7 @@ require (
 	github.com/urfave/cli/v2 v2.25.0
 	golang.org/x/crypto v0.7.0
 	golang.org/x/oauth2 v0.6.0
-	google.golang.org/api v0.113.0
+	google.golang.org/api v0.114.0
 )
 
 require (
@@ -32,7 +32,7 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/mattn/go-ieproxy v0.0.10 // indirect
+	github.com/mattn/go-ieproxy v0.0.7 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.opencensus.io v0.24.0 // indirect
@@ -41,9 +41,9 @@ require (
 	golang.org/x/text v0.8.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20230306155012-7f2fa6fef1f4 // indirect
-	google.golang.org/grpc v1.53.0 // indirect
-	google.golang.org/protobuf v1.29.1 // indirect
+	google.golang.org/genproto v0.0.0-20230320184635-7606e756e683 // indirect
+	google.golang.org/grpc v1.54.0 // indirect
+	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
