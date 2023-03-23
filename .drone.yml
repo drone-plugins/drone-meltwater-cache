@@ -1,6 +1,23 @@
 ---
 kind: pipeline
 type: vm
+name: test1
+
+pool:
+  use: ubuntu
+
+steps:
+  - name: build
+    image: golang:1.19
+    commands:
+      - GOOS=linux   GOARCH=amd64 CGO_ENABLED="1"   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
+      - GOOS=linux   GOARCH=arm64 CGO_ENABLED="1"   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
+      - GOOS=darwin  GOARCH=arm64 CGO_ENABLED="1"   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
+      - GOOS=windows GOARCH=amd64 CGO_ENABLED="1"   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64.exe
+
+---
+kind: pipeline
+type: vm
 name: testing
 
 platform:
