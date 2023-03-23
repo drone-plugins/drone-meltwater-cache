@@ -14,8 +14,8 @@ steps:
       - apt install gcc-aarch64-linux-gnu -y
       - GOOS=linux   GOARCH=amd64 go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
       - GOOS=linux   GOARCH=arm64 go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
-      - GOOS=darwin  GOARCH=arm64 CGO_ENABLED="1" CC=aarch64-linux-gnu-gcc  go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
-      - GOOS=windows GOARCH=amd64  go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64.exe
+      - GOOS=darwin  GOARCH=arm64 go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
+      - GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64.exe
 
 ---
 kind: pipeline
