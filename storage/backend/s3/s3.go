@@ -68,10 +68,15 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		client = s3.New(sess)
 	}
 
+	var getACL = ""
+	if c.ACL != "" {
+		getACL = c.ACL
+	}
+
 	return &Backend{
 		logger:     l,
 		bucket:     c.Bucket,
-		acl:        c.ACL,
+		acl:        getACL,
 		encryption: c.Encryption,
 		client:     client,
 	}, nil
