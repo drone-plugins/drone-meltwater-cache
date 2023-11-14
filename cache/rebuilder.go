@@ -40,7 +40,7 @@ func NewRebuilder(logger log.Logger, s storage.Storage, a archive.Archive, g key
 // Rebuild rebuilds cache from the files provided with given paths.
 func (r rebuilder) Rebuild(srcs []string) error {
 	homeStr := os.Getenv("HOME")
-	level.Info(r.logger).Log("msg", "Ash - check if home gets passed correctly .. 1", "srcs", srcs)
+	level.Info(r.logger).Log("msg", "Ash - check if home gets passed correctly .. 1", "homeStr", homeStr)
 	level.Info(r.logger).Log("msg", "rebuilding cache")
 
 	now := time.Now()
@@ -105,7 +105,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 
 // rebuild pushes the archived file to the cache.
 func (r rebuilder) rebuild(src, dst string) (err error) {
-        homeStr := os.Getenv("HOME")
+        homeStr := os.Getenv("$HOME")
 	userProfile := os.Getenv("USERPROFILE")
 	level.Info(r.logger).Log("msg", "Ash - check if home gets passed correctly .. 2", "userProfile", userProfile)
 	level.Info(r.logger).Log("msg", "Ash - check if home gets passed correctly .. 2", "homeStr", homeStr)
