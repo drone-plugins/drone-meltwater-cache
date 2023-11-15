@@ -48,6 +48,7 @@ func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64
 	var written int64
 
 	for _, src := range srcs {
+	    src = os.ExpandEnv(src)
 		_, err := os.Lstat(src)
 		if err != nil {
 			return written, fmt.Errorf("make sure file or directory readable <%s>: %v,, %w", src, err, ErrSourceNotReachable)
