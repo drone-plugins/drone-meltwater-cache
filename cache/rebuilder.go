@@ -102,8 +102,6 @@ func (r rebuilder) Rebuild(srcs []string) error {
 
 // rebuild pushes the archived file to the cache.
 func (r rebuilder) rebuild(src, dst string) (err error) {
-	level.Info(r.logger).Log("msg", "rebuilding cache for directory", "local", src)
-	level.Debug(r.logger).Log("msg", "rebuilding cache for directory", "remote", dst)
 	isRelativePath := strings.HasPrefix(src, "./")
 	level.Debug(r.logger).Log("msg", "rebuild", "src", src, "relativePath", isRelativePath) //nolint: errcheck
 	src = filepath.Clean(src)
