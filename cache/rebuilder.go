@@ -77,8 +77,6 @@ func (r rebuilder) Rebuild(srcs []string) error {
 			}
 		}
 
-		level.Info(r.logger).Log("msg", "rebuilding cache for directory", "local", src)
-		level.Debug(r.logger).Log("msg", "rebuilding cache for directory", "remote", dst)
 
 		wg.Add(1)
 
