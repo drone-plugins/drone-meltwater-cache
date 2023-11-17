@@ -55,6 +55,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	)
 
 	for _, src := range srcs {
+		src = os.ExpandEnv(src)
 		if _, err := os.Lstat(src); err != nil {
 			if !r.gracefulDetect {
 				return fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err)
