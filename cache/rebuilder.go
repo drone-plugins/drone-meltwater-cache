@@ -55,7 +55,10 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	)
 
 	for _, src := range srcs {
-	    src = os.ExpandEnv(src)
+		level.Info(r.logger).Log("msg", "Before expansion", "src", src)
+		src = os.ExpandEnv(src)
+		level.Info(r.logger).Log("msg", "After expansion", "src", src)
+		level.Info(r.logger).Log("msg", "os.ExpandEnv($HOME)", "test", os.ExpandEnv("$HOME"))
 		if _, err := os.Lstat(src); err != nil {
 			if !r.gracefulDetect {
 				return fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err)
@@ -76,7 +79,6 @@ func (r rebuilder) Rebuild(srcs []string) error {
 				continue
 			}
 		}
-
 
 		wg.Add(1)
 

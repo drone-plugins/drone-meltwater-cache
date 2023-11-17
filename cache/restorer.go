@@ -74,7 +74,9 @@ func (r restorer) Restore(dsts []string) error {
 
 	for _, dst := range dsts {
 		src := filepath.Join(namespace, key, dst)
+        level.Info(r.logger).Log("srcs", "Before expansion ", src)
         src = os.ExpandEnv(src)
+        level.Info(r.logger).Log("srcs", "After expansion ", src)
 		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
 		level.Debug(r.logger).Log("msg", "restoring directory", "remote", src)
 
