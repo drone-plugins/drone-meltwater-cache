@@ -140,7 +140,7 @@ func (r rebuilder) rebuild(src, dst string) (err error) {
 	tr := io.TeeReader(pr, sw)
 
 	if err := r.s.Put(dst, tr); err != nil {
-		err = fmt.Errorf("upload file, pipe reader failed, %w", err)
+		err = fmt.Errorf("failure in uploading file to archived directory, %w", err)
 		if err := pr.CloseWithError(err); err != nil {
 			level.Error(r.logger).Log("msg", "pr close", "err", err)
 		}
