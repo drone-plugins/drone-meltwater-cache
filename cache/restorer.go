@@ -56,7 +56,10 @@ func (r restorer) Restore(dsts []string) error {
 
 	if len(dsts) == 0 {
 		prefix := filepath.Join(namespace, key)
-		entries, err := r.s.List(prefix + getSeparator())
+		if !strings.HasSuffix(prefix, getSeparator()) {
+			prefix = prefix + getSeparator()
+		}
+		entries, err := r.s.List(prefix)
 
 		if err == nil {
 			if r.failIfKeyNotPresent && len(entries) == 0 {
@@ -64,7 +67,7 @@ func (r restorer) Restore(dsts []string) error {
 			}
 
 			for _, e := range entries {
-				dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
+				dsts = append(dsts, strings.TrimPrefix(e.Path, prefix))
 			}
 		} else if err != common.ErrNotImplemented {
 			return err
