@@ -56,7 +56,7 @@ func (r restorer) Restore(dsts []string) error {
 
 	if len(dsts) == 0 {
 		prefix := filepath.Join(namespace, key)
-		entries, err := r.s.List(prefix)
+		entries, err := r.s.List(prefix + getSeparator())
 
 		if err == nil {
 			if r.failIfKeyNotPresent && len(entries) == 0 {
