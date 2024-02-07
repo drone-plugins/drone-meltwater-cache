@@ -28,8 +28,9 @@ type restorer struct {
 	g  key.Generator
 	fg key.Generator
 
-	namespace           string
-	failIfKeyNotPresent bool
+	namespace                string
+	failIfKeyNotPresent      bool
+	disableCacheKeySeparator bool
 }
 
 // NewRestorer creates a new cache.Restorer.
