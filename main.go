@@ -319,7 +319,12 @@ func main() {
 			Value:   false,
 			EnvVars: []string{"PLUGIN_FAIL_RESTORE_IF_KEY_NOT_PRESENT"},
 		},
-
+		&cli.BoolFlag{
+			Name:    "disable-cache-key-separator",
+			Usage:   "Allow addition of separator (/) to cache-prefix. (defaults to false)",
+			Value:   false,
+			EnvVars: []string{"PLUGIN_DISABLE_SEPARATOR", "AWS_PLUGIN_DISABLE_SEPARATOR"},
+		},
 		// Backends Configs
 
 		// Shared Config flags
@@ -568,7 +573,8 @@ func run(c *cli.Context) error {
 		Override:                   c.Bool("override"),
 		FailRestoreIfKeyNotPresent: c.Bool("fail-restore-if-key-not-present"),
 
-		StorageOperationTimeout: c.Duration("backend.operation-timeout"),
+		StorageOperationTimeout:  c.Duration("backend.operation-timeout"),
+		DisableCacheKeySeparator: c.Bool("disable-cache-key-separator"),
 		FileSystem: filesystem.Config{
 			CacheRoot: c.String("filesystem.cache-root"),
 		},
