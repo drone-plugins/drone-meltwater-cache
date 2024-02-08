@@ -40,7 +40,7 @@ steps:
       CGO_ENABLED: 0
 
 #  - name: lint
-#    image: golang:1.19
+#    image: golang:1.21
 #    pull: always
 #    commands:
 #      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
@@ -63,7 +63,7 @@ steps:
         path: /drone/src/tmp/testdata/cache
 
   # - name: generate
-  #   image: golang:1.14.1-alpine3.11
+  #   image: golang:1.21.5-alpine3.11
   #   commands:
   #     - apk add --update make git
   #     # Following environment tricks are because of unintended variable capture by flag library.
