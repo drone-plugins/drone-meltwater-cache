@@ -57,7 +57,7 @@ func WithFailRestoreIfKeyNotPresent(b bool) Option {
 	})
 }
 
-// WithDisableCacheKeySeparator disables addition of '/' to cache
+// WithDisableCacheKeySeparator disables addition of '/' to the specified cache key.
 func WithDisableCacheKeySeparator(b bool) Option {
 	return optionFunc(func(o *options) {
 		o.disableCacheKeySeparator = b

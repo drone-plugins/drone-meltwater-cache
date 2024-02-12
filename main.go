@@ -321,9 +321,9 @@ func main() {
 		},
 		&cli.BoolFlag{
 			Name:    "disable-cache-key-separator",
-			Usage:   "Allow addition of separator (/) to cache-prefix. (defaults to false)",
+			Usage:   "Disable adding of / as the cache key suffix. (defaults to false)",
 			Value:   false,
-			EnvVars: []string{"PLUGIN_DISABLE_SEPARATOR", "AWS_PLUGIN_DISABLE_SEPARATOR"},
+			EnvVars: []string{"PLUGIN_DISABLE_SEPARATOR"},
 		},
 
 		// Backends Configs
