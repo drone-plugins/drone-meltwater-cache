@@ -11,10 +11,10 @@ import (
 var _ Client = (*HTTPClient)(nil)
 
 const (
-	harnessRestoreLinkEndpoint = "/cache/harness/download?accountId=%s&cacheKey=%s"
-	harnessStoreLinkEndpoint   = "/cache/harness/upload?accountId=%s&cacheKey=%s"
-	harnessExistsLinkEndpoint  = "/cache/harness/exists?accountId=%s&cacheKey=%s"
-	harnessListLinkEndpoint    = "/cache/harness/list?accountId=%s&cacheKey=%s"
+	harnessRestoreLinkEndpoint = "/cache/intel/download?accountId=%s&cacheKey=%s"
+	harnessStoreLinkEndpoint   = "/cache/intel/upload?accountId=%s&cacheKey=%s"
+	harnessExistsLinkEndpoint  = "/cache/intel/exists?accountId=%s&cacheKey=%s"
+	harnessListLinkEndpoint    = "/cache/intel/list?accountId=%s&cacheKey=%s"
 )
 
 func New(endpoint, accountID, bearerToken string, skipverify bool) *HTTPClient {
@@ -51,11 +51,6 @@ func (c *HTTPClient) GetDownloadPresignURL(ctx context.Context, key string) (str
 
 func (c *HTTPClient) GetExistsPresignURL(ctx context.Context, key string) (string, error) {
 	path := fmt.Sprintf(harnessExistsLinkEndpoint, c.AccountID, key)
-	return c.getLink(ctx, c.Endpoint+path)
-}
-
-func (c *HTTPClient) GetListPresignURL(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf(harnessListLinkEndpoint, c.AccountID, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 

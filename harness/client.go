@@ -22,6 +22,4 @@ type Client interface {
 	GetDownloadPresignURL(ctx context.Context, key string) (string, error)
 
 	GetExistsPresignURL(ctx context.Context, key string) (string, error)
-
-	GetListPresignURL(ctx context.Context, key string) (string, error)
 }
