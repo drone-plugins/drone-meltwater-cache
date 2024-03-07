@@ -1,6 +1,6 @@
 package harness
 
-// Config is a structure to store S3  backend configuration.
+// Config is a structure to store harness backend configuration.
 type Config struct {
 	AccountID     string
 	Token         string

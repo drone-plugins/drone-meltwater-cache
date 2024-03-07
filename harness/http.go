@@ -11,12 +11,12 @@ import (
 var _ Client = (*HTTPClient)(nil)
 
 const (
-	harnessRestoreLinkEndpoint = "/cache/intel/download?accountId=%s&cacheKey=%s"
-	harnessStoreLinkEndpoint   = "/cache/intel/upload?accountId=%s&cacheKey=%s"
-	harnessExistsLinkEndpoint  = "/cache/intel/exists?accountId=%s&cacheKey=%s"
-	harnessListLinkEndpoint    = "/cache/intel/list?accountId=%s&cacheKey=%s"
+	RestoreEndpoint = "/cache/intel/download?accountId=%s&cacheKey=%s"
+	StoreEndpoint   = "/cache/intel/upload?accountId=%s&cacheKey=%s"
+	ExistsEndpoint  = "/cache/intel/exists?accountId=%s&cacheKey=%s"
 )
 
+// NewHTTPClient returns a new HTTPClient.
 func New(endpoint, accountID, bearerToken string, skipverify bool) *HTTPClient {
 	endpoint = strings.TrimSuffix(endpoint, "/")
 	client := &HTTPClient{
@@ -32,6 +32,7 @@ func New(endpoint, accountID, bearerToken string, skipverify bool) *HTTPClient {
 	return client
 }
 
+// HTTPClient provides an http service client.
 type HTTPClient struct {
 	Client      *http.Client
 	Endpoint    string
@@ -39,18 +40,21 @@ type HTTPClient struct {
 	BearerToken string
 }
 
-func (c *HTTPClient) GetUploadPresignURL(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf(harnessStoreLinkEndpoint, c.AccountID, key)
+// getUploadURL will get the 'put' presigned url from cache service
+func (c *HTTPClient) GetUploadURL(ctx context.Context, key string) (string, error) {
+	path := fmt.Sprintf(StoreEndpoint, c.AccountID, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
-func (c *HTTPClient) GetDownloadPresignURL(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf(harnessRestoreLinkEndpoint, c.AccountID, key)
+// getDownloadURL will get the 'get' presigned url from cache service
+func (c *HTTPClient) GetDownloadURL(ctx context.Context, key string) (string, error) {
+	path := fmt.Sprintf(RestoreEndpoint, c.AccountID, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
-func (c *HTTPClient) GetExistsPresignURL(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf(harnessExistsLinkEndpoint, c.AccountID, key)
+// getExistsURL will get the 'exists' presigned url from cache service
+func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, error) {
+	path := fmt.Sprintf(ExistsEndpoint, c.AccountID, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 

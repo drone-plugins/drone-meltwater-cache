@@ -17,9 +17,9 @@ func (e *Error) Error() string {
 
 // Client defines a cache service client.
 type Client interface {
-	GetUploadPresignURL(ctx context.Context, key string) (string, error)
+	GetUploadURL(ctx context.Context, key string) (string, error)
 
-	GetDownloadPresignURL(ctx context.Context, key string) (string, error)
+	GetDownloadURL(ctx context.Context, key string) (string, error)
 
-	GetExistsPresignURL(ctx context.Context, key string) (string, error)
+	GetExistsURL(ctx context.Context, key string) (string, error)
 }

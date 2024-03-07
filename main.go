@@ -508,7 +508,7 @@ func main() {
 		&cli.StringFlag{
 			Name:    "cache-service-token",
 			Usage:   "cache service token",
-			EnvVars: []string{"PLUGIN_CACHE_SERVICE_TOKEN"},
+			EnvVars: []string{"PLUGIN_CACHE_SERVICE_BEARER_TOKEN"},
 		},
 		&cli.StringFlag{
 			Name:    "cache-service-baseurl",

@@ -32,7 +32,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 }
 
 func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
-	preSignedURL, err := b.client.GetDownloadPresignURL(ctx, key)
+	preSignedURL, err := b.client.GetDownloadURL(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
 }
 
 func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
-	preSignedURL, err := b.client.GetUploadPresignURL(ctx, key)
+	preSignedURL, err := b.client.GetUploadURL(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 }
 
 func (b *Backend) Exists(ctx context.Context, key string) (bool, error) {
-	preSignedURL, err := b.client.GetExistsPresignURL(ctx, key)
+	preSignedURL, err := b.client.GetExistsURL(ctx, key)
 	if err != nil {
 		return false, err
 	}
