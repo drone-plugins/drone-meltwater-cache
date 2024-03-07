@@ -124,7 +124,7 @@ func (r restorer) restore(src, dst string) (err error) {
 
 	written, err := r.a.Extract(dst, pr)
 	if err != nil {
-		err = fmt.Errorf("failure in extracting files from downloaded archive, %w", err)
+		err = fmt.Errorf("failed to extract files from downloaded archive, %w", err)
 		if err := pr.CloseWithError(err); err != nil {
 			level.Error(r.logger).Log("msg", "pr close", "err", err)
 		}
