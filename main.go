@@ -321,7 +321,7 @@ func main() {
 		},
 		&cli.BoolFlag{
 			Name:    "disable-cache-key-separator",
-			Usage:   "Disable adding of / as the cache key suffix. (defaults to false)",
+			Usage:   "Disable adding of / as the cache key suffix. (defaults to true)",
 			Value:   true,
 			EnvVars: []string{"PLUGIN_DISABLE_SEPARATOR"},
 		},
