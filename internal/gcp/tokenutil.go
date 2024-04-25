@@ -52,7 +52,7 @@ func GetGoogleCloudAccessToken(federatedToken string, serviceAccountEmail string
 	name := "projects/-/serviceAccounts/" + serviceAccountEmail
 	// rb (request body) specifies parameters for generating an access token.
 	rb := &iamcredentials.GenerateAccessTokenRequest{
-		Scope: []string{"https://www.googleapis.com/auth/cloud-platform"},
+		Scope: []string{scopeURL},
 	}
 	// Generate an access token for the service account using the specified parameters
 	resp, err := service.Projects.ServiceAccounts.GenerateAccessToken(name, rb).Do()
