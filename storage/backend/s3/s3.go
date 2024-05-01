@@ -18,7 +18,6 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 
-	"github.com/meltwater/drone-cache/internal"
 	"github.com/meltwater/drone-cache/storage/common"
 )
 
@@ -34,10 +33,6 @@ type Backend struct {
 
 // New creates an S3 backend.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
-    if c.Region == "" || c.Bucket == "" {
-        return nil, fmt.Errorf("missing required S3 configuration: region or bucket not specified")
-    }
-
     conf := &aws.Config{
         Region:           aws.String(c.Region),
         Endpoint:         &c.Endpoint,
@@ -47,28 +42,28 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
     sess, err := session.NewSession(conf)
     if err != nil {
-        level.Error(l).Log("msg", "could not instantiate AWS session", "error", err)
+        level.Warn(l).Log("msg", "could not instantiate session", "error", err)
         return nil, err
     }
 
-    var creds *credentials.Credentials
     if c.Key != "" && c.Secret != "" {
-        creds = credentials.NewStaticCredentials(c.Key, c.Secret, "")
+        conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
     } else if c.AssumeRoleARN != "" {
         if c.OIDCTokenID != "" {
-            creds, err = assumeRoleWithWebIdentity(sess, c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
-            if err != nil {
-                level.Error(l).Log("msg", "failed to assume role with OIDC", "error", err)
-                return nil, err
-            }
+            // Assume role with OIDC
+            conf.Credentials, err = assumeRoleWithWebIdentity(sess, c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
+			if err != nil {
+				level.Error(l).Log("component", "s3-backend", "function", "assumeRoleWithWebIdentity", "msg", "failed to assume role with OIDC", "error", err)
+				return nil, err
+			}
         } else {
-            creds = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
+            conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
         }
     } else {
-        level.Warn(l).Log("msg", "no AWS credentials provided, proceeding with anonymous access")
+        level.Warn(l).Log("msg", "AWS credentials not provided (falling back to anonymous credentials)")
     }
 
-    conf.Credentials = creds
+    // Create the S3 client with the configured region and credentials
     client := s3.New(sess)
 
     backend := &Backend{
@@ -76,7 +71,10 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
         bucket:     c.Bucket,
         encryption: c.Encryption,
         client:     client,
-        acl:        c.ACL,
+    }
+
+    if c.ACL != "" {
+        backend.acl = c.ACL
     }
 
     return backend, nil
@@ -84,36 +82,34 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
 // Get writes downloaded content to the given writer.
 func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
-	in := &s3.GetObjectInput{
-		Bucket: aws.String(b.bucket),
-		Key:    aws.String(p),
-	}
+    in := &s3.GetObjectInput{
+        Bucket: aws.String(b.bucket),
+        Key:    aws.String(p),
+    }
 
-	errCh := make(chan error)
+    errCh := make(chan error, 1)  // Buffer the channel to prevent blocking in case of error
 
-	go func() {
-		defer close(errCh)
+    go func() {
+        defer close(errCh)
+        out, err := b.client.GetObjectWithContext(ctx, in)
+        if err != nil {
+            errCh <- fmt.Errorf("get the object, %w", err)
+            return
+        }
+        defer out.Body.Close()  // Ensure the body is closed after reading
 
-		out, err := b.client.GetObjectWithContext(ctx, in)
-		if err != nil {
-			errCh <- fmt.Errorf("get the object, %w", err)
-			return
-		}
+        _, err = io.Copy(w, out.Body)
+        if err != nil {
+            errCh <- fmt.Errorf("copy the object, %w", err)
+        }
+    }()
 
-		defer internal.CloseWithErrLogf(b.logger, out.Body, "response body, close defer")
-
-		_, err = io.Copy(w, out.Body)
-		if err != nil {
-			errCh <- fmt.Errorf("copy the object, %w", err)
-		}
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+    select {
+    case err := <-errCh:
+        return err
+    case <-ctx.Done():
+        return ctx.Err()
+    }
 }
 
 // Put uploads contents of the given reader.
