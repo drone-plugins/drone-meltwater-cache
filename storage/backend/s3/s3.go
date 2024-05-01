@@ -210,11 +210,12 @@ func assumeRoleWithWebIdentity(roleArn, roleSessionName, webIdentityToken string
 	svc := sts.New(sess)
 
 	// Prepare the input parameters for the STS call
+	duration := int64(time.Hour /time.Second)
 	input := &sts.AssumeRoleWithWebIdentityInput{
 		RoleArn:          aws.String(roleArn),
 		RoleSessionName:  aws.String(roleSessionName),
 		WebIdentityToken: aws.String(webIdentityToken),
-		DurationSeconds:  aws.Int64(3600),
+		DurationSeconds:  aws.Int64(duration),
 	}
 
 	// Call the AssumeRoleWithWebIdentity function
