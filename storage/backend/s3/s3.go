@@ -34,52 +34,52 @@ type Backend struct {
 
 // New creates an S3 backend.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
-	conf := &aws.Config{
-		Region:           aws.String(c.Region),
-		Endpoint:         &c.Endpoint,
-		DisableSSL:       aws.Bool(strings.HasPrefix(c.Endpoint, "http://")),
-		S3ForcePathStyle: aws.Bool(c.PathStyle),
-	}
+    if c.Region == "" || c.Bucket == "" {
+        return nil, fmt.Errorf("missing required S3 configuration: region or bucket not specified")
+    }
 
-	if c.Key != "" && c.Secret != "" { // nolint:gocritic
-		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
-	} else if c.AssumeRoleARN != "" {
-		conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
-	} else {
-		level.Warn(l).Log("msg", "aws key and/or Secret not provided (falling back to anonymous credentials)")
-	}
+    conf := &aws.Config{
+        Region:           aws.String(c.Region),
+        Endpoint:         &c.Endpoint,
+        DisableSSL:       aws.Bool(strings.HasPrefix(c.Endpoint, "http://")),
+        S3ForcePathStyle: aws.Bool(c.PathStyle),
+    }
 
-	sess, err := session.NewSession(conf)
-	if err != nil {
-		level.Warn(l).Log("msg", "could not instantiate session", "error", err)
-		return nil, err
-	}
+    sess, err := session.NewSession(conf)
+    if err != nil {
+        level.Error(l).Log("msg", "could not instantiate AWS session", "error", err)
+        return nil, err
+    }
 
-	var client *s3.S3
-	// If user role ARN is set then assume role here
-	if len(c.UserRoleArn) > 0 {
-		confRoleArn := aws.Config{
-			Region:      aws.String(c.Region),
-			Credentials: stscreds.NewCredentials(sess, c.UserRoleArn),
-		}
+    var creds *credentials.Credentials
+    if c.Key != "" && c.Secret != "" {
+        creds = credentials.NewStaticCredentials(c.Key, c.Secret, "")
+    } else if c.AssumeRoleARN != "" {
+        if c.OIDCTokenID != "" {
+            creds, err = assumeRoleWithWebIdentity(sess, c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
+            if err != nil {
+                level.Error(l).Log("msg", "failed to assume role with OIDC", "error", err)
+                return nil, err
+            }
+        } else {
+            creds = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
+        }
+    } else {
+        level.Warn(l).Log("msg", "no AWS credentials provided, proceeding with anonymous access")
+    }
 
-		client = s3.New(sess, &confRoleArn)
-	} else {
-		client = s3.New(sess)
-	}
+    conf.Credentials = creds
+    client := s3.New(sess)
 
-	backend := &Backend{
-		logger:     l,
-		bucket:     c.Bucket,
-		encryption: c.Encryption,
-		client:     client,
-	}
+    backend := &Backend{
+        logger:     l,
+        bucket:     c.Bucket,
+        encryption: c.Encryption,
+        client:     client,
+        acl:        c.ACL,
+    }
 
-	if c.ACL != "" {
-		backend.acl = c.ACL
-	}
-
-	return backend, nil
+    return backend, nil
 }
 
 // Get writes downloaded content to the given writer.
@@ -194,4 +194,18 @@ func assumeRole(roleArn, roleSessionName string) *credentials.Credentials {
 	}
 
 	return credentials.NewCredentials(stsProvider)
+}
+
+func assumeRoleWithWebIdentity(sess *session.Session, roleArn, roleSessionName, idToken string) (*credentials.Credentials, error) {
+    svc := sts.New(sess)
+    input := &sts.AssumeRoleWithWebIdentityInput{
+        RoleArn:          aws.String(roleArn),
+        RoleSessionName:  aws.String(roleSessionName),
+        WebIdentityToken: aws.String(idToken),
+    }
+    result, err := svc.AssumeRoleWithWebIdentity(input)
+    if err != nil {
+        return nil, fmt.Errorf("failed to assume role with web identity: %w", err)
+    }
+    return credentials.NewStaticCredentials(*result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken), nil
 }
