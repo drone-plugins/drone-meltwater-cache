@@ -15,8 +15,8 @@ import (
 )
 
 // MockClient is a mock implementation of the Client interface for testing purposes.
-type MockClient struct{
-    URL string
+type MockClient struct {
+	URL string
 }
 
 func (m *MockClient) GetUploadURL(ctx context.Context, key string) (string, error) {
@@ -33,7 +33,7 @@ func (m *MockClient) GetExistsURL(ctx context.Context, key string) (string, erro
 
 func TestGet(t *testing.T) {
 	logger := log.NewNopLogger()
-    // Create a mock HTTP server
+	// Create a mock HTTP server
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "test data")
@@ -44,8 +44,8 @@ func TestGet(t *testing.T) {
 	backend := &Backend{
 		logger: logger,
 		client: &MockClient{
-            URL: server.URL,
-        },
+			URL: server.URL,
+		},
 	}
 	// Execute Get method
 	var buf bytes.Buffer
@@ -65,7 +65,7 @@ func TestGet(t *testing.T) {
 
 func TestPut(t *testing.T) {
 	logger := log.NewNopLogger()
-    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	server := httptest.NewServer(handler)
@@ -74,8 +74,8 @@ func TestPut(t *testing.T) {
 	backend := &Backend{
 		logger: logger,
 		client: &MockClient{
-            URL: server.URL,
-        },
+			URL: server.URL,
+		},
 	}
 
 	// Execute Put method
@@ -89,8 +89,8 @@ func TestPut(t *testing.T) {
 
 func TestExists(t *testing.T) {
 	logger := log.NewNopLogger()
-    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Add("ETag", "test")
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("ETag", "test")
 		w.WriteHeader(http.StatusOK)
 	})
 	server := httptest.NewServer(handler)
@@ -99,8 +99,8 @@ func TestExists(t *testing.T) {
 	backend := &Backend{
 		logger: logger,
 		client: &MockClient{
-            URL: server.URL,
-        },
+			URL: server.URL,
+		},
 	}
 
 	// Execute Exists method
@@ -119,7 +119,7 @@ func TestExists(t *testing.T) {
 
 func TestNotExists(t *testing.T) {
 	logger := log.NewNopLogger()
-    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	server := httptest.NewServer(handler)
@@ -128,8 +128,8 @@ func TestNotExists(t *testing.T) {
 	backend := &Backend{
 		logger: logger,
 		client: &MockClient{
-            URL: server.URL,
-        },
+			URL: server.URL,
+		},
 	}
 
 	// Execute Exists method
@@ -148,7 +148,7 @@ func TestNotExists(t *testing.T) {
 
 func TestNotExistsWithout404(t *testing.T) {
 	logger := log.NewNopLogger()
-    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	})
 	server := httptest.NewServer(handler)
@@ -157,8 +157,8 @@ func TestNotExistsWithout404(t *testing.T) {
 	backend := &Backend{
 		logger: logger,
 		client: &MockClient{
-            URL: server.URL,
-        },
+			URL: server.URL,
+		},
 	}
 
 	// Execute Exists method

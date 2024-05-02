@@ -92,9 +92,9 @@ func (b *Backend) Exists(ctx context.Context, key string) (bool, error) {
 
 func (b *Backend) List(ctx context.Context, key string) ([]common.FileEntry, error) {
 	var allEntries []common.FileEntry
-
+	continuationToken := ""
 	for {
-		preSignedURL, err := b.client.GetListURL(ctx, key)
+		preSignedURL, err := b.client.GetListURL(ctx, key, continuationToken)
 		if err != nil {
 			return nil, err
 		}
@@ -137,17 +137,17 @@ func (b *Backend) List(ctx context.Context, key string) ([]common.FileEntry, err
 			break
 		}
 
-		// Set the marker for the next page of results
-		key = result.Contents[len(result.Contents)-1].Key
+		continuationToken = result.NextContinuationToken
 	}
 
 	return allEntries, nil
 }
 
 type ListBucketResult struct {
-	XMLName     xml.Name  `xml:"ListBucketResult"`
-	Contents    []Content `xml:"Contents"`
-	IsTruncated bool      `xml:"IsTruncated"`
+	XMLName               xml.Name  `xml:"ListBucketResult"`
+	Contents              []Content `xml:"Contents"`
+	IsTruncated           bool      `xml:"IsTruncated"`
+	NextContinuationToken string    `xml:"NextContinuationToken"`
 }
 
 type Content struct {
