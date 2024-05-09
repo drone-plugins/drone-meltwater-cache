@@ -18,6 +18,7 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 
+	"github.com/meltwater/drone-cache/internal"
 	"github.com/meltwater/drone-cache/storage/common"
 )
 
@@ -44,11 +45,16 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
 	} else if c.AssumeRoleARN != "" {
 		if c.OIDCTokenID != "" {
-            // Assume role with OIDC
-            conf.Credentials = assumeRoleWithWebIdentity(c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
-        } else {
-            conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
-        }
+			// Assume role with OIDC
+			creds, err := assumeRoleWithWebIdentity(c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
+			if err != nil {
+				level.Error(l).Log("msg", "failed to assume role with OIDC", "error", err)
+				return nil, err
+			}
+			conf.Credentials = creds
+		} else {
+			conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName)
+		}
 	} else {
 		level.Warn(l).Log("msg", "aws key and/or Secret not provided (falling back to anonymous credentials)")
 	}
@@ -88,34 +94,36 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
 // Get writes downloaded content to the given writer.
 func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
-    in := &s3.GetObjectInput{
-        Bucket: aws.String(b.bucket),
-        Key:    aws.String(p),
-    }
+	in := &s3.GetObjectInput{
+		Bucket: aws.String(b.bucket),
+		Key:    aws.String(p),
+	}
 
-    errCh := make(chan error, 1)  // Buffer the channel to prevent blocking in case of error
+	errCh := make(chan error)
 
-    go func() {
-        defer close(errCh)
-        out, err := b.client.GetObjectWithContext(ctx, in)
-        if err != nil {
-            errCh <- fmt.Errorf("get the object, %w", err)
-            return
-        }
-        defer out.Body.Close()  // Ensure the body is closed after reading
+	go func() {
+		defer close(errCh)
 
-        _, err = io.Copy(w, out.Body)
-        if err != nil {
-            errCh <- fmt.Errorf("copy the object, %w", err)
-        }
-    }()
+		out, err := b.client.GetObjectWithContext(ctx, in)
+		if err != nil {
+			errCh <- fmt.Errorf("get the object, %w", err)
+			return
+		}
 
-    select {
-    case err := <-errCh:
-        return err
-    case <-ctx.Done():
-        return ctx.Err()
-    }
+		defer internal.CloseWithErrLogf(b.logger, out.Body, "response body, close defer")
+
+		_, err = io.Copy(w, out.Body)
+		if err != nil {
+			errCh <- fmt.Errorf("copy the object, %w", err)
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Put uploads contents of the given reader.
@@ -198,19 +206,18 @@ func assumeRole(roleArn, roleSessionName string) *credentials.Credentials {
 	return credentials.NewCredentials(stsProvider)
 }
 
-func assumeRoleWithWebIdentity(roleArn, roleSessionName, webIdentityToken string) *credentials.Credentials {
-    // Create a new session
+func assumeRoleWithWebIdentity(roleArn, roleSessionName, webIdentityToken string) (*credentials.Credentials, error) {
+	// Create a new session
 	sess, err := session.NewSession()
 	if err != nil {
-		fmt.Printf("failed to create AWS session: %v", err)
-		return nil
+		return nil, fmt.Errorf("failed to create AWS session: %v", err)
 	}
 
 	// Create a new STS client
 	svc := sts.New(sess)
 
 	// Prepare the input parameters for the STS call
-	duration := int64(time.Hour /time.Second)
+	duration := int64(time.Hour / time.Second)
 	input := &sts.AssumeRoleWithWebIdentityInput{
 		RoleArn:          aws.String(roleArn),
 		RoleSessionName:  aws.String(roleSessionName),
@@ -221,11 +228,10 @@ func assumeRoleWithWebIdentity(roleArn, roleSessionName, webIdentityToken string
 	// Call the AssumeRoleWithWebIdentity function
 	result, err := svc.AssumeRoleWithWebIdentity(input)
 	if err != nil {
-		fmt.Printf("failed to assume role with web identity: %v", err)
-		return nil
+		return nil, fmt.Errorf("failed to assume role with web identity: %v", err)
 	}
 
 	// Create credentials using the response from STS
 	newCreds := credentials.NewStaticCredentials(*result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken)
-	return newCreds
+	return newCreds, nil
 }
