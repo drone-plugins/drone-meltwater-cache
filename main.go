@@ -444,6 +444,31 @@ func main() {
 			(See https://cloud.google.com/storage/docs/encryption for details.)`,
 			EnvVars: []string{"PLUGIN_GCS_ENCRYPTION_KEY", "GCS_ENCRYPTION_KEY"},
 		},
+		&cli.StringFlag{
+			Name:    "PLUGIN_OIDC_TOKEN_ID",
+			Usage:   `GCP OIDC TOKEN ID`,
+			EnvVars: []string{"PLUGIN_OIDC_TOKEN_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "PLUGIN_PROJECT_NUMBER",
+			Usage:   `OIDC GCP PROJECT NUMBER`,
+			EnvVars: []string{"PLUGIN_PROJECT_NUMBER"},
+		},
+		&cli.StringFlag{
+			Name:    "PLUGIN_POOL_ID",
+			Usage:   `OIDC GCP WORKLOAD POOL ID`,
+			EnvVars: []string{"PLUGIN_POOL_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "PLUGIN_PROVIDER_ID",
+			Usage:   `GCP OIDC PROVIDER ID`,
+			EnvVars: []string{"PLUGIN_PROVIDER_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "PLUGIN_SERVICE_ACCOUNT_EMAIL",
+			Usage:   `GCP OIDC SERVICE ACCOUNT EMAIL`,
+			EnvVars: []string{"PLUGIN_SERVICE_ACCOUNT_EMAIL"},
+		},
 
 		// Azure specific Config flags
 
@@ -633,12 +658,17 @@ func run(c *cli.Context) error {
 			Timeout: c.Duration("backend.operation-timeout"),
 		},
 		GCS: gcs.Config{
-			Bucket:     c.String("bucket"),
-			Endpoint:   c.String("endpoint"),
-			APIKey:     c.String("gcs.api-key"),
-			JSONKey:    c.String("gcs.json-key"),
-			Encryption: c.String("gcs.encryption-key"),
-			Timeout:    c.Duration("backend.operation-timeout"),
+			Bucket:              c.String("bucket"),
+			Endpoint:            c.String("endpoint"),
+			APIKey:              c.String("gcs.api-key"),
+			JSONKey:             c.String("gcs.json-key"),
+			Encryption:          c.String("gcs.encryption-key"),
+			Timeout:             c.Duration("backend.operation-timeout"),
+			OIDCTokenID:         c.String("PLUGIN_OIDC_TOKEN_ID"),
+			ProjectNumber:       c.String("PLUGIN_PROJECT_NUMBER"),
+			PoolID:              c.String("PLUGIN_POOL_ID"),
+			ProviderID:          c.String("PLUGIN_PROVIDER_ID"),
+			ServiceAccountEmail: c.String("PLUGIN_SERVICE_ACCOUNT_EMAIL"),
 		},
 		Harness: harness.Config{
 			AccountID:     c.String("account-id"),
