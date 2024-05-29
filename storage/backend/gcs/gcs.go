@@ -11,7 +11,6 @@ import (
 	"github.com/meltwater/drone-cache/internal"
 	"github.com/meltwater/drone-cache/internal/gcp"
 	"github.com/meltwater/drone-cache/storage/common"
-	"github.com/sirupsen/logrus"
 
 	gcstorage "cloud.google.com/go/storage"
 	"github.com/go-kit/kit/log"
@@ -56,7 +55,7 @@ func New(l log.Logger, c Config) (*Backend, error) {
 		}
 		oidcToken, err := gcp.GetGoogleCloudAccessToken(federalToken, c.ServiceAccountEmail)
 		if err != nil {
-			logrus.Fatalf("Error getting Google Cloud Access Token: %s", err)
+			return nil, fmt.Errorf("error getting Google Cloud Access Token: %w", err)
 		}
 		opts = append(opts, option.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: oidcToken})))
 	} else {

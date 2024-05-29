@@ -10,7 +10,6 @@ require (
 	github.com/google/go-cmp v0.5.9
 	github.com/klauspost/compress v1.16.3
 	github.com/pkg/sftp v1.13.5
-	github.com/sirupsen/logrus v1.8.1
 	github.com/urfave/cli/v2 v2.25.0
 	golang.org/x/crypto v0.14.0
 	golang.org/x/oauth2 v0.6.0
