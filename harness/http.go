@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"encoding/json"
+	"github.com/meltwater/drone-cache/storage/common"
 )
 
 var _ Client = (*HTTPClient)(nil)
@@ -15,6 +17,7 @@ const (
 	StoreEndpoint   = "/cache/intel/upload?accountId=%s&cacheKey=%s"
 	ExistsEndpoint  = "/cache/intel/exists?accountId=%s&cacheKey=%s"
 	ListEndpoint    = "/cache/intel/list?accountId=%s&cacheKey=%s&continuationToken=%s"
+	
 )
 
 // NewHTTPClient returns a new HTTPClient.
@@ -59,10 +62,34 @@ func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, erro
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
-// getListURL will get the 'list' presigned url from cache service
-func (c *HTTPClient) GetListURL(ctx context.Context, key, continuationToken string) (string, error) {
-	path := fmt.Sprintf(ListEndpoint, c.AccountID, key, continuationToken)
-	return c.getLink(ctx, c.Endpoint+path)
+// getListURL will get the list of all entries
+func (c *HTTPClient) GetEntriesList(ctx context.Context, key string) ([]common.FileEntry, error) {
+	path := fmt.Sprintf(ListEndpoint, c.AccountID, key)
+	req, err := http.NewRequestWithContext(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.BearerToken != "" {
+		req.Header.Add("X-Harness-Token", c.BearerToken)
+	}
+
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get list of entries with status %d", resp.StatusCode)
+	}
+	var entries []common.FileEntry
+    err = json.NewDecoder(resp.Body).Decode(&entries)
+    if err != nil {
+        return nil, err
+    }
+
+    return entries, nil
+
 }
 
 func (c *HTTPClient) getLink(ctx context.Context, path string) (string, error) {
