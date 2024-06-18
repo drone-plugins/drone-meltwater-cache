@@ -2,22 +2,22 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"encoding/json"
+
 	"github.com/meltwater/drone-cache/storage/common"
 )
 
 var _ Client = (*HTTPClient)(nil)
 
 const (
-	RestoreEndpoint = "/cache/intel/download?accountId=%s&cacheKey=%s"
-	StoreEndpoint   = "/cache/intel/upload?accountId=%s&cacheKey=%s"
-	ExistsEndpoint  = "/cache/intel/exists?accountId=%s&cacheKey=%s"
-	ListEndpoint    = "/cache/intel/list?accountId=%s&cacheKey=%s&continuationToken=%s"
-	
+	RestoreEndpoint     = "/cache/intel/download?accountId=%s&cacheKey=%s"
+	StoreEndpoint       = "/cache/intel/upload?accountId=%s&cacheKey=%s"
+	ExistsEndpoint      = "/cache/intel/exists?accountId=%s&cacheKey=%s"
+	ListEntriesEndpoint = "/cache/intel/listEntries?accountId=%s&cacheKey=%s"
 )
 
 // NewHTTPClient returns a new HTTPClient.
@@ -64,7 +64,7 @@ func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, erro
 
 // getListURL will get the list of all entries
 func (c *HTTPClient) GetEntriesList(ctx context.Context, key string) ([]common.FileEntry, error) {
-	path := fmt.Sprintf(ListEndpoint, c.AccountID, key)
+	path := fmt.Sprintf(ListEntriesEndpoint, c.AccountID, key)
 	req, err := http.NewRequestWithContext(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -83,12 +83,12 @@ func (c *HTTPClient) GetEntriesList(ctx context.Context, key string) ([]common.F
 		return nil, fmt.Errorf("failed to get list of entries with status %d", resp.StatusCode)
 	}
 	var entries []common.FileEntry
-    err = json.NewDecoder(resp.Body).Decode(&entries)
-    if err != nil {
-        return nil, err
-    }
+	err = json.NewDecoder(resp.Body).Decode(&entries)
+	if err != nil {
+		return nil, err
+	}
 
-    return entries, nil
+	return entries, nil
 
 }
 
