@@ -65,7 +65,7 @@ func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, erro
 // getListURL will get the list of all entries
 func (c *HTTPClient) GetEntriesList(ctx context.Context, key string) ([]common.FileEntry, error) {
 	path := fmt.Sprintf(ListEntriesEndpoint, c.AccountID, key)
-	req, err := http.NewRequestWithContext(ctx, "GET", path, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.Endpoint+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,6 @@ func (c *HTTPClient) GetEntriesList(ctx context.Context, key string) ([]common.F
 	}
 
 	return entries, nil
-
 }
 
 func (c *HTTPClient) getLink(ctx context.Context, path string) (string, error) {
