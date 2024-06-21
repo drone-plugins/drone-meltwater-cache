@@ -24,5 +24,5 @@ type Client interface {
 
 	GetExistsURL(ctx context.Context, key string) (string, error)
 
-	GetEntriesList(ctx context.Context, key string) ([]common.FileEntry, error)
+	GetEntriesList(ctx context.Context, prefix string) ([]common.FileEntry, error)
 }

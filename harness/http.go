@@ -17,7 +17,7 @@ const (
 	RestoreEndpoint     = "/cache/intel/download?accountId=%s&cacheKey=%s"
 	StoreEndpoint       = "/cache/intel/upload?accountId=%s&cacheKey=%s"
 	ExistsEndpoint      = "/cache/intel/exists?accountId=%s&cacheKey=%s"
-	ListEntriesEndpoint = "/cache/intel/listEntries?accountId=%s&cacheKey=%s"
+	ListEntriesEndpoint = "/cache/intel/list_entries?accountId=%s&cacheKeyPrefix=%s"
 )
 
 // NewHTTPClient returns a new HTTPClient.
@@ -63,8 +63,8 @@ func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, erro
 }
 
 // getListURL will get the list of all entries
-func (c *HTTPClient) GetEntriesList(ctx context.Context, key string) ([]common.FileEntry, error) {
-	path := fmt.Sprintf(ListEntriesEndpoint, c.AccountID, key)
+func (c *HTTPClient) GetEntriesList(ctx context.Context, prefix string) ([]common.FileEntry, error) {
+	path := fmt.Sprintf(ListEntriesEndpoint, c.AccountID, prefix)
 	req, err := http.NewRequestWithContext(ctx, "GET", c.Endpoint+path, nil)
 	if err != nil {
 		return nil, err

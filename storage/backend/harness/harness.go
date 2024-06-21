@@ -88,8 +88,8 @@ func (b *Backend) Exists(ctx context.Context, key string) (bool, error) {
 	return res.Header.Get("ETag") != "", nil
 }
 
-func (b *Backend) List(ctx context.Context, key string) ([]common.FileEntry, error) {
-	entries, err := b.client.GetEntriesList(ctx, key)
+func (b *Backend) List(ctx context.Context, prefix string) ([]common.FileEntry, error) {
+	entries, err := b.client.GetEntriesList(ctx, prefix)
 	return entries, err
 }
 
