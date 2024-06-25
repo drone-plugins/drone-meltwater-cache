@@ -210,8 +210,8 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 			return nil, fmt.Errorf("failed to iterate objects present at path %s/%s with err: %v",
 				b.bucket, p, err)
 		}
-		parts := strings.SplitN(attrs.Name, "/", 2)
-		if parts[0] != p{
+		// Check if the object matches the given prefix exactly
+		if attrs.Name != p && !strings.HasPrefix(attrs.Name, p+"/") {
 			continue
 		}
 
