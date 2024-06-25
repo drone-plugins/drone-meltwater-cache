@@ -210,16 +210,14 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 			return nil, fmt.Errorf("failed to iterate objects present at path %s/%s with err: %v",
 				b.bucket, p, err)
 		}
-		// Check if the object matches the given prefix exactly
-		if attrs.Name != p && !strings.HasPrefix(attrs.Name, p+"/") {
-			continue
+		// Check if the object matches the given prefix exactly or is within the prefix "directory"
+		if attrs.Name == p || strings.HasPrefix(attrs.Name, p+"/") {
+			entries = append(entries, common.FileEntry{
+				Path:         attrs.Name,
+				Size:         attrs.Size,
+				LastModified: attrs.Updated,
+			})
 		}
-
-		entries = append(entries, common.FileEntry{
-			Path:         attrs.Name,
-			Size:         attrs.Size,
-			LastModified: attrs.Updated,
-		})
 	}
 
 	return entries, nil
