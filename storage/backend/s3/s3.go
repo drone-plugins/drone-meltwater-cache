@@ -194,7 +194,8 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 }
 
 func assumeRole(roleArn, roleSessionName string, externalID string) *credentials.Credentials {
-	client := sts.New(session.New()) // nolint:staticcheck
+	sess, _ := session.NewSession()
+	client := sts.New(sess) // nolint:staticcheck
 	duration := time.Hour * 1
 	stsProvider := &stscreds.AssumeRoleProvider{
 		Client:          client,
