@@ -60,6 +60,9 @@ func TestRoundTrip(t *testing.T) {
 	test.Ok(t, err)
 	test.Equals(t, 0, len(entries))
 
+	entries1, err := backend.List(context.TODO(), "test.txt")
+	test.Ok(t, err)
+	test.Equals(t, 0, len(entries1))
 
 }
 
