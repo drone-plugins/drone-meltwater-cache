@@ -1,5 +1,3 @@
-// +build integration
-
 package gcs
 
 import (
@@ -58,9 +56,11 @@ func TestRoundTrip(t *testing.T) {
 
 	test.Equals(t, true, exists)
 
-	entries, err := backend.List(context.TODO(), "")
+	entries, err := backend.List(context.TODO(), "test.txt")
 	test.Ok(t, err)
 	test.Equals(t, 1, len(entries))
+
+
 }
 
 // Helpers
