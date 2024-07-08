@@ -211,7 +211,7 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 				b.bucket, p, err)
 		}
 		// Check if the object matches the given prefix exactly or is within the prefix "directory"
-		if attrs.Name == p || strings.HasPrefix(attrs.Name, p+"/") {
+		if strings.HasPrefix(attrs.Name, p+"/") {
 			entries = append(entries, common.FileEntry{
 				Path:         attrs.Name,
 				Size:         attrs.Size,
