@@ -62,6 +62,7 @@ steps:
       - name: testdata
         path: /drone/src/tmp/testdata/cache
 
+<<<<<<< HEAD
   # - name: generate
   #   image: golang:1.22.4-alpine3.19
   #   commands:
@@ -71,6 +72,8 @@ steps:
   #     - env -i make PATH=$(which go):$PATH HOME=$HOME PWD=$PWD GO=$(which go) GOPATH=$(go env GOPATH) generate
   #     - git diff --exit-code
 
+=======
+>>>>>>> 1594021c5aec54240e5dd96a1eaa4bf43e6c08cb
   - name: rebuild-cache
     image: meltwater/drone-cache:v1.1.0-rc1
     pull: always
