@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"runtime"
 	"strings"
 
 	"github.com/meltwater/drone-cache/internal"
@@ -211,25 +210,15 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 			return nil, fmt.Errorf("failed to iterate objects present at path %s/%s with err: %v",
 				b.bucket, p, err)
 		}
-		// Check if the object matches the given prefix exactly or is within the prefix "directory"
-		if strings.HasPrefix(attrs.Name, p+GetSeparator()) {
-			entries = append(entries, common.FileEntry{
-				Path:         attrs.Name,
-				Size:         attrs.Size,
-				LastModified: attrs.Updated,
-			})
-		}
+
+		entries = append(entries, common.FileEntry{
+			Path:         attrs.Name,
+			Size:         attrs.Size,
+			LastModified: attrs.Updated,
+		})
 	}
 
 	return entries, nil
-}
-
-func GetSeparator() string {
-	if runtime.GOOS == "windows" {
-		return `\`
-	}
-
-	return "/"
 }
 
 // Helpers
