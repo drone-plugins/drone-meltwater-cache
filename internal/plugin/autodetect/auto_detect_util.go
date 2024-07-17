@@ -46,6 +46,11 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			tool:         "golang",
 			preparer:     newGoPreparer(),
 		},
+		{
+			globToDetect: "*.csproj",
+			tool:         "dotnet",
+			preparer:     newDotnetPreparer(),
+		},
 	}
 
 	var directoriesToCache []string
