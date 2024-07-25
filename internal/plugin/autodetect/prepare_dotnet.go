@@ -41,13 +41,18 @@ func (*dotnetPreparer) PrepareRepo(dir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		defer f.Close()
+
 		configuration := Configuration{}
 		marshalledConfig, err := xml.MarshalIndent(configuration, "", "  ")
 		if err != nil {
 			return "", err
 		}
-		os.WriteFile(configPath, marshalledConfig, 0644)
-		f.Close()
+
+		err = os.WriteFile(configPath, marshalledConfig, 0644)
+		if err != nil {
+			return "", fmt.Errorf("failed to write nuget.config: %w", err)
+		}
 	}
 
 	//file exists
