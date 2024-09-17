@@ -16,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	// "github.com/go-kit/kit/log/level"
 	"github.com/sirupsen/logrus"
 
 	"github.com/meltwater/drone-cache/internal"
@@ -35,9 +35,13 @@ type Backend struct {
 
 // New creates an S3 backend.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
-	logrus.WithFields(logrus.Fields{
-        "UserRoleExternalID":      c.UserRoleExternalID,
-    }).Info("Logging New ExternalID function")
+	logger_new := logrus.WithFields(logrus.Fields{
+		"UserRoleExternalID": c.UserRoleExternalID,
+		"AssumeRoleARN":      c.AssumeRoleARN,
+		"UserRoleArn":        c.UserRoleArn,
+	})
+	logger_new.Info("Initializing new Backend")
+
 	conf := &aws.Config{
 		Region:           aws.String(c.Region),
 		Endpoint:         &c.Endpoint,
@@ -45,41 +49,44 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		S3ForcePathStyle: aws.Bool(c.PathStyle),
 	}
 
-	if c.Key != "" && c.Secret != "" { // nolint:gocritic
+	if c.Key != "" && c.Secret != "" {
+		logger_new.Info("Using static credentials")
 		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
 	} else if c.AssumeRoleARN != "" {
 		if c.OIDCTokenID != "" {
-			// Assume role with OIDC
+			logger_new.Info("Attempting to assume role with OIDC")
 			creds, err := assumeRoleWithWebIdentity(c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
 			if err != nil {
-				level.Error(l).Log("msg", "failed to assume role with OIDC", "error", err)
+				logger_new.WithError(err).Error("Failed to assume role with OIDC")
 				return nil, err
 			}
 			conf.Credentials = creds
+			logger_new.Info("Successfully assumed role with OIDC")
 		} else {
+			logger_new.Info("Attempting to assume role")
 			conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID)
+			logger_new.Info("Successfully assumed role")
 		}
 	} else {
-		level.Warn(l).Log("msg", "aws key and/or Secret not provided (falling back to anonymous credentials)")
+		logger_new.Warn("AWS key and/or Secret not provided (falling back to anonymous credentials)")
 	}
 
 	sess, err := session.NewSession(conf)
 	if err != nil {
-		level.Warn(l).Log("msg", "could not instantiate session", "error", err)
+		logger_new.WithError(err).Error("Could not instantiate session")
 		return nil, err
 	}
 
 	var client *s3.S3
-	// If user role ARN is set then assume role here
 	if len(c.UserRoleArn) > 0 {
+		logger_new.Info("Setting up credentials with UserRoleArn")
 		creds := stscreds.NewCredentials(sess, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
 			if c.UserRoleExternalID != "" {
-				logrus.Info("Setting up creds with UserRoleExternalID")
+				logger_new.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up creds with UserRoleExternalID")
 				provider.ExternalID = aws.String(c.UserRoleExternalID)
 			}
 		})
 
-		// Create a new session with the new credentials
 		confWithUserRole := &aws.Config{
 			Region:      aws.String(c.Region),
 			Credentials: creds,
@@ -87,13 +94,14 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
 		sessWithUserRole, err := session.NewSession(confWithUserRole)
 		if err != nil {
-			logrus.Fatalf("failed to create AWS session with user role: %v", err)
+			logger_new.WithError(err).Fatal("Failed to create AWS session with user role")
 		}
 
 		client = s3.New(sessWithUserRole)
+		logger_new.Info("Created S3 client with assumed user role")
 	} else {
 		client = s3.New(sess)
-		logrus.Info("Could not use UserRoleExternalID")
+		logger_new.Info("Created S3 client without user role")
 	}
 
 	backend := &Backend{
@@ -107,10 +115,11 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		backend.acl = c.ACL
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"backend": backend,
-		"client": client,
-	}).Info("Listing backend and client")
+	logger_new.WithFields(logrus.Fields{
+		"Bucket":     backend.bucket,
+		"Encryption": backend.encryption,
+		"ACL":        backend.acl,
+	}).Info("Backend initialized")
 
 	return backend, nil
 }
