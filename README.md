@@ -299,4 +299,3 @@ One bigger area of future investment is to add a couple of [new storage backends
 ## License and Copyright
 
 This project is licensed under the [Apache License 2.0](LICENSE).
-.
