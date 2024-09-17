@@ -63,9 +63,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 			conf.Credentials = creds
 			logger_new.Info("Successfully assumed role with OIDC")
 		} else {
-			logger_new.Info("Attempting to assume role")
 			conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID)
-			logger_new.Info("Successfully assumed role")
 		}
 	} else {
 		logger_new.Warn("AWS key and/or Secret not provided (falling back to anonymous credentials)")
@@ -76,8 +74,10 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		logger_new.WithError(err).Error("Could not instantiate session")
 		return nil, err
 	}
-
-	var client *s3.S3
+	// var client *s3.S3
+	client := s3.New(sess, conf)
+	logger_new.Info("Client variable set here.")
+	
 	if len(c.UserRoleArn) > 0 {
 		logger_new.Info("Setting up credentials with UserRoleArn")
 		creds := stscreds.NewCredentials(sess, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
