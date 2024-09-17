@@ -21,6 +21,7 @@ type Config struct {
 	UserRoleArn           string
 	OIDCTokenID           string
 	ExternalID            string
+	UserRoleExternalID    string
 
 	// us-east-1
 	// us-west-1
