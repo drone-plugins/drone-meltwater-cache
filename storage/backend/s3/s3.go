@@ -107,6 +107,11 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		backend.acl = c.ACL
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"backend": backend,
+		"client": client,
+	}).Info("Listing backend and client")
+
 	return backend, nil
 }
 
