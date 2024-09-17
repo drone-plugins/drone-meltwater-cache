@@ -424,6 +424,11 @@ func main() {
 			Usage:  "external ID to use when assuming role",
 			EnvVars: []string{"PLUGIN_EXTERNAL_ID"},
 		},
+		&cli.StringFlag{
+			Name:   "user-role-external-id",
+			Usage:  "external ID to use when assuming secondary role",
+			EnvVars: []string{"PLUGIN_USER_ROLE_EXTERNAL_ID"},
+		},
 
 		// GCS specific Configs flags
 
@@ -637,6 +642,7 @@ func run(c *cli.Context) error {
 			UserRoleArn:           c.String("user-role-arn"),
 			OIDCTokenID:           c.String("oidc-token-id"),
 			ExternalID:            c.String("external-id"),
+			UserRoleExternalID:    c.String("user-role-external-id"),
 		},
 		Azure: azure.Config{
 			AccountName:    c.String("azure.account-name"),
