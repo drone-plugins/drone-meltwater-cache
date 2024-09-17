@@ -35,6 +35,9 @@ type Backend struct {
 
 // New creates an S3 backend.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
+	logrus.WithFields(logrus.Fields{
+        "UserRoleExternalID":      c.UserRoleExternalID,
+    }).Info("Logging New ExternalID function")
 	conf := &aws.Config{
 		Region:           aws.String(c.Region),
 		Endpoint:         &c.Endpoint,
@@ -71,6 +74,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	if len(c.UserRoleArn) > 0 {
 		creds := stscreds.NewCredentials(sess, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
 			if c.UserRoleExternalID != "" {
+				logrus.Info("Setting up creds with UserRoleExternalID")
 				provider.ExternalID = aws.String(c.UserRoleExternalID)
 			}
 		})
@@ -89,6 +93,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		client = s3.New(sessWithUserRole)
 	} else {
 		client = s3.New(sess)
+		logrus.Info("Could not use UserRoleExternalID")
 	}
 
 	backend := &Backend{
