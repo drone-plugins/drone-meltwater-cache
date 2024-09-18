@@ -16,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/go-kit/kit/log"
-	"github.com/sirupsen/logrus"
 
 	"github.com/meltwater/drone-cache/test"
 )
