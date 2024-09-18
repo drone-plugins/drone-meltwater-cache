@@ -49,7 +49,7 @@ func TestRoundTrip(t *testing.T) {
 		Bucket:    "s3-round-trip",
 		Endpoint:  endpoint,
 		Key:       accessKey,
-		PathStyle: false, // Should be true for minio and false for AWS.
+		PathStyle: true, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,
 		Secret:    secretAccessKey,
 	})
