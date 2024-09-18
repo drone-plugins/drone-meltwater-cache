@@ -121,7 +121,24 @@ func roundTrip(t *testing.T, backend *Backend) {
 // Helpers
 
 func setup(t *testing.T, config Config) (*Backend, func()) {
-	client := newClient(config)
+
+	awsConfig := &aws.Config{
+        Region:                        aws.String(defaultRegion),
+        Endpoint:                      aws.String(endpoint),
+        DisableSSL:                    aws.Bool(strings.HasPrefix(endpoint, "http://")),
+        S3ForcePathStyle:              aws.Bool(true),
+        Credentials:                   credentials.NewStaticCredentials(config.Key, config.Secret, ""),
+        CredentialsChainVerboseErrors: aws.Bool(true),
+    }
+
+    sess, err := session.NewSession(awsConfig)
+    if err != nil {
+        t.Fatalf("Failed to create session: %v", err)
+    }
+
+    client := s3.New(sess)
+
+	// client := newClient(config)
 
 	_, err := client.CreateBucketWithContext(context.Background(), &s3.CreateBucketInput{
 		Bucket: aws.String(config.Bucket),
