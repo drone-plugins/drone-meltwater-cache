@@ -28,7 +28,6 @@ const (
 	defaultACL                 = "private"
 	defaultUserAccessKey       = "foo"
 	defaultUserSecretAccessKey = "barbarbar"
-	defaultUserRoleARN         = ""
 )
 
 var (
@@ -70,7 +69,6 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
-		UserRoleArn:           defaultUserRoleARN,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)

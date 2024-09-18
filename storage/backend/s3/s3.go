@@ -76,9 +76,6 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
 	var client *s3.S3
 	// client = s3.New(sess, conf)
-	logrus.WithFields(logrus.Fields{
-		"Client ": client,
-	}).Info("New Client set here.")
 	
 	if len(c.UserRoleArn) > 0 {
 		logrus.Info("Setting up credentials with UserRoleArn")
@@ -105,6 +102,10 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		client = s3.New(sess)
 		logrus.Info("Created S3 client without user role")
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"Client ": client,
+	}).Info("New Client set here.")
 
 	backend := &Backend{
 		logger:     l,
