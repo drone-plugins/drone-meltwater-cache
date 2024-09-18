@@ -28,6 +28,7 @@ const (
 	defaultACL                 = "private"
 	defaultUserAccessKey       = "foo"
 	defaultUserSecretAccessKey = "barbarbar"
+	defaultUserRoleARN         = ""
 )
 
 var (
@@ -37,6 +38,7 @@ var (
 	acl                 = getEnv("TEST_S3_ACL", defaultACL)
 	userAccessKey       = getEnv("TEST_USER_S3_ACCESS_KEY", defaultUserAccessKey)
 	userSecretAccessKey = getEnv("TEST_USER_S3_SECRET_KEY", defaultUserSecretAccessKey)
+	userroleARN         = getEnv("TEST_USER_ROLE_ARN",defaultUserRoleARN)
 )
 
 func TestRoundTrip(t *testing.T) {
@@ -50,6 +52,7 @@ func TestRoundTrip(t *testing.T) {
 		PathStyle: true, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,
 		Secret:    secretAccessKey,
+		UserRoleArn : userroleARN,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
@@ -69,7 +72,7 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
-		UserRoleArn: 0,
+		UserRoleArn: 		    userroleARN,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
