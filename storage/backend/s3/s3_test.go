@@ -51,7 +51,6 @@ func TestRoundTrip(t *testing.T) {
 		PathStyle: true, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,
 		Secret:    secretAccessKey,
-		UserRoleArn : defaultUserRoleARN,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)

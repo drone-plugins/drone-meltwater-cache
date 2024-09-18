@@ -74,8 +74,8 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		logrus.Warn("AWS key and/or Secret not provided (falling back to anonymous credentials)")
 	}
 
-	// var client *s3.S3
-	client := s3.New(sess, conf)
+	var client *s3.S3
+	// client = s3.New(sess, conf)
 	logrus.WithFields(logrus.Fields{
 		"Client ": client,
 	}).Info("New Client set here.")
