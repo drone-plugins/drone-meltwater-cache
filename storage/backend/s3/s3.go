@@ -35,11 +35,11 @@ type Backend struct {
 
 // New creates an S3 backend.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
-	// logrus.WithFields(logrus.Fields{
-	// 	"UserRoleExternalID": c.UserRoleExternalID,
-	// 	"AssumeRoleARN":      c.AssumeRoleARN,
-	// 	"UserRoleArn":        c.UserRoleArn,
-	// }).Info("Initializing new Backend")
+	logrus.WithFields(logrus.Fields{
+		"UserRoleExternalID": c.UserRoleExternalID,
+		"AssumeRoleARN":      c.AssumeRoleARN,
+		"UserRoleArn":        c.UserRoleArn,
+	}).Info("Initializing new Backend")
 
 	conf := &aws.Config{
 		Region:           aws.String(c.Region),
@@ -50,23 +50,23 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
 	sess, err := session.NewSession(conf)
 	if err != nil {
-		// logrus.WithError(err).Error("Could not instantiate session")
+		logrus.WithError(err).Error("Could not instantiate session")
 		return nil, err
 	}
 
 	if c.Key != "" && c.Secret != "" {
-		// logrus.Info("Using static credentials")
+		logrus.Info("Using static credentials")
 		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
 	} else if c.AssumeRoleARN != "" {
 		if c.OIDCTokenID != "" {
-			// logrus.Info("Attempting to assume role with OIDC")
+			logrus.Info("Attempting to assume role with OIDC")
 			creds, err := assumeRoleWithWebIdentity(c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
 			if err != nil {
 				logrus.WithError(err).Error("Failed to assume role with OIDC")
 				return nil, err
 			}
 			conf.Credentials = creds
-			// logrus.Info("Successfully assumed role with OIDC")
+			logrus.Info("Successfully assumed role with OIDC")
 		} else {
 			conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID)
 		}
@@ -78,34 +78,39 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	// client = s3.New(sess, conf)
 	
 	if len(c.UserRoleArn) > 0 {
-		// logrus.Info("Setting up credentials with UserRoleArn")
+		logrus.Info("Setting up credentials with UserRoleArn")
 		creds := stscreds.NewCredentials(sess, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
 			if c.UserRoleExternalID != "" {
-				// logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up creds with UserRoleExternalID")
+				logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up creds with UserRoleExternalID")
 				provider.ExternalID = aws.String(c.UserRoleExternalID)
 			}
 		})
 
 		confWithUserRole := &aws.Config{
-			Region:      aws.String(c.Region),
-			Credentials: creds,
+			Region:                        aws.String(c.Region),
+			Credentials:                   creds,
+			CredentialsChainVerboseErrors:  aws.Bool(true),  // Enable verbose errors for easier debugging
 		}
-
-		sessWithUserRole, err := session.NewSession(confWithUserRole)
+		
+		// Use the original session's configuration for fallback
+		sessWithUserRole := session.Must(session.NewSessionWithOptions(session.Options{
+			Config:            *confWithUserRole,
+			SharedConfigState: session.SharedConfigEnable, // Use shared credentials and config file
+		}))
 		if err != nil {
 			logrus.WithError(err).Fatal("Failed to create AWS session with user role")
 		}
 
 		client = s3.New(sessWithUserRole)
-		// logrus.Info("Created S3 client with assumed user role")
+		logrus.Info("Created S3 client with assumed user role")
 	} else {
 		client = s3.New(sess)
-		// logrus.Info("Created S3 client without user role")
+		logrus.Info("Created S3 client without user role")
 	}
 
-	// logrus.WithFields(logrus.Fields{
-	// 	"Client ": client,
-	// }).Info("New Client set here.")
+	logrus.WithFields(logrus.Fields{
+		"Client ": client,
+	}).Info("New Client set here.")
 
 	backend := &Backend{
 		logger:     l,
@@ -118,11 +123,11 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		backend.acl = c.ACL
 	}
 
-	// logrus.WithFields(logrus.Fields{
-	// 	"Bucket":     backend.bucket,
-	// 	"Encryption": backend.encryption,
-	// 	"ACL":        backend.acl,
-	// }).Info("Backend initialized")
+	logrus.WithFields(logrus.Fields{
+		"Bucket":     backend.bucket,
+		"Encryption": backend.encryption,
+		"ACL":        backend.acl,
+	}).Info("Backend initialized")
 
 	return backend, nil
 }
@@ -229,11 +234,11 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 }
 
 func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Credentials {
-    // logrus.WithFields(logrus.Fields{
-    //     "roleArn":         roleArn,
-    //     "roleSessionName": roleSessionName,
-    //     "externalID":      externalID,
-    // }).Info("Attempting to assume role")
+    logrus.WithFields(logrus.Fields{
+        "roleArn":         roleArn,
+        "roleSessionName": roleSessionName,
+        "externalID":      externalID,
+    }).Info("Attempting to assume role")
 
     sess, _ := session.NewSession()
     client := sts.New(sess)
@@ -247,18 +252,18 @@ func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Creden
 
     if externalID != "" {
         stsProvider.ExternalID = &externalID
-        // logrus.WithField("externalID", externalID).Info("Using external ID for assume role")
+        logrus.WithField("externalID", externalID).Info("Using external ID for assume role")
     }
 
     creds := credentials.NewCredentials(stsProvider)
 
     // Test the credentials
-    // _, err := creds.Get()
-    // if err != nil {
-    //     logrus.WithError(err).Error("Failed to assume role")
-    // } else {
-    //     logrus.Info("Successfully assumed role")
-    // }
+    _, err := creds.Get()
+    if err != nil {
+        logrus.WithError(err).Error("Failed to assume role")
+    } else {
+        logrus.Info("Successfully assumed role")
+    }
 
     return creds
 }
