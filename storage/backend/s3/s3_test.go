@@ -38,7 +38,6 @@ var (
 	acl                 = getEnv("TEST_S3_ACL", defaultACL)
 	userAccessKey       = getEnv("TEST_USER_S3_ACCESS_KEY", defaultUserAccessKey)
 	userSecretAccessKey = getEnv("TEST_USER_S3_SECRET_KEY", defaultUserSecretAccessKey)
-	userroleARN         = getEnv("TEST_USER_ROLE_ARN",defaultUserRoleARN)
 )
 
 func TestRoundTrip(t *testing.T) {
@@ -52,7 +51,7 @@ func TestRoundTrip(t *testing.T) {
 		PathStyle: true, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,
 		Secret:    secretAccessKey,
-		UserRoleArn : userroleARN,
+		UserRoleArn : defaultUserRoleARN,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
@@ -72,7 +71,7 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
-		UserRoleArn: 		    userroleARN,
+		UserRoleArn:           defaultUserRoleARN,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
@@ -136,13 +135,7 @@ func newClient(config Config) *s3.S3 {
 		Credentials:      credentials.NewStaticCredentials(config.Key, config.Secret, ""),
 	}
 
-	sess, err := session.NewSession(conf)
-	if err != nil {
-		return nil, err
-	}
-
-	return s3.New(sess, conf), nil
-	
+	return s3.New(session.Must(session.NewSessionWithOptions(session.Options{})), conf)
 }
 
 func getEnv(key, defaultVal string) string {
