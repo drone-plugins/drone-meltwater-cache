@@ -28,6 +28,7 @@ const (
 	defaultACL                 = "private"
 	defaultUserAccessKey       = "foo"
 	defaultUserSecretAccessKey = "barbarbar"
+	defaultExternalID          = "test-external-id"
 )
 
 var (
@@ -37,6 +38,7 @@ var (
 	acl                 = getEnv("TEST_S3_ACL", defaultACL)
 	userAccessKey       = getEnv("TEST_USER_S3_ACCESS_KEY", defaultUserAccessKey)
 	userSecretAccessKey = getEnv("TEST_USER_S3_SECRET_KEY", defaultUserSecretAccessKey)
+	externalID          = getEnv("TEST_EXTERNAL_ID", defaultExternalID)
 )
 
 func TestRoundTrip(t *testing.T) {
@@ -47,7 +49,7 @@ func TestRoundTrip(t *testing.T) {
 		Bucket:    "s3-round-trip",
 		Endpoint:  endpoint,
 		Key:       accessKey,
-		PathStyle: true, // Should be true for minio and false for AWS.
+		PathStyle: false, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,
 		Secret:    secretAccessKey,
 	})
@@ -69,6 +71,7 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
+		AssumeRoleExternalID:  externalID,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
