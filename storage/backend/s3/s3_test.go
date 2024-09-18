@@ -136,7 +136,7 @@ func newClient(config Config) *s3.S3 {
 		Credentials:      credentials.NewStaticCredentials(config.Key, config.Secret, ""),
 	}
 
-	return s3.New(session.Must(session.NewSessionWithOptions(session.Options{})), conf)
+	return s3.New(session.NewSession(conf),conf)
 }
 
 func getEnv(key, defaultVal string) string {
