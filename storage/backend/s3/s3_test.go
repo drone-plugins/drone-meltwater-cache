@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/go-kit/kit/log"
+	"github.com/sirupsen/logrus"
 
 	"github.com/meltwater/drone-cache/test"
 )
@@ -74,6 +75,24 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 	roundTrip(t, backend)
 }
 
+func TestRoundTripWithUserRole(t *testing.T) {
+	t.Parallel()
+
+	backend, cleanUp := setup(t, Config{
+		ACL:                acl,
+		Bucket:             "s3-round-trip-with-user-role",
+		Endpoint:           endpoint,
+		Key:                accessKey,
+		PathStyle:          true,
+		Region:             defaultRegion,
+		Secret:             secretAccessKey,
+		UserRoleArn:        "arn:aws:iam::account-id:role/UserTestRole",
+		UserRoleExternalID: "ExternalID123",
+	})
+	t.Cleanup(cleanUp)
+	roundTrip(t, backend)
+}
+
 func roundTrip(t *testing.T, backend *Backend) {
 	content := "Hello world4"
 
@@ -109,11 +128,8 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 	})
 	test.Ok(t, err)
 
-	b, err := New(
-		log.NewNopLogger(),
-		config,
-		false,
-	)
+	logger := log.NewNopLogger()
+	b, err := New(logger, config, false)
 	test.Ok(t, err)
 
 	return b, func() {
