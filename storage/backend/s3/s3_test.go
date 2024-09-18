@@ -71,7 +71,8 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
-		AssumeRoleExternalID:  externalID,
+		UserRoleExternalID:    externalID,
+		ExternalID: 		   externalID,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
