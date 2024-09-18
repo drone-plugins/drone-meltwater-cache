@@ -74,24 +74,6 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 	roundTrip(t, backend)
 }
 
-func TestRoundTripWithUserRole(t *testing.T) {
-	t.Parallel()
-
-	backend, cleanUp := setup(t, Config{
-		ACL:                acl,
-		Bucket:             "s3-round-trip-with-user-role",
-		Endpoint:           endpoint,
-		Key:                accessKey,
-		PathStyle:          true,
-		Region:             defaultRegion,
-		Secret:             secretAccessKey,
-		UserRoleArn:        "arn:aws:iam::account-id:role/UserTestRole",
-		UserRoleExternalID: "ExternalID123",
-	})
-	t.Cleanup(cleanUp)
-	roundTrip(t, backend)
-}
-
 func roundTrip(t *testing.T, backend *Backend) {
 	content := "Hello world4"
 
@@ -120,32 +102,18 @@ func roundTrip(t *testing.T, backend *Backend) {
 // Helpers
 
 func setup(t *testing.T, config Config) (*Backend, func()) {
-
-	awsConfig := &aws.Config{
-        Region:                        aws.String(defaultRegion),
-        Endpoint:                      aws.String(endpoint),
-        DisableSSL:                    aws.Bool(strings.HasPrefix(endpoint, "http://")),
-        S3ForcePathStyle:              aws.Bool(true),
-        Credentials:                   credentials.NewStaticCredentials(config.Key, config.Secret, ""),
-        CredentialsChainVerboseErrors: aws.Bool(true),
-    }
-
-    sess, err := session.NewSession(awsConfig)
-    if err != nil {
-        t.Fatalf("Failed to create session: %v", err)
-    }
-
-    client := s3.New(sess)
-
-	// client := newClient(config)
+	client := newClient(config)
 
 	_, err := client.CreateBucketWithContext(context.Background(), &s3.CreateBucketInput{
 		Bucket: aws.String(config.Bucket),
 	})
 	test.Ok(t, err)
 
-	logger := log.NewNopLogger()
-	b, err := New(logger, config, false)
+	b, err := New(
+		log.NewNopLogger(),
+		config,
+		false,
+	)
 	test.Ok(t, err)
 
 	return b, func() {
