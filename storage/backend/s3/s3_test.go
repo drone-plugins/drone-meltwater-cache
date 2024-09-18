@@ -28,7 +28,6 @@ const (
 	defaultACL                 = "private"
 	defaultUserAccessKey       = "foo"
 	defaultUserSecretAccessKey = "barbarbar"
-	defaultExternalID          = "test-external-id"
 )
 
 var (
@@ -38,7 +37,6 @@ var (
 	acl                 = getEnv("TEST_S3_ACL", defaultACL)
 	userAccessKey       = getEnv("TEST_USER_S3_ACCESS_KEY", defaultUserAccessKey)
 	userSecretAccessKey = getEnv("TEST_USER_S3_SECRET_KEY", defaultUserSecretAccessKey)
-	externalID          = getEnv("TEST_EXTERNAL_ID", defaultExternalID)
 )
 
 func TestRoundTrip(t *testing.T) {
@@ -71,8 +69,7 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
-		UserRoleExternalID:    externalID,
-		ExternalID: 		   externalID,
+		UserRoleArn: 0,
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
