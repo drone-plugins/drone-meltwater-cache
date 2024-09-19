@@ -93,10 +93,14 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		}
 		
 		// Use the original session's configuration for fallback
-		sessWithUserRole, err := session.NewSession(confWithUserRole)
-		if err != nil {
-			logrus.WithError(err).Fatal("Failed to create AWS session with user role")
-		}
+		sessWithUserRole := session.Must(session.NewSessionWithOptions(session.Options{
+			Config:            *confWithUserRole,
+			SharedConfigState: session.SharedConfigEnable, // Use shared credentials and config file
+		}))
+		
+		// if err != nil {
+		// 	logrus.WithError(err).Fatal("Failed to create AWS session with user role")
+		// }
 
 		client = s3.New(sessWithUserRole)
 		logrus.Info("Created S3 client with assumed user role")
