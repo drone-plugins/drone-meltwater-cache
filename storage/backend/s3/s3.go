@@ -48,16 +48,19 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		S3ForcePathStyle: aws.Bool(c.PathStyle),
 	}
 
+	// Create the session once
 	sess, err := session.NewSession(conf)
 	if err != nil {
 		logrus.WithError(err).Error("Could not instantiate session")
 		return nil, err
 	}
 
+	// If Key and Secret are provided, use static credentials
 	if c.Key != "" && c.Secret != "" {
 		logrus.Info("Using static credentials")
 		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
 	} else if c.AssumeRoleARN != "" {
+		// Use OIDC Token or assume role directly
 		if c.OIDCTokenID != "" {
 			logrus.Info("Attempting to assume role with OIDC")
 			creds, err := assumeRoleWithWebIdentity(c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
@@ -75,10 +78,11 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	}
 
 	var client *s3.S3
-	// client = s3.New(sess, conf)
-	
+
+	// Reuse the existing session for assuming role if UserRoleArn is set
 	if len(c.UserRoleArn) > 0 {
 		logrus.Info("Setting up credentials with UserRoleArn")
+		
 		creds := stscreds.NewCredentials(sess, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
 			if c.UserRoleExternalID != "" {
 				logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up creds with UserRoleExternalID")
@@ -86,25 +90,12 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 			}
 		})
 
-		confWithUserRole := &aws.Config{
-			Region:                        aws.String(c.Region),
-			Credentials:                   creds,
-			CredentialsChainVerboseErrors:  aws.Bool(true),  // Enable verbose errors for easier debugging
-		}
-		
-		// Use the original session's configuration for fallback
-		sessWithUserRole := session.Must(session.NewSessionWithOptions(session.Options{
-			Config:            *confWithUserRole,
-			SharedConfigState: session.SharedConfigEnable, // Use shared credentials and config file
-		}))
-		
-		// if err != nil {
-		// 	logrus.WithError(err).Fatal("Failed to create AWS session with user role")
-		// }
-
-		client = s3.New(sessWithUserRole)
+		// Update the config with the assumed role credentials, reuse the session
+		conf.Credentials = creds
+		client = s3.New(sess, conf)
 		logrus.Info("Created S3 client with assumed user role")
 	} else {
+		// If no UserRoleArn, just use the session as it is
 		client = s3.New(sess)
 		logrus.Info("Created S3 client without user role")
 	}
@@ -132,6 +123,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
 	return backend, nil
 }
+
 
 // Get writes downloaded content to the given writer.
 func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
