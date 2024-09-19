@@ -56,23 +56,31 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestRoundTripWithAssumeRole(t *testing.T) {
-	t.Parallel()
+    t.Parallel()
 
-	backend, cleanUp := setup(t, Config{
-		ACL:                   acl,
-		Bucket:                "s3-round-trip-with-role",
-		Endpoint:              endpoint,
-		StsEndpoint:           endpoint,
-		Key:                   userAccessKey,
-		PathStyle:             true, // Should be true for minio and false for AWS.
-		Region:                defaultRegion,
-		Secret:                userSecretAccessKey,
-		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
-		AssumeRoleSessionName: "drone-cache",
-	})
-	t.Cleanup(cleanUp)
-	roundTrip(t, backend)
+    // Log the credentials being used for the test
+    log.WithFields(log.Fields{
+        "AccessKey": userAccessKey,
+        "SecretKey": userSecretAccessKey,
+        "RoleARN":   "arn:aws:iam::account-id:role/TestRole",
+    }).Info("Setting up AssumeRole test")
+
+    backend, cleanUp := setup(t, Config{
+        ACL:                   acl,
+        Bucket:                "s3-round-trip-with-role",
+        Endpoint:              endpoint,
+        StsEndpoint:           endpoint,
+        Key:                   userAccessKey,       // Use test user access key
+        PathStyle:             true,                // Should be true for minio and false for AWS.
+        Region:                defaultRegion,
+        Secret:                userSecretAccessKey, // Use test user secret key
+        AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
+        AssumeRoleSessionName: "drone-cache",
+    })
+    t.Cleanup(cleanUp)
+    roundTrip(t, backend)
 }
+
 
 func roundTrip(t *testing.T, backend *Backend) {
 	content := "Hello world4"
@@ -124,16 +132,34 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 }
 
 func newClient(config Config) *s3.S3 {
-	conf := &aws.Config{
-		Region:           aws.String(defaultRegion),
-		Endpoint:         aws.String(endpoint),
-		DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
-		S3ForcePathStyle: aws.Bool(true),
-		Credentials:      credentials.NewStaticCredentials(config.Key, config.Secret, ""),
-	}
+    // Set up credentials using static or environment-based credentials.
+    creds := credentials.NewStaticCredentials(config.Key, config.Secret, "")
+    if config.Key == "" || config.Secret == "" {
+        // Fallback to environment-based credentials if key/secret are not provided
+        creds = credentials.NewEnvCredentials()
+        log.WithField("Provider", creds.ProviderName()).Info("Using environment-based credentials for S3 client")
+    }
 
-	return s3.New(session.Must(session.NewSessionWithOptions(session.Options{})), conf)
+    conf := &aws.Config{
+        Region:           aws.String(defaultRegion),
+        Endpoint:         aws.String(endpoint),
+        DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
+        S3ForcePathStyle: aws.Bool(true),
+        Credentials:      creds,
+    }
+
+    // Log the region and credentials being used
+    log.WithFields(log.Fields{
+        "Region":    defaultRegion,
+        "Endpoint":  endpoint,
+        "AccessKey": config.Key,
+    }).Info("Creating new S3 client")
+
+    return s3.New(session.Must(session.NewSessionWithOptions(session.Options{
+        SharedConfigState: session.SharedConfigEnable,  // Use shared AWS credentials file as a fallback
+    })), conf)
 }
+
 
 func getEnv(key, defaultVal string) string {
 	value, ok := os.LookupEnv(key)
