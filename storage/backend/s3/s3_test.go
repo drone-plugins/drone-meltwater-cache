@@ -57,31 +57,30 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestRoundTripWithAssumeRole(t *testing.T) {
-    t.Parallel()
+	t.Parallel()
 
-    // Log the credentials being used for the test
-    logrus.WithFields(logrus.Fields{
-        "AccessKey": userAccessKey,
-        "SecretKey": userSecretAccessKey,
-        "RoleARN":   "arn:aws:iam::account-id:role/TestRole",
-    }).Info("Setting up AssumeRole test")
+	// Log the credentials being used for the test
+	logrus.WithFields(logrus.Fields{
+		"AccessKey": userAccessKey,
+		"SecretKey": userSecretAccessKey,
+		"RoleARN":   "arn:aws:iam::account-id:role/TestRole",
+	}).Info("Setting up AssumeRole test")
 
-    backend, cleanUp := setup(t, Config{
-        ACL:                   acl,
-        Bucket:                "s3-round-trip-with-role",
-        Endpoint:              endpoint,
-        StsEndpoint:           endpoint,
-        Key:                   userAccessKey,
-        PathStyle:             true,
-        Region:                defaultRegion,
-        Secret:                userSecretAccessKey,
-        AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
-        AssumeRoleSessionName: "drone-cache",
-    })
-    t.Cleanup(cleanUp)
-    roundTrip(t, backend)
+	backend, cleanUp := setup(t, Config{
+		ACL:                   acl,
+		Bucket:                "s3-round-trip-with-role",
+		Endpoint:              endpoint,
+		StsEndpoint:           endpoint,
+		Key:                   userAccessKey,
+		PathStyle:             true,
+		Region:                defaultRegion,
+		Secret:                userSecretAccessKey,
+		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
+		AssumeRoleSessionName: "drone-cache",
+	})
+	t.Cleanup(cleanUp)
+	roundTrip(t, backend)
 }
-
 
 func roundTrip(t *testing.T, backend *Backend) {
 	content := "Hello world4"
@@ -133,33 +132,33 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 }
 
 func newClient(config Config) *s3.S3 {
-    var creds *credentials.Credentials
-    if config.Key != "" && config.Secret != "" {
-        creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
-    } else {
-        creds = credentials.NewEnvCredentials()
-        logrus.Info("Using environment-based credentials for S3 client")
-    }
+	var creds *credentials.Credentials
+	if config.Key != "" && config.Secret != "" {
+		creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
+	} else {
+		creds = credentials.NewEnvCredentials()
+		logrus.Info("Using environment-based credentials for S3 client")
+	}
 
-    conf := &aws.Config{
-        Region:           aws.String(defaultRegion),
-        Endpoint:         aws.String(endpoint),
-        DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
-        S3ForcePathStyle: aws.Bool(true),
-        Credentials:      creds,
-    }
+	conf := &aws.Config{
+		Region:           aws.String(defaultRegion),
+		Endpoint:         aws.String(endpoint),
+		DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
+		S3ForcePathStyle: aws.Bool(true),
+		Credentials:      creds,
+		LogLevel:         aws.LogLevel(aws.LogDebug),
+	}
 
-    logrus.WithFields(logrus.Fields{
-        "Region":    defaultRegion,
-        "Endpoint":  endpoint,
-        "AccessKey": config.Key,
-    }).Info("Creating new S3 client")
+	logrus.WithFields(logrus.Fields{
+		"Region":    defaultRegion,
+		"Endpoint":  endpoint,
+		"AccessKey": config.Key,
+	}).Info("Creating new S3 client")
 
-    return s3.New(session.Must(session.NewSessionWithOptions(session.Options{
-        SharedConfigState: session.SharedConfigEnable,
-    })), conf)
+	return s3.New(session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+	})), conf)
 }
-
 
 func getEnv(key, defaultVal string) string {
 	value, ok := os.LookupEnv(key)
