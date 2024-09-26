@@ -119,9 +119,9 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 	test.Ok(t, err)
 
 	b, err := New(
-		log.NewNopLogger(),
+		log.NewLogfmtLogger(os.Stderr), // Use a logger that writes to stderr
 		config,
-		false,
+		true, // Enable debug mode
 	)
 	test.Ok(t, err)
 
@@ -131,6 +131,7 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 		})
 	}
 }
+
 
 func newClient(config Config) *s3.S3 {
     conf := &aws.Config{
