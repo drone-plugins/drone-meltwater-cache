@@ -63,13 +63,18 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 
     // Handle role assumption
     if c.AssumeRoleARN != "" {
-        logrus.Info("Attempting to assume role")
-        conf.Credentials = stscreds.NewCredentials(sess, c.AssumeRoleARN, func(p *stscreds.AssumeRoleProvider) {
-            if c.ExternalID != "" {
-                logrus.WithField("ExternalID", c.ExternalID).Info("Using external ID for assume role")
-                p.ExternalID = &c.ExternalID
-            }
-        })
+        if c.OIDCTokenID != "" {
+			logrus.Info("Attempting to assume role with OIDC")
+			creds, err := assumeRoleWithWebIdentity(c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
+			if err != nil {
+				logrus.WithError(err).Error("Failed to assume role with OIDC")
+				return nil, err
+			}
+			conf.Credentials = creds
+			logrus.Info("Successfully assumed role with OIDC")
+		} else {
+			conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID)
+		}
         // Create a new session with the assumed role
         sess, err = session.NewSession(conf)
         if err != nil {
