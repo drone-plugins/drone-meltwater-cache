@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/go-kit/kit/log"
+	"github.com/sirupsen/logrus"
 
 	"github.com/meltwater/drone-cache/test"
 )
@@ -59,7 +60,7 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
     t.Parallel()
 
     // Log the credentials being used for the test
-    log.WithFields(log.Fields{
+    logrus.WithFields(logrus.Fields{
         "AccessKey": userAccessKey,
         "SecretKey": userSecretAccessKey,
         "RoleARN":   "arn:aws:iam::account-id:role/TestRole",
@@ -70,10 +71,10 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
         Bucket:                "s3-round-trip-with-role",
         Endpoint:              endpoint,
         StsEndpoint:           endpoint,
-        Key:                   userAccessKey,       // Use test user access key
-        PathStyle:             true,                // Should be true for minio and false for AWS.
+        Key:                   userAccessKey,
+        PathStyle:             true,
         Region:                defaultRegion,
-        Secret:                userSecretAccessKey, // Use test user secret key
+        Secret:                userSecretAccessKey,
         AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
         AssumeRoleSessionName: "drone-cache",
     })
@@ -132,12 +133,12 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 }
 
 func newClient(config Config) *s3.S3 {
-    // Set up credentials using static or environment-based credentials.
-    creds := credentials.NewStaticCredentials(config.Key, config.Secret, "")
-    if config.Key == "" || config.Secret == "" {
-        // Fallback to environment-based credentials if key/secret are not provided
+    var creds *credentials.Credentials
+    if config.Key != "" && config.Secret != "" {
+        creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
+    } else {
         creds = credentials.NewEnvCredentials()
-        log.WithField("Provider", creds.ProviderName()).Info("Using environment-based credentials for S3 client")
+        logrus.Info("Using environment-based credentials for S3 client")
     }
 
     conf := &aws.Config{
@@ -148,15 +149,14 @@ func newClient(config Config) *s3.S3 {
         Credentials:      creds,
     }
 
-    // Log the region and credentials being used
-    log.WithFields(log.Fields{
+    logrus.WithFields(logrus.Fields{
         "Region":    defaultRegion,
         "Endpoint":  endpoint,
         "AccessKey": config.Key,
     }).Info("Creating new S3 client")
 
     return s3.New(session.Must(session.NewSessionWithOptions(session.Options{
-        SharedConfigState: session.SharedConfigEnable,  // Use shared AWS credentials file as a fallback
+        SharedConfigState: session.SharedConfigEnable,
     })), conf)
 }
 
