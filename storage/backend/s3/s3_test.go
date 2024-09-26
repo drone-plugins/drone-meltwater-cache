@@ -133,20 +133,30 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 }
 
 func newClient(config Config) *s3.S3 {
-    var creds *credentials.Credentials
-    if config.Key != "" && config.Secret != "" {
-        creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
-    } else {
-        creds = credentials.NewEnvCredentials()
-        logrus.Info("Using environment-based credentials for S3 client")
-    }
-
     conf := &aws.Config{
         Region:           aws.String(defaultRegion),
         Endpoint:         aws.String(endpoint),
         DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
         S3ForcePathStyle: aws.Bool(true),
-        Credentials:      creds,
+    }
+
+    // Create initial session
+    sess, err := session.NewSession(conf)
+    if err != nil {
+        logrus.WithError(err).Fatal("Could not create initial session")
+    }
+
+    // Setup credentials
+    if config.Key != "" && config.Secret != "" {
+        conf.Credentials = credentials.NewStaticCredentials(config.Key, config.Secret, "")
+    } else {
+        conf.Credentials = credentials.NewEnvCredentials()
+    }
+
+    // Create new session with updated configuration
+    sess, err = session.NewSession(conf)
+    if err != nil {
+        logrus.WithError(err).Fatal("Could not create session with credentials")
     }
 
     logrus.WithFields(logrus.Fields{
@@ -155,10 +165,9 @@ func newClient(config Config) *s3.S3 {
         "AccessKey": config.Key,
     }).Info("Creating new S3 client")
 
-    return s3.New(session.Must(session.NewSessionWithOptions(session.Options{
-        SharedConfigState: session.SharedConfigEnable,
-    })), conf)
+    return s3.New(sess, conf)
 }
+
 
 
 func getEnv(key, defaultVal string) string {
