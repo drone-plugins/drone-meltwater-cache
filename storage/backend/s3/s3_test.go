@@ -77,6 +77,8 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
+		ExternalID:            "example-external-id",
+		UserRoleExternalID:    "example-external-id",
 	})
 	t.Cleanup(cleanUp)
 	roundTrip(t, backend)
@@ -146,7 +148,7 @@ func newClient(config Config) *s3.S3 {
 		DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
 		S3ForcePathStyle: aws.Bool(true),
 		Credentials:      creds,
-		LogLevel:         aws.LogLevel(aws.LogDebug),
+		CredentialsChainVerboseErrors: aws.Bool(true),
 	}
 
 	logrus.WithFields(logrus.Fields{
