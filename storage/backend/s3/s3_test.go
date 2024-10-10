@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/go-kit/kit/log"
@@ -21,15 +20,13 @@ import (
 )
 
 const (
-	defaultEndpoint        = "http://localhost:9000"
-	defaultAccessKey      = "minioadmin"
-	defaultSecretKey      = "minioadmin"
+	defaultEndpoint       = "http://localhost:9000"
 	defaultRegion         = "us-east-1"
-	defaultACL           = "private"
-	defaultBucketPrefix  = "test-bucket"
+	defaultACL            = "private"
+	defaultBucketPrefix   = "test-bucket"
 )
 
-// TestBasicS3Operations tests basic S3 operations without assume role
+// TestBasicS3Operations tests basic S3 operations without explicit credentials
 func TestBasicS3Operations(t *testing.T) {
 	t.Parallel()
 
@@ -38,8 +35,6 @@ func TestBasicS3Operations(t *testing.T) {
 	config := Config{
 		Bucket:     bucketName,
 		Endpoint:   defaultEndpoint,
-		Key:        defaultAccessKey,
-		Secret:     defaultSecretKey,
 		Region:     defaultRegion,
 		ACL:        defaultACL,
 		PathStyle:  true,
@@ -83,15 +78,13 @@ func TestS3WithAssumeRole(t *testing.T) {
 	
 	config := Config{
 		Bucket:                bucketName,
-		Endpoint:             defaultEndpoint,
-		Key:                  defaultAccessKey,
-		Secret:               defaultSecretKey,
-		Region:               defaultRegion,
-		ACL:                  defaultACL,
-		PathStyle:            true,
-		AssumeRoleARN:        "arn:aws:iam::123456789012:role/test-role",
+		Endpoint:              defaultEndpoint,
+		Region:                defaultRegion,
+		ACL:                   defaultACL,
+		PathStyle:             true,
+		AssumeRoleARN:         "arn:aws:iam::123456789012:role/test-role",
 		AssumeRoleSessionName: "test-session",
-		ExternalID:           "test-external-id",
+		ExternalID:            "test-external-id",
 	}
 
 	// Setup backend and cleanup
@@ -113,8 +106,78 @@ func TestS3WithAssumeRole(t *testing.T) {
 	test.Equals(t, content, buf.String())
 }
 
-// Helper functions
+// TestS3WithOIDC tests S3 operations with OIDC token
+// func TestS3WithOIDC(t *testing.T) {
+// 	t.Parallel()
 
+// 	bucketName := defaultBucketPrefix + "-oidc-" + time.Now().Format("20060102150405")
+	
+// 	config := Config{
+// 		Bucket:                bucketName,
+// 		Endpoint:              defaultEndpoint,
+// 		Region:                defaultRegion,
+// 		ACL:                   defaultACL,
+// 		PathStyle:             true,
+// 		AssumeRoleARN:         "arn:aws:iam::123456789012:role/test-role",
+// 		AssumeRoleSessionName: "test-session",
+// 		OIDCTokenID:           "test-oidc-token",
+// 	}
+
+// 	// Setup backend and cleanup
+// 	backend, cleanup := setupTest(t, config)
+// 	defer cleanup()
+
+// 	// Test file content
+// 	content := "Hello World Test Content with OIDC"
+// 	key := "test-file-oidc.txt"
+
+// 	// Test Put operation
+// 	err := backend.Put(context.Background(), key, strings.NewReader(content))
+// 	test.Ok(t, err)
+
+// 	// Test Get operation
+// 	var buf bytes.Buffer
+// 	err = backend.Get(context.Background(), key, &buf)
+// 	test.Ok(t, err)
+// 	test.Equals(t, content, buf.String())
+// }
+
+// // TestS3WithUserRole tests S3 operations with user role
+// func TestS3WithUserRole(t *testing.T) {
+// 	t.Parallel()
+
+// 	bucketName := defaultBucketPrefix + "-user-role-" + time.Now().Format("20060102150405")
+	
+// 	config := Config{
+// 		Bucket:              bucketName,
+// 		Endpoint:            defaultEndpoint,
+// 		Region:              defaultRegion,
+// 		ACL:                 defaultACL,
+// 		PathStyle:           true,
+// 		UserRoleArn:         "arn:aws:iam::123456789012:role/test-user-role",
+// 		UserRoleExternalID:  "test-user-external-id",
+// 	}
+
+// 	// Setup backend and cleanup
+// 	backend, cleanup := setupTest(t, config)
+// 	defer cleanup()
+
+// 	// Test file content
+// 	content := "Hello World Test Content with User Role"
+// 	key := "test-file-user-role.txt"
+
+// 	// Test Put operation
+// 	err := backend.Put(context.Background(), key, strings.NewReader(content))
+// 	test.Ok(t, err)
+
+// 	// Test Get operation
+// 	var buf bytes.Buffer
+// 	err = backend.Get(context.Background(), key, &buf)
+// 	test.Ok(t, err)
+// 	test.Equals(t, content, buf.String())
+// }
+
+// Helper functions
 func setupTest(t *testing.T, config Config) (*Backend, func()) {
 	// Create S3 client
 	s3Client := createS3Client(config)
@@ -157,14 +220,16 @@ func setupTest(t *testing.T, config Config) (*Backend, func()) {
 
 func createS3Client(config Config) *s3.S3 {
 	awsConfig := &aws.Config{
-		Credentials:      credentials.NewStaticCredentials(config.Key, config.Secret, ""),
 		Endpoint:         aws.String(config.Endpoint),
 		Region:           aws.String(config.Region),
 		DisableSSL:       aws.Bool(strings.HasPrefix(config.Endpoint, "http://")),
 		S3ForcePathStyle: aws.Bool(config.PathStyle),
 	}
 
-	sess := session.Must(session.NewSession(awsConfig))
+	sess, err := session.NewSession(awsConfig)
+	if err != nil {
+		panic(err)
+	}
 	return s3.New(sess)
 }
 
