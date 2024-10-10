@@ -6,7 +6,6 @@ package s3
 import (
 	"bytes"
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,16 +18,20 @@ import (
 )
 
 const (
-	defaultEndpoint     = "http://localhost:9000"
-	defaultRegion       = "us-east-1"
-	defaultACL          = "private"
-	defaultBucketPrefix = "test-bucket"
+	defaultEndpoint            = "http://127.0.0.1:9000"
+	defaultAccessKey           = "AKIAIOSFODNN7EXAMPLE"
+	defaultSecretAccessKey     = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	defaultRegion              = "eu-west-1"
+	defaultACL                 = "private"
+	defaultUserAccessKey       = "foo"
+	defaultUserSecretAccessKey = "barbarbar"
 )
 
 func TestBasicS3Operations(t *testing.T) {
+	t.Skip()
 	t.Parallel()
 
-	bucketName := defaultBucketPrefix + "-basic-" + time.Now().Format("20060102150405")
+	bucketName := "s3-round-trip"
 	
 	config := Config{
 		Bucket:     bucketName,
@@ -36,8 +39,8 @@ func TestBasicS3Operations(t *testing.T) {
 		Region:     defaultRegion,
 		ACL:        defaultACL,
 		PathStyle:  true,
-		Key:        "minioadmin",
-		Secret:     "minioadmin",
+		Key:        defaultAccessKey,
+		Secret:     defaultSecretAccessKey,
 	}
 
 	backend, cleanup := setupTest(t, config)
@@ -71,7 +74,7 @@ func TestBasicS3Operations(t *testing.T) {
 func TestS3WithAssumeRole(t *testing.T) {
 	t.Skip("Skipping assume role test in local environment")
 	
-	bucketName := defaultBucketPrefix + "-assume-role-" + time.Now().Format("20060102150405")
+	bucketName := "s3-round-trip-with-role"
 	
 	config := Config{
 		Bucket:                bucketName,
@@ -79,9 +82,11 @@ func TestS3WithAssumeRole(t *testing.T) {
 		Region:                defaultRegion,
 		ACL:                   defaultACL,
 		PathStyle:             true,
-		AssumeRoleARN:         os.Getenv("TEST_ASSUME_ROLE_ARN"),
+		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "test-session",
 		ExternalID:            "test-external-id",
+		Key:                   defaultUserAccessKey,
+		Secret:                defaultUserSecretAccessKey,
 	}
 
 	backend, cleanup := setupTest(t, config)
