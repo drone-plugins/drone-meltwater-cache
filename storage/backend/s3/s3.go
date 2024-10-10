@@ -47,6 +47,13 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		S3ForcePathStyle: aws.Bool(c.PathStyle),
 	}
 
+	// Create the session without credentials (lazy loading)
+	sess, err := session.NewSession(conf)
+	if err != nil {
+		logrus.WithError(err).Error("Could not instantiate session")
+		return nil, err
+	}
+
 	// Inject credentials after session creation
 	if c.Key != "" && c.Secret != "" {
 		logrus.Info("Using static credentials")
@@ -67,13 +74,6 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		}
 	} else {
 		logrus.Warn("AWS key and/or Secret not provided (falling back to anonymous credentials)")
-	}
-
-// Create the session without credentials (lazy loading)
-	sess, err := session.NewSession(conf)
-	if err != nil {
-		logrus.WithError(err).Error("Could not instantiate session")
-		return nil, err
 	}
 
 	var client *s3.S3
