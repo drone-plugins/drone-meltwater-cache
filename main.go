@@ -411,7 +411,7 @@ func main() {
 		&cli.StringFlag{
 			Name:    "assume-role-session-name",
 			Usage:   "aws iam role session name to assume",
-			Value:   "drone-cache",
+			Value:   "",
 			EnvVars: []string{"PLUGIN_ASSUME_ROLE_SESSION_NAME", "ASSUME_ROLE_SESSION_NAME"},
 		},
 		&cli.StringFlag{
