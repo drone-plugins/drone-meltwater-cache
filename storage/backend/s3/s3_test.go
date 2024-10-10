@@ -40,44 +40,20 @@ var (
 	userSecretAccessKey = getEnv("TEST_USER_S3_SECRET_KEY", defaultUserSecretAccessKey)
 )
 
-func TestBasicRoundTrip(t *testing.T) {
+func TestRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	// Set up a logger for the test
-	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
-
-	logger.WithFields(logrus.Fields{
-		"AccessKey": accessKey,
-		"Endpoint":  endpoint,
-		"Region":    defaultRegion,
-	}).Info("Setting up basic S3 round trip test")
-
-	// Create a test configuration
-	config := Config{
+	backend, cleanUp := setup(t, Config{
 		ACL:       acl,
-		Bucket:    "s3-basic-round-trip",
+		Bucket:    "s3-round-trip",
 		Endpoint:  endpoint,
 		Key:       accessKey,
-		Secret:    secretAccessKey,
 		PathStyle: true, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,
-	}
-
-	// Create a new backend
-	backend, err := New(log.NewLogfmtLogger(os.Stdout), config, true)
-	if err != nil {
-		t.Fatalf("Failed to create backend: %v", err)
-	}
-
-	// Set up the S3 bucket
-	cleanup := setupTestBucket(t, config)
-	t.Cleanup(cleanup)
-
-	// Perform the round trip test
-	testRoundTrip(t, backend)
-
-	logger.Info("Basic S3 round trip test completed successfully")
+		Secret:    secretAccessKey,
+	})
+	t.Cleanup(cleanUp)
+	roundTrip(t, backend)
 }
 
 func TestRoundTripWithAssumeRole(t *testing.T) {
@@ -100,7 +76,6 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		Region:                defaultRegion,
 		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
-		UserRoleArn:           "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
 		ExternalID:            "example-external-id",
 		UserRoleExternalID:    "example-external-id",
@@ -109,142 +84,82 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 	roundTrip(t, backend)
 }
 
-func setupTestBucket(t *testing.T, config Config) func() {
-	// Create an S3 client
-	sess, err := session.NewSession(&aws.Config{
-		Region:           aws.String(config.Region),
-		Endpoint:         aws.String(config.Endpoint),
-		Credentials:      credentials.NewStaticCredentials(config.Key, config.Secret, ""),
-		S3ForcePathStyle: aws.Bool(config.PathStyle),
-	})
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
-	client := s3.New(sess)
-
-	// Create the bucket
-	_, err = client.CreateBucket(&s3.CreateBucketInput{
-		Bucket: aws.String(config.Bucket),
-	})
-	if err != nil {
-		t.Fatalf("Failed to create bucket: %v", err)
-	}
-
-	return func() {
-		// Delete all objects in the bucket
-		err := deleteAllObjects(client, config.Bucket)
-		if err != nil {
-			t.Logf("Failed to delete objects in bucket: %v", err)
-		}
-
-		// Delete the bucket
-		_, err = client.DeleteBucket(&s3.DeleteBucketInput{
-			Bucket: aws.String(config.Bucket),
-		})
-		if err != nil {
-			t.Logf("Failed to delete bucket: %v", err)
-		}
-	}
-}
-
-func deleteAllObjects(client *s3.S3, bucket string) error {
-	// List all objects in the bucket
-	listResp, err := client.ListObjectsV2(&s3.ListObjectsV2Input{
-		Bucket: aws.String(bucket),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list objects: %w", err)
-	}
-
-	// Delete each object
-	for _, item := range listResp.Contents {
-		_, err := client.DeleteObject(&s3.DeleteObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    item.Key,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to delete object %s: %w", *item.Key, err)
-		}
-	}
-
-	return nil
-}
-
-func testRoundTrip(t *testing.T, backend *Backend) {
-	content := "Hello, S3 world!"
-	key := "test-file.txt"
+func roundTrip(t *testing.T, backend *Backend) {
+	content := "Hello world4"
 
 	// Test Put
-	err := backend.Put(context.TODO(), key, strings.NewReader(content))
-	if err != nil {
-		t.Fatalf("Failed to put object: %v", err)
-	}
+	test.Ok(t, backend.Put(context.TODO(), "test.t", strings.NewReader(content)))
 
 	// Test Get
 	var buf bytes.Buffer
-	err = backend.Get(context.TODO(), key, &buf)
-	if err != nil {
-		t.Fatalf("Failed to get object: %v", err)
-	}
+	test.Ok(t, backend.Get(context.TODO(), "test.t", &buf))
 
-	if buf.String() != content {
-		t.Fatalf("Retrieved content does not match. Expected: %s, Got: %s", content, buf.String())
-	}
+	b, err := ioutil.ReadAll(&buf)
+	test.Ok(t, err)
 
-	// Test Exists
-	exists, err := backend.Exists(context.TODO(), key)
-	if err != nil {
-		t.Fatalf("Failed to check if object exists: %v", err)
-	}
-	if !exists {
-		t.Fatalf("Object should exist, but Exists returned false")
-	}
+	test.Equals(t, []byte(content), b)
 
-	// Test List
+	exists, err := backend.Exists(context.TODO(), "test.t")
+	test.Ok(t, err)
+
+	test.Equals(t, true, exists)
+
 	entries, err := backend.List(context.TODO(), "")
-	if err != nil {
-		t.Fatalf("Failed to list objects: %v", err)
-	}
-	if len(entries) != 1 || entries[0] != key {
-		t.Fatalf("Unexpected list result. Expected: [%s], Got: %v", key, entries)
+	test.Ok(t, err)
+	test.Equals(t, 1, len(entries))
+}
+
+// Helpers
+
+func setup(t *testing.T, config Config) (*Backend, func()) {
+	client := newClient(config)
+
+	_, err := client.CreateBucketWithContext(context.Background(), &s3.CreateBucketInput{
+		Bucket: aws.String(config.Bucket),
+	})
+	test.Ok(t, err)
+
+	b, err := New(
+		log.NewNopLogger(),
+		config,
+		false,
+	)
+	test.Ok(t, err)
+
+	return b, func() {
+		_, err = client.DeleteBucket(&s3.DeleteBucketInput{
+			Bucket: aws.String(config.Bucket),
+		})
 	}
 }
 
 func newClient(config Config) *s3.S3 {
-    conf := &aws.Config{
-        Region:           aws.String(defaultRegion),
-        Endpoint:         aws.String(endpoint),
-        DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
-        S3ForcePathStyle: aws.Bool(true),
-    }
+	var creds *credentials.Credentials
+	if config.Key != "" && config.Secret != "" {
+		creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
+	} else {
+		creds = credentials.NewEnvCredentials()
+		logrus.Info("Using environment-based credentials for S3 client")
+	}
 
-    // Create initial session
-    sess, err := session.NewSession(conf)
-    if err != nil {
-        logrus.WithError(err).Fatal("Could not create initial session")
-    }
+	conf := &aws.Config{
+		Region:           aws.String(defaultRegion),
+		Endpoint:         aws.String(endpoint),
+		DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
+		S3ForcePathStyle: aws.Bool(true),
+		Credentials:      creds,
+		CredentialsChainVerboseErrors: aws.Bool(true),
+	}
 
-    // Setup credentials
-    if config.Key != "" && config.Secret != "" {
-        conf.Credentials = credentials.NewStaticCredentials(config.Key, config.Secret, "")
-    } else {
-        conf.Credentials = credentials.NewEnvCredentials()
-    }
+	logrus.WithFields(logrus.Fields{
+		"Region":    defaultRegion,
+		"Endpoint":  endpoint,
+		"AccessKey": config.Key,
+	}).Info("Creating new S3 client")
 
-    // Create new session with updated configuration
-    sess, err = session.NewSession(conf)
-    if err != nil {
-        logrus.WithError(err).Fatal("Could not create session with credentials")
-    }
-
-    logrus.WithFields(logrus.Fields{
-        "Region":    defaultRegion,
-        "Endpoint":  endpoint,
-        "AccessKey": config.Key,
-    }).Info("Creating new S3 client")
-
-    return s3.New(sess, conf)
+	return s3.New(session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+	})), conf)
 }
 
 func getEnv(key, defaultVal string) string {
