@@ -411,7 +411,7 @@ func main() {
 		&cli.StringFlag{
 			Name:    "assume-role-session-name",
 			Usage:   "aws iam role session name to assume",
-			Value:   "",
+			Value:   "drone-cache",
 			EnvVars: []string{"PLUGIN_ASSUME_ROLE_SESSION_NAME", "ASSUME_ROLE_SESSION_NAME"},
 		},
 		&cli.StringFlag{
@@ -566,7 +566,7 @@ func run(c *cli.Context) error {
 		logLevel = internal.LogLevelDebug
 	}
 
-	logger := internal.NewLogger(logLevel, c.String("log.format"), "drone-cache")
+	logger := internal.NewLogger(logLevel, c.String("log.format"), "drone-cache-logger")
 	level.Debug(logger).Log("version", version, "commit", commit, "date", date)
 
 	plg := plugin.New(log.With(logger, "component", "plugin"))
