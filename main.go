@@ -420,13 +420,13 @@ func main() {
 			EnvVars: []string{"PLUGIN_USER_ROLE_ARN", "AWS_USER_ROLE_ARN"},
 		},
 		&cli.StringFlag{
-			Name:   "external-id",
-			Usage:  "external ID to use when assuming role",
+			Name:    "external-id",
+			Usage:   "external ID to use when assuming role",
 			EnvVars: []string{"PLUGIN_EXTERNAL_ID"},
 		},
 		&cli.StringFlag{
-			Name:   "user-role-external-id",
-			Usage:  "external ID to use when assuming secondary role",
+			Name:    "user-role-external-id",
+			Usage:   "external ID to use when assuming secondary role",
 			EnvVars: []string{"PLUGIN_USER_ROLE_EXTERNAL_ID"},
 		},
 
