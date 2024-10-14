@@ -226,38 +226,39 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 
 // AssumeRole logic
 func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Credentials {
-    logrus.WithFields(logrus.Fields{
-        "roleArn":         roleArn,
-        "roleSessionName": roleSessionName,
-        "externalID":      externalID,
-    }).Info("Attempting to assume role")
+	logrus.WithFields(logrus.Fields{
+		"roleArn":         roleArn,
+		"roleSessionName": roleSessionName,
+		"externalID":      externalID,
+	}).Info("Attempting to assume role")
 
-    sess, _ := session.NewSession()
-    client := sts.New(sess)
-    duration := time.Hour * 1
-    stsProvider := &stscreds.AssumeRoleProvider{
-        Client:          client,
-        Duration:        duration,
-        RoleARN:         roleArn,
-        RoleSessionName: roleSessionName,
-    }
+	sess, err := session.NewSession()
+	if err != nil {
+		logrus.WithError(err).Error("Failed to create session for role assumption")
+		return nil
+	}
 
-    if externalID != "" {
-        stsProvider.ExternalID = &externalID
-        logrus.WithField("externalID", externalID).Info("Using external ID for assume role")
-    }
+	stsClient := sts.New(sess)
+	roleProvider := &stscreds.AssumeRoleProvider{
+		Client:          stsClient,
+		RoleARN:         roleArn,
+		RoleSessionName: roleSessionName,
+		Duration:        time.Hour, // 1-hour session
+	}
 
-    creds := credentials.NewCredentials(stsProvider)
+	if externalID != "" {
+		roleProvider.ExternalID = aws.String(externalID)
+		logrus.WithField("externalID", externalID).Info("Using external ID for assume role")
+	}
 
-    // Test the credentials
-    _, err := creds.Get()
-    if err != nil {
-        logrus.WithError(err).Error("Failed to assume role")
-    } else {
-        logrus.Info("Successfully assumed role")
-    }
+	creds := credentials.NewCredentials(roleProvider)
+	if _, err := creds.Get(); err != nil {
+		logrus.WithError(err).Error("Failed to assume role with external ID")
+		return nil
+	}
 
-    return creds
+	logrus.Info("Successfully assumed role")
+	return creds
 }
 
 func assumeRoleWithWebIdentity(roleArn, roleSessionName, webIdentityToken string) (*credentials.Credentials, error) {
