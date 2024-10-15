@@ -89,6 +89,8 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
         Endpoint:              endpoint,
         StsEndpoint:           endpoint,
         PathStyle:             true,
+		Key:       accessKey,
+		Secret:    secretAccessKey,
         Region:                defaultRegion,
         AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
         AssumeRoleSessionName: "drone-cache",
