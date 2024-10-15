@@ -13,11 +13,11 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/go-kit/kit/log"
 	"github.com/sirupsen/logrus"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 
 	"github.com/meltwater/drone-cache/test"
 )
@@ -58,54 +58,53 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestRoundTripWithAssumeRole(t *testing.T) {
-    t.Parallel()
+	t.Parallel()
 
-    // Log the credentials being used for the test (without exposing secrets)
-    logrus.WithFields(logrus.Fields{
-        "RoleARN": "arn:aws:iam::account-id:role/TestRole",
-    }).Info("Setting up AssumeRole test")
+	// Log the credentials being used for the test (without exposing secrets)
+	logrus.WithFields(logrus.Fields{
+		"RoleARN": "arn:aws:iam::account-id:role/TestRole",
+	}).Info("Setting up AssumeRole test")
 
-    // Setting up the base session with static credentials
-    baseSess, err := session.NewSession(&aws.Config{
-        Region:      aws.String(defaultRegion),
-        Endpoint:    aws.String(endpoint),
-        DisableSSL:  aws.Bool(true),
-        Credentials: credentials.NewStaticCredentials(accessKey, secretAccessKey, ""), // Use static credentials for the base session
-    })
-    if err != nil {
-        t.Fatalf("failed to create base session: %v", err)
-    }
+	// Setting up the base session with static credentials
+	baseSess, err := session.NewSession(&aws.Config{
+		Region:      aws.String(defaultRegion),
+		Endpoint:    aws.String(endpoint),
+		DisableSSL:  aws.Bool(true),
+		Credentials: credentials.NewStaticCredentials(accessKey, secretAccessKey, ""), // Use static credentials for the base session
+	})
+	if err != nil {
+		t.Fatalf("failed to create base session: %v", err)
+	}
 
-    // Use stscreds.NewCredentials for assuming the role
-    creds := stscreds.NewCredentials(baseSess, "arn:aws:iam::account-id:role/TestRole", func(p *stscreds.AssumeRoleProvider) {
-        p.ExternalID = aws.String("example-external-id") // Optionally pass ExternalID
-        logrus.WithField("externalID", "example-external-id").Info("Using external ID for assume role")
-    })
+	// Use stscreds.NewCredentials for assuming the role
+	creds := stscreds.NewCredentials(baseSess, "arn:aws:iam::account-id:role/TestRole", func(p *stscreds.AssumeRoleProvider) {
+		p.ExternalID = aws.String("example-external-id") // Optionally pass ExternalID
+		logrus.WithField("externalID", "example-external-id").Info("Using external ID for assume role")
+	})
 
-    // Setup backend using the assumed role credentials
-    backend, cleanUp := setup(t, Config{
-        ACL:                   acl,
-        Bucket:                "s3-round-trip-with-role",
-        Endpoint:              endpoint,
-        StsEndpoint:           endpoint,
-        PathStyle:             true,
-		Key:       accessKey,
-		Secret:    secretAccessKey,
-        Region:                defaultRegion,
-        AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
-        AssumeRoleSessionName: "drone-cache",
-        ExternalID:            "example-external-id",
-        UserRoleExternalID:    "example-external-id",
-        Credentials:           creds, // Pass the assumed role credentials here
-    })
+	// Setup backend using the assumed role credentials
+	backend, cleanUp := setup(t, Config{
+		ACL:                   acl,
+		Bucket:                "s3-round-trip-with-role",
+		Endpoint:              endpoint,
+		StsEndpoint:           endpoint,
+		PathStyle:             true,
+		Key:                   accessKey,
+		Secret:                secretAccessKey,
+		Region:                defaultRegion,
+		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
+		AssumeRoleSessionName: "drone-cache",
+		ExternalID:            "example-external-id",
+		UserRoleExternalID:    "example-external-id",
+		Credentials:           creds, // Pass the assumed role credentials here
+	})
 
-    // Cleanup after the test
-    t.Cleanup(cleanUp)
+	// Cleanup after the test
+	t.Cleanup(cleanUp)
 
-    // Perform the round-trip test
-    roundTrip(t, backend)
+	// Perform the round-trip test
+	roundTrip(t, backend)
 }
-
 
 func roundTrip(t *testing.T, backend *Backend) {
 	content := "Hello world4"
@@ -158,25 +157,33 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 
 func newClient(config Config) *s3.S3 {
 	var creds *credentials.Credentials
-	if config.Key != "" && config.Secret != "" {
+
+	// If dynamic credentials are provided in config, use them
+	if config.Credentials != nil {
+		creds = config.Credentials
+		logrus.Info("Using dynamic credentials for S3 client")
+	} else if config.Key != "" && config.Secret != "" {
+		// Fall back to static credentials if no dynamic credentials are provided
 		creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
+		logrus.Info("Using static credentials for S3 client")
 	} else {
+		// If no credentials are explicitly provided, fall back to environment-based credentials
 		creds = credentials.NewEnvCredentials()
 		logrus.Info("Using environment-based credentials for S3 client")
 	}
 
 	conf := &aws.Config{
-		Region:           aws.String(defaultRegion),
-		Endpoint:         aws.String(endpoint),
-		DisableSSL:       aws.Bool(strings.HasPrefix(endpoint, "http://")),
-		S3ForcePathStyle: aws.Bool(true),
-		Credentials:      creds,
+		Region:                        aws.String(config.Region),
+		Endpoint:                      aws.String(config.Endpoint),
+		DisableSSL:                    aws.Bool(strings.HasPrefix(config.Endpoint, "http://")),
+		S3ForcePathStyle:              aws.Bool(config.PathStyle),
+		Credentials:                   creds,
 		CredentialsChainVerboseErrors: aws.Bool(true),
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"Region":    defaultRegion,
-		"Endpoint":  endpoint,
+		"Region":    config.Region,
+		"Endpoint":  config.Endpoint,
 		"AccessKey": config.Key,
 	}).Info("Creating new S3 client")
 
