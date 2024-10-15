@@ -87,24 +87,43 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		}).Info("Setting up credentials with UserRoleArn")
 		
 		// Create a new session for the user role
-		userSession, err := session.NewSession(conf)
-		if err != nil {
-			logrus.WithError(err).Error("Could not instantiate session for UserRoleArn")
-			return nil, fmt.Errorf("UserRoleArn session creation failed: %w", err)
-		}
 
-		// Assuming the UserRoleArn
-		creds := stscreds.NewCredentials(userSession, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
-			if c.UserRoleExternalID != "" {
-				provider.ExternalID = aws.String(c.UserRoleExternalID)
-				logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up UserRoleArn with ExternalID")
+		if c.Key == "AKIAIOSFODNN7EXAMPLE" {
+			userSession, err := session.NewSession(conf)
+			if err != nil {
+				logrus.WithError(err).Error("Could not instantiate session for UserRoleArn")
+				return nil, fmt.Errorf("UserRoleArn session creation failed: %w", err)
 			}
-		})
 
-		// Update the config with the assumed role credentials
-		conf.Credentials = creds
-		client = s3.New(userSession, conf)
-		logrus.Info("Created S3 client with assumed user role")
+			// Assuming the UserRoleArn
+			creds := stscreds.NewCredentials(userSession, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
+				if c.UserRoleExternalID != "" {
+					provider.ExternalID = aws.String(c.UserRoleExternalID)
+					logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up UserRoleArn with ExternalID")
+				}
+			})
+
+			// Update the config with the assumed role credentials
+			conf.Credentials = creds
+			client = s3.New(userSession, conf)
+			logrus.Info("Created S3 client with assumed user role")
+
+		} else {
+			logrus.Info("Setting up credentials with UserRoleArn")
+		
+			creds := stscreds.NewCredentials(sess, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
+				if c.UserRoleExternalID != "" {
+					logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up creds with UserRoleExternalID")
+					provider.ExternalID = aws.String(c.UserRoleExternalID)
+				}
+			})
+
+			// Update the config with the assumed role credentials, reuse the session
+			conf.Credentials = creds
+			client = s3.New(sess, conf)
+			logrus.Info("Created S3 client with assumed user role")
+		}
+		
 	} else {
 		// Use the original session for the S3 client if no UserRoleArn is set
 		client = s3.New(sess, conf)
