@@ -56,33 +56,33 @@ func TestRoundTrip(t *testing.T) {
 	roundTrip(t, backend)
 }
 
-// func TestRoundTripWithAssumeRole(t *testing.T) {
-// 	t.Parallel()
+func TestRoundTripWithAssumeRole(t *testing.T) {
+	t.Parallel()
 
-// 	// Log the credentials being used for the test
-// 	logrus.WithFields(logrus.Fields{
-// 		"AccessKey": userAccessKey,
-// 		"SecretKey": userSecretAccessKey,
-// 		"RoleARN":   "arn:aws:iam::account-id:role/TestRole",
-// 	}).Info("Setting up AssumeRole test")
+	// Log the credentials being used for the test
+	logrus.WithFields(logrus.Fields{
+		"AccessKey": userAccessKey,
+		"SecretKey": userSecretAccessKey,
+		"RoleARN":   "arn:aws:iam::account-id:role/TestRole",
+	}).Info("Setting up AssumeRole test")
 
-// 	backend, cleanUp := setup(t, Config{
-// 		ACL:                   acl,
-// 		Bucket:                "s3-round-trip-with-role",
-// 		Endpoint:              endpoint,
-// 		StsEndpoint:           endpoint,
-// 		Key:                   userAccessKey,
-// 		PathStyle:             true,
-// 		Region:                defaultRegion,
-// 		Secret:                userSecretAccessKey,
-// 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
-// 		AssumeRoleSessionName: "drone-cache",
-// 		ExternalID:            "example-external-id",
-// 		UserRoleExternalID:    "example-external-id",
-// 	})
-// 	t.Cleanup(cleanUp)
-// 	roundTrip(t, backend)
-// }
+	backend, cleanUp := setup(t, Config{
+		ACL:                   acl,
+		Bucket:                "s3-round-trip-with-role",
+		Endpoint:              endpoint,
+		StsEndpoint:           endpoint,
+		// Key:                   userAccessKey,
+		PathStyle:             true,
+		Region:                defaultRegion,
+		// Secret:                userSecretAccessKey,
+		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
+		AssumeRoleSessionName: "drone-cache",
+		ExternalID:            "example-external-id",
+		UserRoleExternalID:    "example-external-id",
+	})
+	t.Cleanup(cleanUp)
+	roundTrip(t, backend)
+}
 
 func roundTrip(t *testing.T, backend *Backend) {
 	content := "Hello world4"
