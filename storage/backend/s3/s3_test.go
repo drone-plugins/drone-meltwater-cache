@@ -57,7 +57,7 @@ func TestRoundTrip(t *testing.T) {
 	roundTrip(t, backend)
 }
 
-func TestRoundTripWithAssumeRole(t *testing.T) {
+func TestRoundTripWithAssumeRoleAndExternalID(t *testing.T) {
 	t.Parallel()
 
 	// Log the credentials being used for the test (without exposing secrets)
