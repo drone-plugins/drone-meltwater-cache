@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/go-kit/kit/log"
 	"github.com/sirupsen/logrus"
+	"github.com/aws/aws-sdk-go/service/stscreds"
 
 	"github.com/meltwater/drone-cache/test"
 )
@@ -88,27 +89,29 @@ func TestRoundTripWithAssumeRole(t *testing.T) {
 		logrus.WithField("externalID", "example-external-id").Info("Using external ID for assume role")
 	})
 
-	// Setup backend using the assumed role credentials
+	// Create a new session using the assumed role credentials
+	assumedSess, err := session.NewSession(&aws.Config{
+		Credentials: creds, // Use the assumed role credentials
+	})
+	if err != nil {
+		t.Fatalf("failed to create assumed session: %v", err)
+	}
+
+	// Setup backend using the assumed role credentials, without modifying the Config struct
 	backend, cleanUp := setup(t, Config{
 		ACL:                   acl,
 		Bucket:                "s3-round-trip-with-role",
 		Endpoint:              endpoint,
 		StsEndpoint:           endpoint,
-		Key:                   userAccessKey,
 		PathStyle:             true,
 		Region:                defaultRegion,
-		Secret:                userSecretAccessKey,
 		AssumeRoleARN:         "arn:aws:iam::account-id:role/TestRole",
 		AssumeRoleSessionName: "drone-cache",
 		ExternalID:            "example-external-id",
 		UserRoleExternalID:    "example-external-id",
-		Credentials:           creds, // Use the assumed role credentials here
+		// The session with assumed role will be passed separately in the backend logic
 	})
-
-	// Cleanup after the test
 	t.Cleanup(cleanUp)
-
-	// Perform the round-trip test
 	roundTrip(t, backend)
 }
 
