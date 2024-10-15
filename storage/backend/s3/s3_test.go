@@ -157,33 +157,25 @@ func setup(t *testing.T, config Config) (*Backend, func()) {
 
 func newClient(config Config) *s3.S3 {
 	var creds *credentials.Credentials
-
-	// If dynamic credentials are provided in config, use them
-	if config.Credentials != nil {
-		creds = config.Credentials
-		logrus.Info("Using dynamic credentials for S3 client")
-	} else if config.Key != "" && config.Secret != "" {
-		// Fall back to static credentials if no dynamic credentials are provided
+	if config.Key != "" && config.Secret != "" {
 		creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
-		logrus.Info("Using static credentials for S3 client")
 	} else {
-		// If no credentials are explicitly provided, fall back to environment-based credentials
 		creds = credentials.NewEnvCredentials()
 		logrus.Info("Using environment-based credentials for S3 client")
 	}
 
 	conf := &aws.Config{
-		Region:                        aws.String(config.Region),
-		Endpoint:                      aws.String(config.Endpoint),
-		DisableSSL:                    aws.Bool(strings.HasPrefix(config.Endpoint, "http://")),
-		S3ForcePathStyle:              aws.Bool(config.PathStyle),
+		Region:                        aws.String(defaultRegion),
+		Endpoint:                      aws.String(endpoint),
+		DisableSSL:                    aws.Bool(strings.HasPrefix(endpoint, "http://")),
+		S3ForcePathStyle:              aws.Bool(true),
 		Credentials:                   creds,
 		CredentialsChainVerboseErrors: aws.Bool(true),
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"Region":    config.Region,
-		"Endpoint":  config.Endpoint,
+		"Region":    defaultRegion,
+		"Endpoint":  endpoint,
 		"AccessKey": config.Key,
 	}).Info("Creating new S3 client")
 
