@@ -220,11 +220,6 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 
 // AssumeRole logic
 func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Credentials {
-	logrus.WithFields(logrus.Fields{
-		"roleArn":         roleArn,
-		"roleSessionName": roleSessionName,
-		"externalID":      externalID,
-	}).Info("Attempting to assume role")
 
 	sess, err := session.NewSession()
 	if err != nil {
