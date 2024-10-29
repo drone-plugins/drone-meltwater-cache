@@ -34,13 +34,6 @@ type Backend struct {
 
 // New creates a new S3 backend with lazy-loaded credentials.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
-	logrus.WithFields(logrus.Fields{
-		"UserRoleExternalID": c.UserRoleExternalID,
-		"AssumeRoleARN":      c.AssumeRoleARN,
-		"UserRoleArn":        c.UserRoleArn,
-		"SessionName":        c.AssumeRoleSessionName,
-		"ExternalID":         c.ExternalID,
-	}).Info("Initializing new Backend")
 
 	conf := &aws.Config{
 		Region:           aws.String(c.Region),
