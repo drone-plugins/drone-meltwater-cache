@@ -67,7 +67,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 			conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID)
 		}
 	} else {
-		logrus.Warn("AWS key and/or Secret not provided, falling back to anonymous credentials")
+		logrus.Warn("No AWS credentials provided or role assumed; using default machine credentials for AWS requests")
 	}
 
 	var client *s3.S3
