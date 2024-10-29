@@ -113,11 +113,6 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		backend.acl = c.ACL
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"Bucket":     backend.bucket,
-		"Encryption": backend.encryption,
-		"ACL":        backend.acl,
-	}).Info("Backend initialized")
 
 	return backend, nil
 }
