@@ -237,16 +237,10 @@ func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Creden
 
 	if externalID != "" {
 		roleProvider.ExternalID = aws.String(externalID)
-		logrus.WithField("externalID", externalID).Info("Using external ID for assume role")
 	}
 
 	creds := credentials.NewCredentials(roleProvider)
-	if _, err := creds.Get(); err != nil {
-		logrus.WithError(err).Error("Failed to assume role with external ID")
-		return nil
-	}
-
-	logrus.Info("Successfully assumed role")
+	
 	return creds
 }
 
