@@ -255,6 +255,28 @@ Targets:
   help           	  Shows this help message
 ```
 
+## Configuration Variables for Secondary Role Assumption with External ID
+
+The following environment variables enable the plugin to assume a secondary IAM role using IRSA, with an External ID if required by the role’s trust policy.
+
+### Variables
+
+#### `PLUGIN_USER_ROLE_ARN`
+
+- **Type**: String
+- **Required**: No
+- **Description**: Specifies the secondary IAM role to be assumed by the plugin, allowing it to inherit permissions associated with this role and access specific AWS resources.
+
+#### `PLUGIN_USER_ROLE_EXTERNAL_ID`
+
+- **Type**: String
+- **Required**: No
+- **Description**: Provide the External ID necessary for the role assumption process if the secondary role’s trust policy mandates it. This is often required for added security, ensuring that only authorized entities assume the role.
+
+### Usage Notes
+
+- If the role secondary role (`PLUGIN_USER_ROLE_ARN`) requires an External ID then pass it through `PLUGIN_USER_ROLE_EXTERNAL_ID`.
+
 ## Releases
 
 Release management handled by the CI pipeline. When you create a tag on `master` branch, CI handles the rest.
@@ -299,3 +321,4 @@ One bigger area of future investment is to add a couple of [new storage backends
 ## License and Copyright
 
 This project is licensed under the [Apache License 2.0](LICENSE).
+.

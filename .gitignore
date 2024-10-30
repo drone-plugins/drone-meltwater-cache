@@ -37,3 +37,5 @@ release/
 # Azurite temp files
 __*__
 __*__.json
+
+update_script.sh

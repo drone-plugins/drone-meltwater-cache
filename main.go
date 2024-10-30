@@ -420,9 +420,14 @@ func main() {
 			EnvVars: []string{"PLUGIN_USER_ROLE_ARN", "AWS_USER_ROLE_ARN"},
 		},
 		&cli.StringFlag{
-			Name:   "external-id",
-			Usage:  "external ID to use when assuming role",
+			Name:    "external-id",
+			Usage:   "external ID to use when assuming role",
 			EnvVars: []string{"PLUGIN_EXTERNAL_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "user-role-external-id",
+			Usage:   "external ID to use when assuming secondary role",
+			EnvVars: []string{"PLUGIN_USER_ROLE_EXTERNAL_ID"},
 		},
 
 		// GCS specific Configs flags
@@ -561,7 +566,7 @@ func run(c *cli.Context) error {
 		logLevel = internal.LogLevelDebug
 	}
 
-	logger := internal.NewLogger(logLevel, c.String("log.format"), "drone-cache")
+	logger := internal.NewLogger(logLevel, c.String("log.format"), "drone-cache-logger")
 	level.Debug(logger).Log("version", version, "commit", commit, "date", date)
 
 	plg := plugin.New(log.With(logger, "component", "plugin"))
@@ -637,6 +642,7 @@ func run(c *cli.Context) error {
 			UserRoleArn:           c.String("user-role-arn"),
 			OIDCTokenID:           c.String("oidc-token-id"),
 			ExternalID:            c.String("external-id"),
+			UserRoleExternalID:    c.String("user-role-external-id"),
 		},
 		Azure: azure.Config{
 			AccountName:    c.String("azure.account-name"),
