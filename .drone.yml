@@ -505,7 +505,7 @@ steps:
         - release/plugin-darwin-arm64.zst
         - release/plugin-windows-amd64.zst
       api_key:
-        from_secret: github_token
+        from_secret: cireporunner_github_token
 trigger:
   event:
     - tag
