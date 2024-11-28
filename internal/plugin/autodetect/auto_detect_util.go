@@ -51,6 +51,16 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			tool:         "dotnet",
 			preparer:     newDotnetPreparer(),
 		},
+		{
+			globToDetect: "*.vbproj",
+			tool:         "dotnet",
+			preparer:     newDotnetPreparer(),
+		},
+		{
+			globToDetect: "*.fsproj",
+			tool:         "dotnet",
+			preparer:     newDotnetPreparer(),
+		},
 	}
 
 	var directoriesToCache []string
