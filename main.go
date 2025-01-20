@@ -253,6 +253,11 @@ func main() {
 			EnvVars: []string{"PLUGIN_CACHE_KEY"},
 		},
 		&cli.StringFlag{
+			Name:    "cache-file, chf",
+			Usage:   "cache file to use for generating cache file metrics",
+			EnvVars: []string{"PLUGIN_CACHE_INTEL_FILE"},
+		},
+		&cli.StringFlag{
 			Name:    "remote-root, rr",
 			Usage:   "remote root directory to contain all the cache files created (default repo.name)",
 			EnvVars: []string{"PLUGIN_REMOTE_ROOT"},
@@ -610,6 +615,7 @@ func run(c *cli.Context) error {
 		ArchiveFormat:              c.String("archive-format"),
 		Backend:                    c.String("backend"),
 		CacheKeyTemplate:           c.String("cache-key"),
+		CacheFileName:              c.String("cache-file"),
 		CompressionLevel:           c.Int("compression-level"),
 		Debug:                      c.Bool("debug"),
 		Mount:                      c.StringSlice("mount"),

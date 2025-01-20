@@ -22,10 +22,6 @@ import (
 	"github.com/meltwater/drone-cache/storage/common"
 )
 
-const (
-	PLUGIN_CACHE_INTEL_FILE_NAME = "plugin-cache-intel.json"
-)
-
 type restorer struct {
 	logger log.Logger
 
@@ -47,7 +43,7 @@ func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.
 }
 
 // Restore restores files from the cache provided with given paths.
-func (r restorer) Restore(dsts []string) error {
+func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	level.Info(r.logger).Log("msg", "restoring cache")
 
 	now := time.Now()
@@ -100,7 +96,7 @@ func (r restorer) Restore(dsts []string) error {
 		go func(src, dst string) {
 			defer wg.Done()
 
-			if err := r.restore(src, dst); err != nil {
+			if err := r.restore(src, dst, cacheFileName); err != nil {
 				errs.Add(fmt.Errorf("download from <%s> to <%s>, %w", src, dst, err))
 			}
 		}(src, dst)
@@ -118,7 +114,7 @@ func (r restorer) Restore(dsts []string) error {
 }
 
 // restore fetches the archived file from the cache and restores to the host machine's file system.
-func (r restorer) restore(src, dst string) (err error) {
+func (r restorer) restore(src, dst, cacheFileName string) (err error) {
 	pr, pw := io.Pipe()
 	defer internal.CloseWithErrCapturef(&err, pr, "rebuild, pr close <%s>", dst)
 
@@ -146,7 +142,10 @@ func (r restorer) restore(src, dst string) (err error) {
 		return err
 	}
 
-	writeCacheMetadata(CacheMetadata{CacheSize: humanize.Bytes(uint64(written))}, PLUGIN_CACHE_INTEL_FILE_NAME)
+	err = writeCacheMetadata(CacheMetadata{CacheSize: humanize.Bytes(uint64(written))}, cacheFileName)
+	if err != nil {
+		level.Error(r.logger).Log("msg", "writeCacheMetadata", "err", err)
+	}
 
 	level.Info(r.logger).Log("msg", "downloaded to local", "directory", dst, "cache size", humanize.Bytes(uint64(written)))
 
