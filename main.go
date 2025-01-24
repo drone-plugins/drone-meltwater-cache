@@ -253,7 +253,7 @@ func main() {
 			EnvVars: []string{"PLUGIN_CACHE_KEY"},
 		},
 		&cli.StringFlag{
-			Name:    "cache-file, chf",
+			Name:    "metrics-file, chf",
 			Usage:   "cache file to use for generating cache file metrics",
 			EnvVars: []string{"PLUGIN_CACHE_INTEL_FILE"},
 		},
@@ -615,7 +615,7 @@ func run(c *cli.Context) error {
 		ArchiveFormat:              c.String("archive-format"),
 		Backend:                    c.String("backend"),
 		CacheKeyTemplate:           c.String("cache-key"),
-		CacheFileName:              c.String("cache-file"),
+		CacheFileName:              c.String("metrics-file"),
 		CompressionLevel:           c.Int("compression-level"),
 		Debug:                      c.Bool("debug"),
 		Mount:                      c.StringSlice("mount"),
