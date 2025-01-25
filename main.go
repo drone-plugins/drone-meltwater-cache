@@ -255,7 +255,7 @@ func main() {
 		&cli.StringFlag{
 			Name:    "metrics-file, chf",
 			Usage:   "cache file to use for generating cache file metrics",
-			EnvVars: []string{"PLUGIN_CACHE_INTEL_FILE"},
+			EnvVars: []string{"PLUGIN_CACHE_INTEL_METRICS_FILE"},
 		},
 		&cli.StringFlag{
 			Name:    "remote-root, rr",
@@ -615,7 +615,7 @@ func run(c *cli.Context) error {
 		ArchiveFormat:              c.String("archive-format"),
 		Backend:                    c.String("backend"),
 		CacheKeyTemplate:           c.String("cache-key"),
-		CacheFileName:              c.String("metrics-file"),
+		MetricsFile:                c.String("metrics-file"),
 		CompressionLevel:           c.Int("compression-level"),
 		Debug:                      c.Bool("debug"),
 		Mount:                      c.StringSlice("mount"),

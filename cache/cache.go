@@ -43,7 +43,8 @@ type cache struct {
 }
 
 type CacheMetadata struct {
-	CacheSize string `json:"cache_size,omitempty"`
+	CacheSizeBytes uint64 `json:"cache_size_bytes,omitempty"`
+	Dstpath        string `json:"dst_path,omitempty"`
 }
 
 // New creates a new cache with given parameters.

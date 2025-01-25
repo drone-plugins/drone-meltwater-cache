@@ -37,6 +37,8 @@ type restorer struct {
 	accountID               string
 }
 
+var cacheFileMutex sync.Mutex // To ensure thread-safe writes to the file
+
 // NewRestorer creates a new cache.Restorer.
 func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, backend, accountID string) Restorer { // nolint:lll
 	return restorer{logger, a, s, g, fg, namespace, failIfKeyNotPresent, enableCacheKeySeparator, backend, accountID}
@@ -142,7 +144,7 @@ func (r restorer) restore(src, dst, cacheFileName string) (err error) {
 		return err
 	}
 
-	err = writeCacheMetadata(CacheMetadata{CacheSize: humanize.Bytes(uint64(written))}, cacheFileName)
+	err = writeCacheMetadata(CacheMetadata{CacheSizeBytes: uint64(written), Dstpath: dst}, cacheFileName)
 	if err != nil {
 		level.Error(r.logger).Log("msg", "writeCacheMetadata", "err", err)
 	}
@@ -188,21 +190,52 @@ func getSeparator() string {
 }
 
 func writeCacheMetadata(data CacheMetadata, filename string) error {
-	b, err := json.MarshalIndent(data, "", "\t")
-	if err != nil {
-		return fmt.Errorf("failed with err %s to marshal output %+v", err, data)
-	}
+	// Lock the mutex to prevent concurrent writes
+	cacheFileMutex.Lock()
+	defer cacheFileMutex.Unlock()
 
+	// Ensure the directory exists
 	dir := filepath.Dir(filename)
-	err = os.MkdirAll(dir, 0644)
+	err := os.MkdirAll(dir, 0755)
 	if err != nil {
-		return fmt.Errorf("failed with err %s to create %s directory for cache metrics file", err, dir)
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	err = os.WriteFile(filename, b, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write cache metrics to cache metrics file %s", filename)
+	// Initialize a slice to hold the cache metadata
+	var cacheData []CacheMetadata
+
+	// Check if the file exists
+	if _, err := os.Stat(filename); err == nil {
+		// File exists, read and unmarshal its contents
+		fileContent, err := os.ReadFile(filename)
+		if err != nil {
+			return fmt.Errorf("failed to read cache file %s: %w", filename, err)
+		}
+
+		// Unmarshal the JSON into the slice
+		if len(fileContent) > 0 {
+			err = json.Unmarshal(fileContent, &cacheData)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal existing cache data: %w", err)
+			}
+		}
 	}
-	fmt.Println("Successfully wrote to CacheMetadata file at", filename)
+
+	// Append the new metadata to the slice
+	cacheData = append(cacheData, data)
+
+	// Marshal the updated slice back to JSON
+	updatedData, err := json.MarshalIndent(cacheData, "", "\t")
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated cache data: %w", err)
+	}
+
+	// Write the updated JSON to the file
+	err = os.WriteFile(filename, updatedData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write updated cache data to file %s: %w", filename, err)
+	}
+
+	fmt.Println("Successfully updated cache metrics to", filename)
 	return nil
 }
