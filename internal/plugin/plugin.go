@@ -177,7 +177,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	}
 
 	if cfg.Restore {
-		if err := c.Restore(p.Config.Mount); err != nil {
+		if err := c.Restore(p.Config.Mount, p.Config.MetricsFile); err != nil {
 			level.Debug(p.logger).Log("err", fmt.Sprintf("%+v\n", err))
 			return Error(fmt.Sprintf("[IMPORTANT] restore cache, %+v\n", err))
 		}

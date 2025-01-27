@@ -16,6 +16,7 @@ type Config struct {
 	ArchiveFormat    string
 	Backend          string
 	CacheKeyTemplate string
+	MetricsFile      string
 	RemoteRoot       string
 	LocalRoot        string
 	AccountID        string
