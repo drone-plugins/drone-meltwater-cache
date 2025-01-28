@@ -1,0 +1,690 @@
+pipeline:
+  orgIdentifier: default
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: GitHub_Drone_Plugins_Org
+        repoName: drone-meltwater-cache
+        build: <+input>
+        sparseCheckout: []
+  stages:
+    - stage:
+        name: Testing
+        identifier: testing
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: false
+            paths: []
+          buildIntelligence:
+            enabled: false
+          execution:
+            steps:
+              - step:
+                  type: Background
+                  name: minio
+                  identifier: minio
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: minio/minio:RELEASE.2020-11-06T23-17-07Z
+                    shell: Sh
+                    command: minio server /data
+                    envVariables:
+                      MINIO_ACCESS_KEY: AKIAIOSFODNN7EXAMPLE
+                      MINIO_REGION: eu-west-1
+                      MINIO_SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+              - step:
+                  type: Background
+                  name: fakegcs
+                  identifier: fakegcs
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: fsouza/fake-gcs-server:1.18.3
+                    shell: Sh
+                    command: fake-gcs-server -public-host fakegcs -scheme http
+              - step:
+                  type: Background
+                  name: sftp
+                  identifier: sftp
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: atmoz/sftp:alpine
+                    shell: Sh
+                    command: /entrypoint foo:pass:::sftp_test bar:pass:::plugin_test
+              - step:
+                  type: Background
+                  name: azurite
+                  identifier: azurite
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: mcr.microsoft.com/azure-storage/azurite
+                    shell: Sh
+                    command: azurite-blob --blobHost 0.0.0.0
+              - step:
+                  type: Run
+                  name: fetch
+                  identifier: fetch
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: docker:git
+                    shell: Sh
+                    command: git fetch --tags
+                  description: This is needed for the tags. And the tags are needed to determine version.
+              - step:
+                  type: Run
+                  name: configure-buckets
+                  identifier: configurebuckets
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: minio/mc:RELEASE.2020-10-03T02-54-56Z
+                    shell: Sh
+                    command: |-
+                      sleep 5
+                      mc config host add minio http://minio:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                      mc mb --region=eu-west-1 minio/drone-cache-bucket
+                      mc admin user add minio foo barbarbar
+                      echo '{"Version": "2012-10-17", "Statement": [ { "Action": [ "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:CreateBucket", "s3:DeleteBucket", "s3:ListBucket" ], "Effect": "Allow", "Resource": [ "arn:aws:s3:::s3-round-trip-with-role/*", "arn:aws:s3:::s3-round-trip-with-role" ], "Sid": "" } ] }' >> /tmp/policy.json
+                      mc admin policy add minio userpolicy /tmp/policy.json
+              - step:
+                  type: Run
+                  name: build
+                  identifier: build
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: golang:1.22.4-alpine3.19
+                    shell: Sh
+                    command: |-
+                      apk add --update make git
+                      make drone-cache
+                    envVariables:
+                      CGO_ENABLED: "0"
+                  description: there is an issue in golang 1.17.7-alpine3.15 -- with make files so using 1.17.3 here   https://gitlab.alpinelinux.org/alpine/aports/-/issues/12396
+              - step:
+                  type: Run
+                  name: test
+                  identifier: test
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: golang:1.22.4-alpine3.19
+                    shell: Sh
+                    command: go test -mod=vendor -short -cover -tags=integration -timeout 20m ./...
+                    envVariables:
+                      CGO_ENABLED: "0"
+                      TEST_S3_ENDPOINT: http://minio:9000
+                      TEST_GCS_ENDPOINT: http://fakegcs:4443/storage/v1/
+                      TEST_STORAGE_EMULATOR_HOST: fakegcs:4443
+                      TEST_SFTP_HOST: sftp
+                      TEST_AZURITE_URL: azurite:10000
+                  timeout: 1h
+              - step:
+                  type: Plugin
+                  name: rebuild-cache
+                  identifier: rebuildcache
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      bucket: drone-cache-bucket
+                      mount:
+                        - vendor
+                      rebuild: true
+                      region: eu-west-1
+                      path_style: true
+                      endpoint: minio:9000
+                      exit_code: true
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+                      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: rebuild-cache-with-key
+                  identifier: rebuildcachewithkey
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      bucket: drone-cache-bucket
+                      cache_key: "{{ .Repo.Name }}_{{ checksum \"go.mod\" }}_{{ checksum \"go.sum\" }}_{{ arch }}_{{ os }}"
+                      mount:
+                        - vendor
+                      rebuild: true
+                      region: eu-west-1
+                      path_style: true
+                      endpoint: minio:9000
+                      exit_code: true
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+                      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: rebuild-cache-with-gzip
+                  identifier: rebuildcachewithgzip
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      archive_format: gzip
+                      bucket: drone-cache-bucket
+                      cache_key: gzip
+                      mount:
+                        - vendor
+                      rebuild: true
+                      region: eu-west-1
+                      path_style: true
+                      endpoint: minio:9000
+                      exit_code: true
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+                      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: rebuild-cache-with-filesystem
+                  identifier: rebuildcachewithfilesystem
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      archive_format: gzip
+                      backend: filesystem
+                      cache_key: volume
+                      mount:
+                        - vendor
+                      rebuild: true
+                      exit_code: true
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: restore-cache-with-key
+                  identifier: restorecachewithkey
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      bucket: drone-cache-bucket
+                      cache_key: "{{ .Repo.Name }}_{{ checksum \"go.mod\" }}_{{ checksum \"go.sum\" }}_{{ arch }}_{{ os }}"
+                      mount:
+                        - vendor
+                      restore: true
+                      region: eu-west-1
+                      path_style: true
+                      endpoint: minio:9000
+                      exit_code: true
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+                      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: restore-cache-with-gzip
+                  identifier: restorecachewithgzip
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      archive_format: gzip
+                      bucket: drone-cache-bucket
+                      cache_key: gzip
+                      mount:
+                        - vendor
+                      restore: true
+                      region: eu-west-1
+                      path_style: true
+                      endpoint: minio:9000
+                      exit_code: true
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+                      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: restore-cache-with-filesystem
+                  identifier: restorecachewithfilesystem
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      archive_format: gzip
+                      backend: filesystem
+                      cache_key: volume
+                      mount:
+                        - vendor
+                      restore: true
+                      exit_code: true
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: restore-cache-debug
+                  identifier: restorecachedebug
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      debug: true
+                      restore: true
+                      pull: always
+                    imagePullPolicy: Always
+              - step:
+                  type: Plugin
+                  name: restore-cache
+                  identifier: restorecache
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: meltwater/drone-cache:v1.1.0-rc1
+                    settings:
+                      bucket: drone-cache-bucket
+                      mount:
+                        - vendor
+                      region: eu-west-1
+                      restore: true
+                      path_style: true
+                      endpoint: minio:9000
+                      exit_code: true
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
+                      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+                    imagePullPolicy: Always
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          sharedPaths:
+            - /tmp/cache
+    - parallel:
+        - stage:
+            name: Linux ARM64
+            identifier: Linux_ARM64
+            description: ""
+            type: CI
+            spec:
+              cloneCodebase: true
+              caching:
+                enabled: false
+                paths: []
+              buildIntelligence:
+                enabled: false
+              platform:
+                os: Linux
+                arch: Arm64
+              runtime:
+                type: Cloud
+                spec: {}
+              execution:
+                steps:
+                  - step:
+                      identifier: buildpush
+                      type: Run
+                      name: build
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.22.4
+                        shell: Sh
+                        command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
+                        envVariables:
+                          CGO_ENABLED: "0"
+                          GO111MODULE: "on"
+                        imagePullPolicy: Always
+                  - step:
+                      type: Run
+                      name: build-tag
+                      identifier: Run_2_2
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.22.4
+                        shell: Sh
+                        command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
+                        envVariables:
+                          CGO_ENABLED: "0"
+                          GO111MODULE: "on"
+                        imagePullPolicy: Always
+                  - step:
+                      type: Plugin
+                      name: "Build and Push on Tag "
+                      identifier: Plugin_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: plugins/docker
+                        settings:
+                          username: drone
+                          password: <+secrets.getValue("Plugins_Docker_Hub_Pat")>
+                          repo: plugins/cache
+                          dockerfile: docker/Dockerfile.linux.arm64
+                          auto_tag: "true"
+                          auto_tag_suffix: linux-arm64
+                      when:
+                        stageStatus: Success
+                        condition: <+codebase.build.type> == "tag"
+                  - step:
+                      type: BuildAndPushDockerRegistry
+                      name: Build And Push On Branch
+                      identifier: BuildAndPushDockerRegistry_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        repo: plugins/cache
+                        tags:
+                          - linux-arm64
+                        caching: false
+                        dockerfile: docker/Dockerfile.linux.arm64
+                      when:
+                        stageStatus: Success
+                        condition: <+codebase.build.type> == "branch"
+        - stage:
+            name: Linux AMD64
+            identifier: Linux_AMD64
+            description: ""
+            type: CI
+            spec:
+              cloneCodebase: true
+              caching:
+                enabled: false
+                paths: []
+              platform:
+                os: Linux
+                arch: Amd64
+              runtime:
+                type: Cloud
+                spec: {}
+              execution:
+                steps:
+                  - step:
+                      type: Run
+                      name: build-push
+                      identifier: Run_1_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.22.4
+                        shell: Sh
+                        command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
+                        envVariables:
+                          CGO_ENABLED: "0"
+                          GO111MODULE: "on"
+                        imagePullPolicy: Always
+                  - step:
+                      type: Run
+                      name: build-tag
+                      identifier: Run_1_2
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.22.4
+                        shell: Sh
+                        command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
+                        envVariables:
+                          CGO_ENABLED: "0"
+                          GO111MODULE: "on"
+                        imagePullPolicy: Always
+                  - step:
+                      type: Plugin
+                      name: Build and Push on Tag
+                      identifier: Plugin_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: plugins/docker:linux-amd64
+                        settings:
+                          username: drone
+                          password: <+secrets.getValue("Plugins_Docker_Hub_Pat")>
+                          repo: plugins/cache
+                          dockerfile: docker/Dockerfile.linux.amd64
+                          auto_tag: "true"
+                          auto_tag_suffix: linux-amd64
+                      when:
+                        stageStatus: Success
+                        condition: <+codebase.build.type> == "tag"
+                  - step:
+                      type: BuildAndPushDockerRegistry
+                      name: Build And Push on Branch
+                      identifier: BuildAndPushDockerRegistry_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        repo: plugins/cache
+                        tags:
+                          - linux-amd64
+                        caching: false
+                        dockerfile: docker/Dockerfile.linux.amd64
+                      when:
+                        stageStatus: Success
+                        condition: |
+                          <+codebase.build.type> == "branch"
+        - stage:
+            name: Windows-1809
+            identifier: Windows1809
+            description: ""
+            type: CI
+            spec:
+              cloneCodebase: true
+              caching:
+                enabled: false
+                paths: []
+              buildIntelligence:
+                enabled: false
+              platform:
+                os: Windows
+                arch: Amd64
+              runtime:
+                type: Cloud
+                spec: {}
+              execution:
+                steps:
+                  - step:
+                      identifier: build_amd64ltsc2022
+                      type: Run
+                      name: build
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.22.4
+                        shell: Sh
+                        command: |-
+                          echo $env:DRONE_SEMVER_SHORT
+                          go build -o release/windows/amd64/drone-cache.exe
+                        envVariables:
+                          CGO_ENABLED: "0"
+                  - step:
+                      type: Plugin
+                      name: Build and Push on Tag
+                      identifier: Plugin_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: plugins/docker
+                        settings:
+                          username: drone
+                          password: <+secrets.getValue("Plugins_Docker_Hub_Pat")>
+                          repo: plugins/cache
+                          dockerfile: docker/Dockerfile.windows.1809
+                          auto_tag: "true"
+                          auto_tag_suffix: windows-1809-amd64
+                          daemon_off: true
+                          purge: false
+                      when:
+                        stageStatus: Success
+                        condition: <+codebase.build.type> == "tag"
+                  - step:
+                      type: BuildAndPushDockerRegistry
+                      name: Build And Push on Branch
+                      identifier: BuildAndPushDockerRegistry_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        repo: plugins/cache
+                        tags:
+                          - windows-1809-amd64
+                        caching: false
+                        dockerfile: docker/Dockerfile.windows.1809
+                      when:
+                        stageStatus: Success
+                        condition: <+codebase.build.type> == "branch"
+        - stage:
+            name: Windows-ltsc2022
+            identifier: WindowsLTSC2022
+            description: ""
+            type: CI
+            spec:
+              cloneCodebase: true
+              caching:
+                enabled: false
+                paths: []
+              platform:
+                os: Windows
+                arch: Amd64
+              runtime:
+                type: Cloud
+                spec: {}
+              buildIntelligence:
+                enabled: false
+              execution:
+                steps:
+                  - step:
+                      identifier: build_amd64ltsc2022
+                      type: Run
+                      name: build
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.22.4
+                        shell: Sh
+                        command: |-
+                          echo $env:DRONE_SEMVER_SHORT
+                          go build -o release/windows/amd64/drone-cache.exe
+                        envVariables:
+                          CGO_ENABLED: "0"
+                  - step:
+                      type: Plugin
+                      name: Build and Push on Tag
+                      identifier: Plugin_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: plugins/docker
+                        settings:
+                          username: drone
+                          password: <+secrets.getValue("Plugins_Docker_Hub_Pat")>
+                          repo: plugins/cache
+                          dockerfile: docker/Dockerfile.windows.ltsc2022
+                          auto_tag: "true"
+                          auto_tag_suffix: windows-ltsc2022-amd64
+                          daemon_off: true
+                          purge: false
+                      when:
+                        stageStatus: Success
+                        condition: <+codebase.build.type> == "tag"
+                  - step:
+                      type: BuildAndPushDockerRegistry
+                      name: Build And Push on Branch
+                      identifier: BuildAndPushDockerRegistry_1
+                      spec:
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        repo: plugins/cache
+                        tags:
+                          - windows-ltsc2022-amd64
+                        caching: false
+                        dockerfile: docker/Dockerfile.windows.ltsc2022
+                      when:
+                        stageStatus: Success
+                        condition: <+codebase.build.type> == "branch"
+    - stage:
+        name: Notifications
+        identifier: notifications
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: false
+            paths: []
+          buildIntelligence:
+            enabled: false
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Plugin
+                  name: manifest
+                  identifier: manifest
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: plugins/manifest
+                    settings:
+                      username: drone
+                      password: <+secrets.getValue("Plugins_Docker_Hub_Pat")>
+                      auto_tag: "true"
+                      ignore_missing: "true"
+                      spec: docker/manifest.tmpl
+                    imagePullPolicy: Always
+                  when:
+                    stageStatus: Success
+                    condition: |
+                      <+codebase.build.type> == "tag" || "branch"
+    - stage:
+        name: Release artifacts
+        identifier: Release_artifacts
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: false
+            paths: []
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          buildIntelligence:
+            enabled: false
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Build binaries
+                  identifier: Run_1
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: golang:1.22.4
+                    shell: Sh
+                    command: |-
+                      GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-linux-amd64
+                      GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-linux-arm64
+                      GOOS=darwin  GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-darwin-arm64
+                      GOOS=windows GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-windows-amd64
+
+                      apt-get update -y
+                      apt-get install -y zstd
+                      zstd release/plugin-meltwater-cache-linux-amd64
+                      zstd release/plugin-meltwater-cache-linux-arm64
+                      zstd release/plugin-meltwater-cache-darwin-arm64
+                      zstd release/plugin-meltwater-cache-windows-amd64
+                  when:
+                    stageStatus: Success
+                    condition: |
+                      <+codebase.build.type> == "tag"
+              - step:
+                  type: Plugin
+                  name: Release
+                  identifier: Release
+                  spec:
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: plugins/github-release
+                    settings:
+                      api_key: <+secrets.getValue("ci_job_github_pat")>
+                      title: <+trigger.tag>
+                      files: release/plugin-meltwater-cache-*.zst
+                  when:
+                    stageStatus: Success
+                    condition: <+codebase.build.type> == "tag"
+        variables:
+          - name: DRONE_REPO_OWNER
+            type: String
+            description: ""
+            required: false
+            value: drone-plugins
+  projectIdentifier: Drone_Plugins
+  identifier: dronemeltwatercacheharness
+  name: drone-meltwater-cache-harness
