@@ -128,7 +128,7 @@ func TestPlugin(t *testing.T) {
 			mount: func(name string) []string {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
-			autodetect: true
+			autodetect: true,
 			cacheKey: "key"
 			success: true,
 		},
@@ -137,13 +137,13 @@ func TestPlugin(t *testing.T) {
 			mount: func(name string) []string {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
-			autodetect: true
+			autodetect: true,
 			success: false,
 		},
 		{
 			name: "autodetect path missing",
 			cacheKey: "key"
-			autodetect: true
+			autodetect: true,
 			success: false,
 		},
 		// NOTICE: Slows down test runs significantly, disabled for now. Will be introduced with a special flag.
