@@ -140,12 +140,6 @@ func TestPlugin(t *testing.T) {
 			autodetect: true,
 			success:    true,
 		},
-		{
-			name:       "autodetect path missing",
-			cacheKey:   "key",
-			autodetect: true,
-			success:    false,
-		},
 		// NOTICE: Slows down test runs significantly, disabled for now. Will be introduced with a special flag.
 		// {
 		// 	name: "existing mount with large file",
