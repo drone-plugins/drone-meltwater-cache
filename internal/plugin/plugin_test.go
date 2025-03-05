@@ -129,7 +129,7 @@ func TestPlugin(t *testing.T) {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
 			autodetect: true,
-			cacheKey: "key"
+			cacheKey: "key",
 			success: true,
 		},
 		{
