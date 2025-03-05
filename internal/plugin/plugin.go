@@ -91,12 +91,14 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	switch {
 	case cfg.AutoDetect:
 		{
+			var toolDetected, keyOverriden bool = false, false
 			pathOverridden := len(p.Config.Mount) > 0
 			dirs, buildTools, cacheKey, err := autodetect.DetectDirectoriesToCache(pathOverridden)
 			if err != nil {
 				return fmt.Errorf("autodetect enabled but failed to detect, falling back to default, %w", err)
 			}
 			if len(buildTools) > 0 {
+				toolDetected = true
 				p.logger.Log("msg", "build tools detected: "+strings.Join(buildTools, ", ")) //nolint: errcheck
 			} else if pathOverridden {
 				p.logger.Log("msg", "using provided cache path") //nolint: errcheck
@@ -110,10 +112,42 @@ func (p *Plugin) Exec() error { // nolint:funlen
 				options = append(options, cache.WithGracefulDetect(false))
 			}
 			if cfg.CacheKeyTemplate != "" {
+				keyOverriden = true
 				cacheKey = cfg.CacheKeyTemplate
 			} else if cacheKey == "" {
 				cacheKey = "default"
 			}
+
+			// auto-detect | Tool detected | Key override | Path Override | Key used    | Path Used
+			// ------------|---------------|--------------|---------------|-------------|-------------
+			//  On         | Yes           | Yes          | Yes           | user key    | user path
+			//  On         | Yes           | Yes          | No            | user key    | auto path
+			//  On         | Yes           | No           | Yes           | disable     | disable
+			//  On         | Yes           | No           | No            | auto key    | auto path
+			//  On         | No            | Yes          | Yes           | user key    | user path
+			//  On         | No            | Yes          | No            | disable     | disable
+			//  On         | No            | No           | Yes           | disable     | disable
+			//  On         | No            | No           | No            | disable     | disable
+
+			//  Off        | N/A           | Yes          | Yes           | user key    | user path
+			//  Off        | N/A           | No           | Yes           | Error       | Error
+			//  Off        | N/A           | No           | No            | Error       | Error
+
+			if !toolDetected {
+				if !(keyOverriden && pathOverridden) {
+					p.logger.Log("msg", "no build tool detected. Please provide custom key and path to use cache")
+					return nil
+				}
+			} else if pathOverridden {
+				if !keyOverriden {
+					p.logger.Log("msg", "cache path provided but cache key is not provided, skipping cache")
+					return nil
+				} else {
+					// continue with a warning
+					p.logger.Log("msg", "using supplied key and detected path")
+				}
+			}
+
 			generator = keygen.NewMetadata(p.logger, cfg.AccountID+"/"+cacheKey, p.Metadata)
 			if err := generator.Check(); err != nil {
 				return fmt.Errorf("parse failed, falling back to default, %w", err)
