@@ -74,10 +74,10 @@ func TestPlugin(t *testing.T) {
 	})
 
 	cases := []struct {
-		name     string
-		mount    func(string) []string
-		cacheKey string
-		success  bool
+		name       string
+		mount      func(string) []string
+		cacheKey   string
+		success    bool
 		autodetect bool
 	}{
 		{
@@ -129,8 +129,8 @@ func TestPlugin(t *testing.T) {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
 			autodetect: true,
-			cacheKey: "key",
-			success: true,
+			cacheKey:   "key",
+			success:    true,
 		},
 		{
 			name: "autodetect key missing",
@@ -138,13 +138,13 @@ func TestPlugin(t *testing.T) {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
 			autodetect: true,
-			success: false,
+			success:    false,
 		},
 		{
-			name: "autodetect path missing",
-			cacheKey: "key"
+			name:       "autodetect path missing",
+			cacheKey:   "key",
 			autodetect: true,
-			success: false,
+			success:    false,
 		},
 		// NOTICE: Slows down test runs significantly, disabled for now. Will be introduced with a special flag.
 		// {
