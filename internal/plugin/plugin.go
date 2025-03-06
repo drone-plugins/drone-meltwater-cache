@@ -118,33 +118,12 @@ func (p *Plugin) Exec() error { // nolint:funlen
 				cacheKey = "default"
 			}
 
-			// auto-detect | Tool detected | Key override | Path Override | Key used    | Path Used
-			// ------------|---------------|--------------|---------------|-------------|-------------
-			//  On         | Yes           | Yes          | Yes           | user key    | user path
-			//  On         | Yes           | Yes          | No            | user key    | auto path
-			//  On         | Yes           | No           | Yes           | disable     | disable
-			//  On         | Yes           | No           | No            | auto key    | auto path
-			//  On         | No            | Yes          | Yes           | user key    | user path
-			//  On         | No            | Yes          | No            | disable     | disable
-			//  On         | No            | No           | Yes           | disable     | disable
-			//  On         | No            | No           | No            | disable     | disable
-
-			//  Off        | N/A           | Yes          | Yes           | user key    | user path
-			//  Off        | N/A           | No           | Yes           | Error       | Error
-			//  Off        | N/A           | No           | No            | Error       | Error
-
+			// for now if tool detect fails, require both key and paths
 			if !toolDetected {
 				if !(keyOverriden && pathOverridden) {
+					// log message and end step
 					p.logger.Log("msg", "no build tool detected. Please provide custom key and path to use cache")
 					return nil
-				}
-			} else if pathOverridden {
-				if !keyOverriden {
-					p.logger.Log("msg", "cache path provided but cache key is not provided, skipping cache")
-					return nil
-				} else {
-					// continue with a warning
-					p.logger.Log("msg", "using supplied key and detected path")
 				}
 			}
 
