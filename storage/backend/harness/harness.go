@@ -58,24 +58,108 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 }
 
 func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
+	// First try to get the XML file that contains part information
 	preSignedURL, err := b.client.GetDownloadURL(ctx, key)
 	if err != nil {
 		return err
 	}
+
 	res, err := b.do(ctx, "GET", preSignedURL, nil)
 	if err != nil {
 		return err
 	}
 	defer internal.CloseWithErrLogf(b.logger, res.Body, "response body, close defer")
+
+	// If not found, this might be a regular file
+	if res.StatusCode == http.StatusNotFound {
+		b.logger.Log("msg", "file not found, checking if it's a multipart file", "key", key)
+		return fmt.Errorf("file not found: %s", key)
+	}
+
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("received status code %d from presigned get url", res.StatusCode)
 	}
-	_, err = io.Copy(w, res.Body)
-	if err != nil {
+
+	// Try to parse the response as XML
+	var completeReq CompleteMultipartUploadRequest
+	if err := xml.NewDecoder(res.Body).Decode(&completeReq); err != nil {
+		// If we can't parse as XML, this is a regular file
+		b.logger.Log("msg", "not a multipart file, copying directly", "key", key)
+		// Reset the body reader to the beginning
+		res.Body.Close()
+		// Get the file again since we consumed the body
+		res, err = b.do(ctx, "GET", preSignedURL, nil)
+		if err != nil {
+			return err
+		}
+		defer internal.CloseWithErrLogf(b.logger, res.Body, "response body, close defer")
+		_, err = io.Copy(w, res.Body)
 		return err
 	}
 
-	return nil
+	// This is a multipart file, download and combine all parts
+	b.logger.Log(
+		"msg", "found multipart file, downloading parts",
+		"key", key,
+		"numParts", len(completeReq.Parts),
+	)
+
+	// Create a temp buffer for each part and calculate checksum
+	var combinedData bytes.Buffer
+	hash := md5.New()
+	mw := io.MultiWriter(&combinedData, hash)
+
+	// Download and combine each part in order
+	for _, part := range completeReq.Parts {
+		b.logger.Log(
+			"msg", "downloading part",
+			"partNumber", part.PartNumber,
+			"partKey", part.Key,
+		)
+
+		// Get the part
+		partURL, err := b.client.GetDownloadURL(ctx, part.Key)
+		if err != nil {
+			return fmt.Errorf("failed to get download URL for part %d: %w", part.PartNumber, err)
+		}
+
+		partRes, err := b.do(ctx, "GET", partURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to download part %d: %w", part.PartNumber, err)
+		}
+		defer internal.CloseWithErrLogf(b.logger, partRes.Body, "part response body, close defer")
+
+		if partRes.StatusCode != http.StatusOK {
+			return fmt.Errorf("received status code %d when downloading part %d", partRes.StatusCode, part.PartNumber)
+		}
+
+		// Copy this part's data to the combined buffer and hash
+		_, err = io.Copy(mw, partRes.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read part %d data: %w", part.PartNumber, err)
+		}
+	}
+
+	// Calculate final checksum
+	restoredChecksum := fmt.Sprintf("%x", hash.Sum(nil))
+
+	// Verify checksum matches
+	if completeReq.Checksum != "" && completeReq.Checksum != restoredChecksum {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", completeReq.Checksum, restoredChecksum)
+	}
+
+	b.logger.Log(
+		"msg", "successfully combined all parts",
+		"key", key,
+		"numParts", len(completeReq.Parts),
+		"totalSize", combinedData.Len(),
+		"checksum", restoredChecksum,
+		"checksumMatch", completeReq.Checksum == restoredChecksum,
+	)
+
+	// Write the combined data to the output writer
+	_, err = io.Copy(w, &combinedData)
+	return err
 }
 
 const (
