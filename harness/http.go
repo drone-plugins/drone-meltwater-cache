@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/meltwater/drone-cache/storage/common"
@@ -50,19 +51,40 @@ func (c *HTTPClient) GetUploadURL(ctx context.Context, key string) (string, erro
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
-// getDownloadURL will get the 'get' presigned url from cache service
+// GetUploadURLWithQuery will get the 'put' presigned url from cache service with additional query parameters
+func (c *HTTPClient) GetUploadURLWithQuery(ctx context.Context, key string, query url.Values) (string, error) {
+	path := fmt.Sprintf(StoreEndpoint, c.AccountID, key)
+	fullURL := c.Endpoint + path
+	if len(query) > 0 {
+		if strings.Contains(fullURL, "?") {
+			fullURL += "&" + query.Encode()
+		} else {
+			fullURL += "?" + query.Encode()
+		}
+	}
+
+	// Get the presigned URL from the server
+	presignedURL, err := c.getLink(ctx, fullURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to get presigned URL: %w", err)
+	}
+
+	return presignedURL, err
+}
+
+// GetDownloadURL will get the 'get' presigned url from cache service
 func (c *HTTPClient) GetDownloadURL(ctx context.Context, key string) (string, error) {
 	path := fmt.Sprintf(RestoreEndpoint, c.AccountID, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
-// getExistsURL will get the 'exists' presigned url from cache service
+// GetExistsURL will get the 'exists' presigned url from cache service
 func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, error) {
 	path := fmt.Sprintf(ExistsEndpoint, c.AccountID, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
-// getListURL will get the list of all entries
+// GetListURL will get the list of all entries
 func (c *HTTPClient) GetEntriesList(ctx context.Context, prefix string) ([]common.FileEntry, error) {
 	path := fmt.Sprintf(ListEntriesEndpoint, c.AccountID, prefix)
 	req, err := http.NewRequestWithContext(ctx, "GET", c.Endpoint+path, nil)
