@@ -133,11 +133,19 @@ func TestPlugin(t *testing.T) {
 			success:    true,
 		},
 		{
-			name: "autodetect key missing",
+			name: "autodetect success key missing",
 			mount: func(name string) []string {
 				return exampleFileTree(t, name, make([]byte, 1*1024))
 			},
 			autodetect: true,
+			success:    true,
+		},
+		{
+			name: "autodetect failed key missing",
+			mount: func(name string) []string {
+				return exampleFileTree(t, name, make([]byte, 1*1024))
+			},
+			autodetect: false,
 			success:    true,
 		},
 		// NOTICE: Slows down test runs significantly, disabled for now. Will be introduced with a special flag.
