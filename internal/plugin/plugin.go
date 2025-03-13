@@ -125,11 +125,10 @@ func (p *Plugin) Exec() error { // nolint:funlen
 				Yes              No              Yes              do nothing    do nothing
 				Yes              No              No               auto key      auto path
 				No               Yes             Yes              user key      user path
-				No               Yes             No               disable       disable
+				No               Yes             No               do nothing    do nothing
 				No               No              Yes              do nothing    do nothing
 				No               No              No               do nothing    do nothing
 			*/
-			// for now if tool detect fails, require both key and paths
 			if !toolDetected {
 				if !(keyOverriden && pathOverridden) {
 					// log message and end step
