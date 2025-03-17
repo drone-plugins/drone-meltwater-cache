@@ -82,7 +82,7 @@ const (
 	// 5GB in bytes - threshold for multipart upload
 	multipartThreshold = 5 * 1024 * 1024 * 1024
 	// 64MB chunk size for multipart uploads
-	multipartChunkSize = 64 * 1024 * 1024
+	multipartChunkSize = 256 * 1024 * 1024
 )
 
 func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
@@ -385,11 +385,6 @@ func (b *Backend) do(ctx context.Context, method, urlStr string, body io.Reader)
 	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	if !strings.Contains(urlStr, "X-Amz-Signature=") {
-		// Only add AWS headers for non-presigned URLs
-		req.Header.Set("X-Amz-Content-SHA256", "UNSIGNED-PAYLOAD")
 	}
 
 	httpClient := &http.Client{}
