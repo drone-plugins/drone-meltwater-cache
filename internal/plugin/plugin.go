@@ -117,6 +117,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 			} else if cacheKey == "" {
 				cacheKey = "default"
 			}
+
 			/*
 				Tool Detected    Key Override    Path Override    Key Used      Path Used
 				---------------------------------------------------------------
@@ -129,16 +130,18 @@ func (p *Plugin) Exec() error { // nolint:funlen
 				No               No              Yes              do nothing    do nothing
 				No               No              No               do nothing    do nothing
 			*/
+			if cfg.AutoDetectEarlyExit {
+				if pathOverridden && !keyOverriden {
+					p.logger.Log("msg", "A key must be provided if any custom paths are used. Skipping cache")
+				}
+			}
+
 			if !toolDetected {
-				if !(keyOverriden && pathOverridden) {
+				if !keyOverriden && !pathOverridden {
 					// log message and end step
 					p.logger.Log("msg", "no build tool detected. Please provide custom key and path to use cache")
 					return nil
 				}
-			}
-
-			if pathOverridden && !keyOverriden {
-				p.logger.Log("msg", "A key must be provided if any custom paths are used. Skipping cache")
 			}
 
 			generator = keygen.NewMetadata(p.logger, cfg.AccountID+"/"+cacheKey, p.Metadata)
