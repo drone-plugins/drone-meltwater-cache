@@ -279,6 +279,12 @@ func main() {
 			Value:   false,
 			EnvVars: []string{"PLUGIN_AUTO_CACHE"},
 		},
+		&cli.BoolFlag{
+			Name:    "auto-detect-early-exit",
+			Usage:   "determines whether plugin will early return if key is missing while path is specified,",
+			Value:   false,
+			EnvVars: []string{"PLUGIN_AUTO_CACHE_EARLY_EXIT"},
+		},
 		&cli.StringFlag{
 			Name:    "account-id",
 			Usage:   "account-id used for automatic key generation",
@@ -622,6 +628,7 @@ func run(c *cli.Context) error {
 		Rebuild:                    c.Bool("rebuild"),
 		Restore:                    c.Bool("restore"),
 		AutoDetect:                 c.Bool("auto-detect"),
+		AutoDetectEarlyExit:        c.Bool("auto-detect-early-exit"),
 		AccountID:                  c.String("account-id"),
 		RemoteRoot:                 c.String("remote-root"),
 		LocalRoot:                  c.String("local-root"),
