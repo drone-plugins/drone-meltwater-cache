@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -81,8 +83,8 @@ func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
 const (
 	// 5GB in bytes - threshold for multipart upload
 	multipartThreshold = 5 * 1024 * 1024 * 1024
-	// 64MB chunk size for multipart uploads
-	multipartChunkSize = 256 * 1024 * 1024
+	// 512MB chunk size for multipart upload
+	multipartChunkSize = 512 * 1024 * 1024
 )
 
 func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
@@ -115,16 +117,16 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 	buf := &bytes.Buffer{}
 	hash := md5.New()
 	mw := io.MultiWriter(buf, hash)
-	
+
 	// Copy data to buffer while calculating hash
 	totalSize, err := io.Copy(mw, r)
 	if err != nil {
 		return fmt.Errorf("failed to read data: %w", err)
 	}
-	
+
 	// Get the MD5 checksum
 	checksum := fmt.Sprintf("%x", hash.Sum(nil))
-	
+
 	// Log the original file checksum
 	b.logger.Log(
 		"msg", "calculated file checksum",
@@ -195,71 +197,160 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 		}
 
 		// Upload parts in chunks
-		var completedParts []CompletedPartElement
-		partNumber := 1
+		const (
+			maxWorkers     = 10 // Maximum number of concurrent uploads
+			maxRetries     = 3  // Maximum number of retries per part
+			initialBackoff = 1 * time.Second
+		)
 
-		for {
-			chunk := make([]byte, multipartChunkSize)
-			n, err := io.ReadFull(r, chunk)
-			if err == io.EOF {
-				break
-			}
-			if err != nil && err != io.ErrUnexpectedEOF {
-				return fmt.Errorf("error reading content for part %d: %w", partNumber, err)
-			}
-
-			// Create a unique key for this part
-			partKey := fmt.Sprintf("%s.part%d", key, partNumber)
-
-			// Get a new presigned URL for uploading this part
-			queryParams = url.Values{}
-			queryParams.Set("key", partKey) // Use the part-specific key
-			queryParams.Set("partNumber", fmt.Sprintf("%d", partNumber))
-			queryParams.Set("uploadId", uploadID)
-			partURL, err := b.client.GetUploadURLWithQuery(ctx, partKey, queryParams) // Use part-specific key
-			if err != nil {
-				return err
-			}
-
-			// Log the presigned URL and parameters for debugging
-			b.logger.Log(
-				"msg", "generated presigned URL for part upload",
-				"originalKey", key,
-				"partKey", partKey,
-				"uploadID", uploadID,
-				"partNumber", partNumber,
-				"url", partURL,
-			)
-
-			// Upload part directly with PUT
-			res, err := b.do(ctx, "PUT", partURL, bytes.NewReader(chunk[:n]))
-			if err != nil {
-				return fmt.Errorf("failed to upload part %d: %w", partNumber, err)
-			}
-			defer internal.CloseWithErrLogf(b.logger, res.Body, "response body, close defer")
-
-			if res.StatusCode != http.StatusOK {
-				body, _ := io.ReadAll(res.Body)
-				return fmt.Errorf("received status code %d for part %d, body: %s", res.StatusCode, partNumber, string(body))
-			}
-
-			etag := res.Header.Get("ETag")
-			if etag == "" {
-				return fmt.Errorf("no ETag in response for part %d", partNumber)
-			}
-
-			// Store completed part info with the part-specific key
-			completedParts = append(completedParts, CompletedPartElement{
-				PartNumber: partNumber,
-				ETag:       strings.Trim(etag, "\""),
-				Key:        partKey,
-			})
-
-			partNumber++
-			if err == io.ErrUnexpectedEOF {
-				break
-			}
+		type partUploadResult struct {
+			part CompletedPartElement
+			err  error
 		}
+
+		// Create channels for work distribution and result collection
+		jobs := make(chan struct {
+			partNumber int
+			chunk      []byte
+		}, maxWorkers)
+		results := make(chan partUploadResult, maxWorkers)
+
+		// Start worker pool
+		var wg sync.WaitGroup
+		for w := 0; w < maxWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for job := range jobs {
+					// Worker function to handle part upload with retries
+					var result partUploadResult
+					backoff := initialBackoff
+
+					for attempt := 0; attempt < maxRetries; attempt++ {
+						partKey := fmt.Sprintf("%s.part%d", key, job.partNumber)
+						queryParams := url.Values{}
+						queryParams.Set("key", partKey)
+						queryParams.Set("partNumber", fmt.Sprintf("%d", job.partNumber))
+						queryParams.Set("uploadId", uploadID)
+
+						partURL, err := b.client.GetUploadURLWithQuery(ctx, partKey, queryParams)
+						if err != nil {
+							if attempt < maxRetries-1 {
+								time.Sleep(backoff)
+								backoff *= 2 // Exponential backoff
+								continue
+							}
+							result.err = fmt.Errorf("failed to get presigned URL for part %d after %d attempts: %w", job.partNumber, attempt+1, err)
+							break
+						}
+
+						b.logger.Log(
+							"msg", "uploading part",
+							"originalKey", key,
+							"partKey", partKey,
+							"uploadID", uploadID,
+							"partNumber", job.partNumber,
+							"attempt", attempt+1,
+						)
+
+						res, err := b.do(ctx, "PUT", partURL, bytes.NewReader(job.chunk))
+						if err != nil {
+							if attempt < maxRetries-1 {
+								time.Sleep(backoff)
+								backoff *= 2
+								continue
+							}
+							result.err = fmt.Errorf("failed to upload part %d after %d attempts: %w", job.partNumber, attempt+1, err)
+							break
+						}
+
+						defer internal.CloseWithErrLogf(b.logger, res.Body, "response body, close defer")
+
+						if res.StatusCode != http.StatusOK {
+							body, _ := io.ReadAll(res.Body)
+							if attempt < maxRetries-1 {
+								time.Sleep(backoff)
+								backoff *= 2
+								continue
+							}
+							result.err = fmt.Errorf("received status code %d for part %d after %d attempts, body: %s", res.StatusCode, job.partNumber, attempt+1, string(body))
+							break
+						}
+
+						etag := res.Header.Get("ETag")
+						if etag == "" {
+							if attempt < maxRetries-1 {
+								time.Sleep(backoff)
+								backoff *= 2
+								continue
+							}
+							result.err = fmt.Errorf("no ETag in response for part %d after %d attempts", job.partNumber, attempt+1)
+							break
+						}
+
+						// Successfully uploaded the part
+						result.part = CompletedPartElement{
+							PartNumber: job.partNumber,
+							ETag:       strings.Trim(etag, "\""),
+							Key:        partKey,
+						}
+						break // Success, exit retry loop
+					}
+
+					results <- result
+				}
+			}()
+		}
+
+		// Read and distribute parts to workers
+		go func() {
+			partNumber := 1
+			for {
+				chunk := make([]byte, multipartChunkSize)
+				n, err := io.ReadFull(r, chunk)
+				if err == io.EOF {
+					break
+				}
+				if err != nil && err != io.ErrUnexpectedEOF {
+					results <- partUploadResult{err: fmt.Errorf("error reading content for part %d: %w", partNumber, err)}
+					break
+				}
+
+				jobs <- struct {
+					partNumber int
+					chunk      []byte
+				}{
+					partNumber: partNumber,
+					chunk:      chunk[:n],
+				}
+
+				partNumber++
+				if err == io.ErrUnexpectedEOF {
+					break
+				}
+			}
+			close(jobs)
+		}()
+
+		// Wait for all workers to complete
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		// Collect results and handle errors
+		var completedParts []CompletedPartElement
+		for result := range results {
+			if result.err != nil {
+				return result.err
+			}
+			completedParts = append(completedParts, result.part)
+		}
+
+		// Sort completed parts by part number for proper assembly
+		sort.Slice(completedParts, func(i, j int) bool {
+			return completedParts[i].PartNumber < completedParts[j].PartNumber
+		})
 
 		// Log the parts we're about to combine
 		b.logger.Log(
