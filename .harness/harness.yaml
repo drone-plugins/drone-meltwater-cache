@@ -650,17 +650,17 @@ pipeline:
                     image: golang:1.22.4
                     shell: Sh
                     command: |-
-                      GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-linux-amd64
-                      GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-linux-arm64
-                      GOOS=darwin  GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-darwin-arm64
-                      GOOS=windows GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-meltwater-cache-windows-amd64
+                      GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
+                      GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
+                      GOOS=darwin  GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
+                      GOOS=windows GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64
 
                       apt-get update -y
                       apt-get install -y zstd
-                      zstd release/plugin-meltwater-cache-linux-amd64
-                      zstd release/plugin-meltwater-cache-linux-arm64
-                      zstd release/plugin-meltwater-cache-darwin-arm64
-                      zstd release/plugin-meltwater-cache-windows-amd64
+                      zstd release/plugin-linux-amd64
+                      zstd release/plugin-linux-arm64
+                      zstd release/plugin-darwin-arm64
+                      zstd release/plugin-windows-amd64
                   when:
                     stageStatus: Success
                     condition: |
@@ -688,3 +688,4 @@ pipeline:
   projectIdentifier: Drone_Plugins
   identifier: dronemeltwatercacheharness
   name: drone-meltwater-cache-harness
+  allowStageExecutions: true
