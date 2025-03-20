@@ -166,7 +166,7 @@ const (
 	// 5GB in bytes - threshold for multipart upload
 	multipartThreshold = 5 * 1024 * 1024 * 1024
 	// 256MB chunk size for multipart upload
-	multipartChunkSize = 256 * 1024 * 1024
+	multipartChunkSize = 1 * 1024 * 1024 * 1024
 )
 
 func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
