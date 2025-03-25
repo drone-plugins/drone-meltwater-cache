@@ -74,10 +74,11 @@ func TestPlugin(t *testing.T) {
 	})
 
 	cases := []struct {
-		name     string
-		mount    func(string) []string
-		cacheKey string
-		success  bool
+		name       string
+		mount      func(string) []string
+		cacheKey   string
+		success    bool
+		autodetect bool
 	}{
 		{
 			name: "existing mount",
@@ -121,6 +122,31 @@ func TestPlugin(t *testing.T) {
 				return exampleFileTreeWithSymlinks(t, name, make([]byte, 1*1024))
 			},
 			success: true,
+		},
+		{
+			name: "autodetect key and path exist",
+			mount: func(name string) []string {
+				return exampleFileTree(t, name, make([]byte, 1*1024))
+			},
+			autodetect: true,
+			cacheKey:   "key",
+			success:    true,
+		},
+		{
+			name: "autodetect success key missing",
+			mount: func(name string) []string {
+				return exampleFileTree(t, name, make([]byte, 1*1024))
+			},
+			autodetect: true,
+			success:    true,
+		},
+		{
+			name: "autodetect failed key missing",
+			mount: func(name string) []string {
+				return exampleFileTree(t, name, make([]byte, 1*1024))
+			},
+			autodetect: false,
+			success:    true,
 		},
 		// NOTICE: Slows down test runs significantly, disabled for now. Will be introduced with a special flag.
 		// {

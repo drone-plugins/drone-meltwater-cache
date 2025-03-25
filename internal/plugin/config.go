@@ -22,10 +22,11 @@ type Config struct {
 	AccountID        string
 
 	// Modes
-	Debug      bool
-	Rebuild    bool
-	Restore    bool
-	AutoDetect bool
+	Debug               bool
+	Rebuild             bool
+	Restore             bool
+	AutoDetect          bool
+	AutoDetectEarlyExit bool
 
 	// Optional
 	SkipSymlinks               bool
