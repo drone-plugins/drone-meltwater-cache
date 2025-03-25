@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -23,15 +24,25 @@ type MockClient struct {
 }
 
 func (m *MockClient) GetUploadURL(ctx context.Context, key string) (string, error) {
-	return m.URL, nil
+	return m.URL + "?key=" + key, nil
+}
+
+func (m *MockClient) GetUploadURLWithQuery(ctx context.Context, key string, query url.Values) (string, error) {
+	// Create a new query to avoid modifying the input
+	newQuery := url.Values{}
+	for k, v := range query {
+		newQuery[k] = v
+	}
+	newQuery.Set("key", key)
+	return m.URL + "?" + newQuery.Encode(), nil
 }
 
 func (m *MockClient) GetDownloadURL(ctx context.Context, key string) (string, error) {
-	return m.URL, nil
+	return m.URL + "?key=" + key, nil
 }
 
 func (m *MockClient) GetExistsURL(ctx context.Context, key string) (string, error) {
-	return m.URL, nil
+	return m.URL + "?key=" + key, nil
 }
 
 func (m *MockClient) GetEntriesList(ctx context.Context, key string) ([]common.FileEntry, error) {
