@@ -343,13 +343,13 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 
 	b.logger.Log(
 		"msg", "checking multipart upload configuration",
-		"PLUGIN_UPLOAD_MULTIPART", os.Getenv("PLUGIN_UPLOAD_MULTIPART"),
+		"PLUGIN_ENABLE_MULTIPART", os.Getenv("PLUGIN_ENABLE_MULTIPART"),
 		"Configured Chunk size", multipartChunkSize,
 		"Configured max file size", getMaxUploadSize(),
 	)
 
 	// Use multipart upload for files larger than 5GB if enabled via env var
-	if os.Getenv("PLUGIN_UPLOAD_MULTIPART") == "true" && totalSize > multipartThreshold {
+	if os.Getenv("PLUGIN_ENABLE_MULTIPART") == "true" && totalSize > multipartThreshold {
 		// Get a new presigned URL for initiating multipart upload
 		queryParams := url.Values{}
 		queryParams.Set("key", key)

@@ -360,7 +360,7 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 	}
 
 	// Enable multipart upload
-	t.Setenv("PLUGIN_UPLOAD_MULTIPART", "true")
+	t.Setenv("PLUGIN_ENABLE_MULTIPART", "true")
 
 	// Create test data slightly larger than multipart threshold
 	testDataSize := 5*1024*1024*1024 + 1024*1024 // 5GB + 1MB
@@ -556,14 +556,14 @@ func TestMultipartUploadToggle(t *testing.T) {
 	largeData := make([]byte, chunkSize+1)
 
 	// Test with multipart upload disabled
-	t.Setenv("PLUGIN_UPLOAD_MULTIPART", "false")
+	t.Setenv("PLUGIN_ENABLE_MULTIPART", "false")
 	err := backend.Put(context.Background(), "test-key", bytes.NewBuffer(largeData))
 	if err != nil {
 		t.Errorf("Put method returned unexpected error with multipart disabled: %v", err)
 	}
 
 	// Test with multipart upload enabled
-	t.Setenv("PLUGIN_UPLOAD_MULTIPART", "true")
+	t.Setenv("PLUGIN_ENABLE_MULTIPART", "true")
 	err = backend.Put(context.Background(), "test-key", bytes.NewBuffer(largeData))
 	if err != nil {
 		t.Errorf("Put method returned unexpected error with multipart enabled: %v", err)
