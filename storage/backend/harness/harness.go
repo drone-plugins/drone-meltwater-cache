@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -257,11 +259,28 @@ func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
 }
 
 const (
-	// 5GB in bytes - threshold for multipart upload
-	multipartThreshold = 5 * 1024 * 1024 * 1024
-	// 512MB chunk size for multipart upload
-	multipartChunkSize = 512 * 1024 * 1024
+	defaultMultipartChunkSize = 512 * 1024 * 1024              // 512MB in bytes
+	multipartThreshold        = 5 * 1024 * 1024 * 1024         // 5GB in bytes - threshold for multipart upload
+	maxUploadSize             = 50 * 1024 * 1024 * 1024 * 1024 // 50GB in bytes - maximum allowed upload size
 )
+
+func getMultipartChunkSize() int64 {
+	if chunkStr := os.Getenv("PLUGIN_MULTIPART_CHUNK_SIZE_MB"); chunkStr != "" {
+		if chunkMB, err := strconv.ParseInt(chunkStr, 10, 64); err == nil {
+			return chunkMB * 1024 * 1024 // Convert MB to bytes
+		}
+	}
+	return defaultMultipartChunkSize
+}
+
+func getMaxUploadSize() int64 {
+	if sizeStr := os.Getenv("PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB"); sizeStr != "" {
+		if sizeMB, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+			return sizeMB * 1024 * 1024 // Convert MB to bytes
+		}
+	}
+	return maxUploadSize
+}
 
 func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 	// Clean the key path
@@ -289,7 +308,7 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 		return nil
 	}
 
-	// Create a buffer to store data and calculate checksum
+	// Calculate total size and checksum
 	buf := &bytes.Buffer{}
 	hash := md5.New()
 	mw := io.MultiWriter(buf, hash)
@@ -297,28 +316,40 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 	// Copy data to buffer while calculating hash
 	totalSize, err := io.Copy(mw, r)
 	if err != nil {
-		return fmt.Errorf("failed to read data: %w", err)
+		return fmt.Errorf("failed to calculate size and checksum: %w", err)
 	}
 
 	// Get the MD5 checksum
 	checksum := fmt.Sprintf("%x", hash.Sum(nil))
 
-	// Log the original file checksum
+	// Use the buffered data as our reader
+	r = buf
+
+	// Check if file size exceeds maximum allowed size
+	maxSize := getMaxUploadSize()
+	if totalSize > maxSize {
+		return fmt.Errorf("file size %d bytes exceeds maximum allowed size of %d bytes", totalSize, maxSize)
+	}
+
 	b.logger.Log(
-		"msg", "calculated file checksum",
+		"msg", "uploading file",
 		"key", key,
 		"size", totalSize,
 		"checksum", checksum,
 	)
 
-	// Ensure we're using forward slashes in the key
-	key = strings.ReplaceAll(key, "\\", "/")
+	// Log multipart upload configuration
+	multipartChunkSize := getMultipartChunkSize()
 
-	// Use the buffered data as our reader
-	r = buf
+	b.logger.Log(
+		"msg", "checking multipart upload configuration",
+		"PLUGIN_UPLOAD_MULTIPART", os.Getenv("PLUGIN_UPLOAD_MULTIPART"),
+		"Configured Chunk size", multipartChunkSize,
+		"Configured max file size", getMaxUploadSize(),
+	)
 
-	// Use multipart upload for files larger than 5GB
-	if totalSize > multipartThreshold {
+	// Use multipart upload for files larger than 5GB if enabled via env var
+	if os.Getenv("PLUGIN_UPLOAD_MULTIPART") == "true" && totalSize > multipartThreshold {
 		// Get a new presigned URL for initiating multipart upload
 		queryParams := url.Values{}
 		queryParams.Set("key", key)

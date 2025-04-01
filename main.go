@@ -563,6 +563,19 @@ func main() {
 			Usage:   "cache service base url",
 			EnvVars: []string{"PLUGIN_CACHE_SERVICE_BASE_URL"},
 		},
+
+		&cli.Int64Flag{
+			Name:    "multipart.chunk.size",
+			Usage:   "chunk size in MB for multipart uploads (default: 512MB)",
+			Value:   512,
+			EnvVars: []string{"PLUGIN_MULTIPART_CHUNK_SIZE_MB"},
+		},
+		&cli.Int64Flag{
+			Name:    "multipart.max.size",
+			Usage:   "maximum allowed file size in MB for any upload (default: 50GB)",
+			Value:   50 * 1024, // 50GB in MB
+			EnvVars: []string{"PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB"},
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
