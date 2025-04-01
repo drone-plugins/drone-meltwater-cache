@@ -7,13 +7,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -273,141 +273,213 @@ func (r *patternReader) Read(p []byte) (n int, err error) {
 // with a large file that exceeds the multipart threshold.
 func TestParallelMultipartUploadDownload(t *testing.T) {
 	t.Log("Starting TestParallelMultipartUploadDownload...")
+	t.Setenv("PLUGIN_ENABLE_MULTIPART", "true")
 	logger := log.NewNopLogger()
 
-	// Track request count and uploaded data
-	var (
-		requestCount int
-		uploadedData []byte
-		mu           sync.Mutex
-	)
+	// Track request sequence and upload ID
+	uploadID := "test-upload-id"
+	partUploads := make(map[int][]byte)
+	var uploadedChecksum string
+	requestCount := 0
 
-	// Create a test server that handles both upload and download requests
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		requestCount++
-		mu.Unlock()
+		// All requests should be PUT or GET
+		if r.Method != "PUT" && r.Method != "GET" {
+			t.Errorf("Expected PUT or GET request, got %s", r.Method)
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 
-		t.Logf("Received request. Method: %s, Path: %s, Query: %v", r.Method, r.URL.Path, r.URL.Query())
+		query := r.URL.Query()
+		key := query.Get("key")
+		if key == "" {
+			t.Error("Missing key parameter")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 
-		switch r.Method {
-		case "PUT":
-			key := r.URL.Query().Get("key")
-			if key == "" {
-				t.Error("Missing key in query parameters")
+		// Handle different types of requests
+		switch {
+		// Upload Requests
+		case r.Method == "PUT" && query.Has("uploads"):
+			t.Log("Processing initiate multipart upload request")
+			// Return upload ID in XML response
+			w.Header().Set("Content-Type", "application/xml")
+			initResponse := MultipartUploadInitResponse{
+				Bucket:   "test-bucket",
+				Key:      key,
+				UploadID: uploadID,
+			}
+			xml.NewEncoder(w).Encode(initResponse)
+			requestCount++
+
+		case r.Method == "PUT" && query.Has("partNumber") && query.Get("uploadId") == uploadID:
+			t.Logf("Processing part upload request for part %s", query.Get("partNumber"))
+			// Read part data
+			partData, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("Failed to read part data: %v", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			// Store part data
+			partNum := query.Get("partNumber")
+			t.Logf("Storing data for part %s, size: %d bytes", partNum, len(partData))
+			partNumber := 0
+			fmt.Sscanf(partNum, "%d", &partNumber)
+
+			// Store part data
+			partUploads[partNumber] = partData
+
+			// Return ETag
+			w.Header().Set("ETag", fmt.Sprintf("\"etag-part-%d\"", partNumber))
+			w.WriteHeader(http.StatusOK)
+			requestCount++
+
+		case r.Method == "PUT" && query.Has("uploadId") && query.Get("uploadId") == uploadID && !query.Has("partNumber"):
+			// Parse completion request
+			var completeReq CompleteMultipartUploadRequest
+			if err := xml.NewDecoder(r.Body).Decode(&completeReq); err != nil {
+				t.Errorf("Failed to parse completion request: %v", err)
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			// Handle multipart upload initiation
-			if r.URL.Query().Get("uploads") != "" {
-				t.Log("Handling multipart upload initiation")
-				w.Header().Set("X-Upload-Id", "test-upload-id")
-				w.WriteHeader(http.StatusOK)
-				return
-			}
+			// Store the uploaded checksum for verification
+			uploadedChecksum = completeReq.Checksum
 
-			// Handle part upload
-			if uploadID := r.URL.Query().Get("uploadId"); uploadID != "" {
-				t.Logf("Handling part upload. Part: %s", r.URL.Query().Get("partNumber"))
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Errorf("Failed to read part body: %v", err)
-					w.WriteHeader(http.StatusInternalServerError)
-					return
+			// Verify parts are in order
+			for i, part := range completeReq.Parts {
+				if part.PartNumber != i+1 {
+					t.Errorf("Expected part number %d, got %d", i+1, part.PartNumber)
 				}
-				mu.Lock()
-				uploadedData = append(uploadedData, body...)
-				mu.Unlock()
-				w.Header().Set("ETag", fmt.Sprintf("etag-%d", len(body)))
-				w.WriteHeader(http.StatusOK)
+				expectedETag := fmt.Sprintf("\"etag-part-%d\"", part.PartNumber)
+				if part.ETag != strings.Trim(expectedETag, "\"") {
+					t.Errorf("Expected ETag %s for part %d, got %s", expectedETag, part.PartNumber, part.ETag)
+				}
+			}
+
+			w.WriteHeader(http.StatusOK)
+			requestCount++
+
+		// Download Requests
+		case r.Method == "GET" && strings.Contains(key, ".part"):
+			// Handle part download request
+			partNum := 0
+			if _, err := fmt.Sscanf(key, "test-key.part%d", &partNum); err != nil {
+				t.Errorf("Failed to parse part number from key %s: %v", key, err)
+				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			// Handle regular upload
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Errorf("Failed to read request body: %v", err)
-				w.WriteHeader(http.StatusInternalServerError)
+			partData, ok := partUploads[partNum]
+			if !ok {
+				t.Errorf("Part %d not found", partNum)
+				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			mu.Lock()
-			uploadedData = body
-			mu.Unlock()
-			w.WriteHeader(http.StatusOK)
 
-		case "GET":
-			mu.Lock()
-			data := uploadedData
-			mu.Unlock()
+			// Return the part data
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(partData)))
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(data)
+			w.Write(partData)
+			requestCount++
+
+		case r.Method == "GET":
+			// Return the completion XML for the main file
+			var parts []CompletedPartElement
+			for i := 1; i <= len(partUploads); i++ {
+				parts = append(parts, CompletedPartElement{
+					PartNumber: i,
+					ETag:       fmt.Sprintf("etag-part-%d", i),
+					Key:        fmt.Sprintf("test-key.part%d", i),
+				})
+			}
+
+			completeReq := CompleteMultipartUploadRequest{
+				Parts:    parts,
+				Checksum: uploadedChecksum,
+			}
+
+			w.Header().Set("Content-Type", "application/xml")
+			xml.NewEncoder(w).Encode(completeReq)
+			requestCount++
 
 		default:
-			t.Errorf("Unexpected request method: %s", r.Method)
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			t.Errorf("Unexpected request. Method: %s, Path: %s, Query: %v", r.Method, r.URL.Path, query)
+			w.WriteHeader(http.StatusBadRequest)
 		}
 	})
 
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	backend := &Backend{
-		logger: logger,
-		client: &MockClient{
-			URL: server.URL,
-		},
+	client := &MockClient{
+		URL: server.URL + "/upload",
 	}
 
-	// Enable multipart upload
-	t.Setenv("PLUGIN_ENABLE_MULTIPART", "true")
+	backend := &Backend{
+		logger: logger,
+		client: client,
+	}
 
 	// Create test data slightly larger than multipart threshold
-	testDataSize := 5*1024*1024*1024 + 1024*1024 // 5GB + 1MB
+	testDataSize := multipartThreshold + 1024*1024 // 5GB + 1MB
 	t.Logf("Creating test data of size: %d bytes", testDataSize)
 
 	// Create a repeating pattern for test data
-	pattern := []byte("test data pattern")
-	reader := &patternReader{
+	patternSize := 1024 * 1024 // 1MB pattern
+	pattern := make([]byte, patternSize)
+	for i := range pattern {
+		pattern[i] = byte(i % 256)
+	}
+
+	// Create a reader that repeats the pattern
+	testData := &patternReader{
 		pattern:   pattern,
 		totalSize: int64(testDataSize),
 	}
 
-	t.Log("Starting multipart upload...")
 	// Upload the test data
-	err := backend.Put(context.Background(), "test-key", reader)
+	t.Log("Starting multipart upload...")
+	err := backend.Put(context.Background(), "test-key", testData)
 	if err != nil {
 		t.Fatalf("Put method failed: %v", err)
 	}
+	t.Log("Multipart upload completed successfully")
 
-	// Download and verify
-	var downloadedData bytes.Buffer
-	err = backend.Get(context.Background(), "test-key", &downloadedData)
+	// Download and verify the data
+	t.Log("Starting parallel download...")
+	downloadedData := &bytes.Buffer{}
+	err = backend.Get(context.Background(), "test-key", downloadedData)
 	if err != nil {
 		t.Fatalf("Get method failed: %v", err)
 	}
 	t.Log("Parallel download completed successfully")
 
 	// Verify the downloaded data size
-	if downloadedData.Len() != int(testDataSize) {
+	if downloadedData.Len() != testDataSize {
 		t.Errorf("Downloaded data size mismatch: expected %d, got %d", testDataSize, downloadedData.Len())
 	}
 
-	// Verify the pattern in downloaded data
-	patternLen := len(pattern)
-	for i := int64(0); i < int64(testDataSize)-int64(patternLen)+1; i += int64(patternLen) {
-		chunk := downloadedData.Bytes()[i : i+int64(patternLen)]
-		if !bytes.Equal(chunk, pattern) {
-			t.Errorf("Data corruption at offset %d: got %x, want %x", i, chunk, pattern)
+	// Verify the content pattern
+	t.Log("Verifying downloaded data integrity...")
+	downloadedBytes := downloadedData.Bytes()
+	for i := 0; i < testDataSize; i++ {
+		expected := pattern[i%patternSize]
+		if downloadedBytes[i] != expected {
+			t.Errorf("Data mismatch at position %d: expected %d, got %d", i, expected, downloadedBytes[i])
+			break
 		}
 	}
 
 	// Verify request count
-	expectedParts := int64((int64(testDataSize) + getMultipartChunkSize() - 1) / getMultipartChunkSize())
+	expectedParts := (int64(testDataSize) + getMultipartChunkSize() - 1) / getMultipartChunkSize()
 	expectedRequests := expectedParts + 2 // initiate + parts + complete
 	expectedRequests += expectedParts + 1 // download parts + metadata
 
-	if int64(requestCount) != expectedRequests {
+	if requestCount != int(expectedRequests) {
 		t.Errorf("Expected %d requests, got %d", expectedRequests, requestCount)
 	}
 
