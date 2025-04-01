@@ -1,3 +1,4 @@
 run:
   binary:
     source: https://github.com/drone-plugins/drone-meltwater-cache/releases/download/{{ release }}/plugin-{{ os }}-{{ arch }}.zst
+    fallback_source: https://app.harness.io/storage/harness-download/harness-ti/drone-meltwater-cache/{{ release }}/plugin-{{ os }}-{{ arch }}.zst
