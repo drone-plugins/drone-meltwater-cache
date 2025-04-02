@@ -576,6 +576,17 @@ func main() {
 			Value:   50 * 1024, // 50GB in MB
 			EnvVars: []string{"PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB"},
 		},
+		&cli.Int64Flag{
+			Name:    "multipart.threshold.size",
+			Usage:   "threshold for initiating multipart upload in MB (default: 5GB)",
+			Value:   5 * 1024, // 5GB in MB
+			EnvVars: []string{"PLUGIN_MULTIPART_THRESHOLD_SIZE_MB"},
+		},
+		&cli.StringFlag{
+			Name:    "multipart.enabled",
+			Usage:   "enable multipart upload",
+			EnvVars: []string{"PLUGIN_ENABLE_MULTIPART"},
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
@@ -704,9 +715,13 @@ func run(c *cli.Context) error {
 			ServiceAccountEmail: c.String("oidc-service-account-email"),
 		},
 		Harness: harness.Config{
-			AccountID:     c.String("account-id"),
-			Token:         c.String("cache-service-token"),
-			ServerBaseURL: c.String("cache-service-baseurl"),
+			AccountID:              c.String("account-id"),
+			Token:                  c.String("cache-service-token"),
+			ServerBaseURL:          c.String("cache-service-baseurl"),
+			MultipartChunkSize:     c.Int("multipart.chunk.size"),
+			MultipartMaxUploadSize: c.Int("multipart.max.size"),
+			MultipartThresholdSize: c.Int("multipart.threshold.size"),
+			MultipartEnabled:       c.String("multipart.enabled"),
 		},
 
 		SkipSymlinks: c.Bool("skip-symlinks"),
