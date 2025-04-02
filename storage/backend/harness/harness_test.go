@@ -99,6 +99,11 @@ func TestPut(t *testing.T) {
 		client: &MockClient{
 			URL: server.URL,
 		},
+		c: Config{
+			MultipartChunkSize:     512,       // 512MB
+			MultipartMaxUploadSize: 50 * 1024, // 50GB
+			MultipartThresholdSize: 5 * 1024,  // 5GB
+		},
 	}
 
 	// Execute Put method
