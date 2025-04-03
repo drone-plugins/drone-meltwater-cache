@@ -62,24 +62,200 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 }
 
 func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
+	// First try to get the XML file that contains part information
 	preSignedURL, err := b.client.GetDownloadURL(ctx, key)
 	if err != nil {
 		return err
 	}
+
 	res, err := b.do(ctx, "GET", preSignedURL, nil)
 	if err != nil {
 		return err
 	}
 	defer internal.CloseWithErrLogf(b.logger, res.Body, "response body, close defer")
+
+	// If not found, this might be a regular file
+	if res.StatusCode == http.StatusNotFound {
+		b.logger.Log("msg", "file not found, checking if it's a multipart file", "key", key)
+		return fmt.Errorf("file not found: %s", key)
+	}
+
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("received status code %d from presigned get url", res.StatusCode)
 	}
-	_, err = io.Copy(w, res.Body)
-	if err != nil {
+
+	// Try to parse the response as XML
+	var completeReq CompleteMultipartUploadRequest
+	if err := xml.NewDecoder(res.Body).Decode(&completeReq); err != nil {
+		// If we can't parse as XML, this is a regular file
+		b.logger.Log("msg", "not a multipart file, copying directly", "key", key)
+		// Reset the body reader to the beginning
+		res.Body.Close()
+		// Get the file again since we consumed the body
+		res, err = b.do(ctx, "GET", preSignedURL, nil)
+		if err != nil {
+			return err
+		}
+		defer internal.CloseWithErrLogf(b.logger, res.Body, "response body, close defer")
+		_, err = io.Copy(w, res.Body)
 		return err
 	}
 
-	return nil
+	// This is a multipart file, download and combine all parts
+	b.logger.Log(
+		"msg", "found multipart file, downloading parts",
+		"key", key,
+		"numParts", len(completeReq.Parts),
+	)
+
+	const (
+		maxDownloadWorkers = 10 // Maximum number of concurrent downloads
+		maxDownloadRetries = 3  // Maximum number of retries per part
+		initialBackoff     = 1 * time.Second
+	)
+
+	type downloadResult struct {
+		partNumber int
+		data       []byte
+		err        error
+	}
+
+	// Create buffered channels for work distribution and result collection
+	jobs := make(chan CompletedPartElement, maxDownloadWorkers)
+	results := make(chan downloadResult, len(completeReq.Parts))
+
+	// Start worker pool
+	var wg sync.WaitGroup
+	for w := 0; w < maxDownloadWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for part := range jobs {
+				// Worker function to handle part download with retries
+				var result downloadResult
+				result.partNumber = part.PartNumber
+				backoff := initialBackoff
+
+				for attempt := 0; attempt < maxDownloadRetries; attempt++ {
+					b.logger.Log(
+						"msg", "downloading part",
+						"partNumber", part.PartNumber,
+						"partKey", part.Key,
+						"attempt", attempt+1,
+					)
+
+					partURL, err := b.client.GetDownloadURL(ctx, part.Key)
+					if err != nil {
+						if attempt < maxDownloadRetries-1 {
+							time.Sleep(backoff)
+							backoff *= 2
+							continue
+						}
+						result.err = fmt.Errorf("failed to get download URL for part %d after %d attempts: %w", part.PartNumber, attempt+1, err)
+						break
+					}
+
+					partRes, err := b.do(ctx, "GET", partURL, nil)
+					if err != nil {
+						if attempt < maxDownloadRetries-1 {
+							time.Sleep(backoff)
+							backoff *= 2
+							continue
+						}
+						result.err = fmt.Errorf("failed to download part %d after %d attempts: %w", part.PartNumber, attempt+1, err)
+						break
+					}
+					defer internal.CloseWithErrLogf(b.logger, partRes.Body, "part response body, close defer")
+
+					if partRes.StatusCode != http.StatusOK {
+						if attempt < maxDownloadRetries-1 {
+							time.Sleep(backoff)
+							backoff *= 2
+							continue
+						}
+						result.err = fmt.Errorf("received status code %d when downloading part %d after %d attempts", partRes.StatusCode, part.PartNumber, attempt+1)
+						break
+					}
+
+					// Read the entire part into memory
+					data, err := io.ReadAll(partRes.Body)
+					if err != nil {
+						if attempt < maxDownloadRetries-1 {
+							time.Sleep(backoff)
+							backoff *= 2
+							continue
+						}
+						result.err = fmt.Errorf("failed to read part %d data after %d attempts: %w", part.PartNumber, attempt+1, err)
+						break
+					}
+
+					// Successfully downloaded the part
+					result.data = data
+					break // Success, exit retry loop
+				}
+
+				results <- result
+			}
+		}()
+	}
+
+	// Distribute parts to workers
+	go func() {
+		for _, part := range completeReq.Parts {
+			jobs <- part
+		}
+		close(jobs)
+	}()
+
+	// Wait for all workers to complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect and order results
+	downloadedParts := make([]downloadResult, len(completeReq.Parts))
+	for result := range results {
+		if result.err != nil {
+			return result.err
+		}
+		// Store result in the correct position based on part number
+		downloadedParts[result.partNumber-1] = result
+	}
+
+	// Create a temp buffer for the combined data and calculate checksum
+	var combinedData bytes.Buffer
+	hash := md5.New()
+	mw := io.MultiWriter(&combinedData, hash)
+
+	// Combine parts in order
+	for _, part := range downloadedParts {
+		_, err := mw.Write(part.data)
+		if err != nil {
+			return fmt.Errorf("failed to write part %d to combined buffer: %w", part.partNumber, err)
+		}
+	}
+
+	// Calculate final checksum
+	restoredChecksum := fmt.Sprintf("%x", hash.Sum(nil))
+
+	// Verify checksum matches
+	if completeReq.Checksum != "" && completeReq.Checksum != restoredChecksum {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", completeReq.Checksum, restoredChecksum)
+	}
+
+	b.logger.Log(
+		"msg", "successfully combined all parts",
+		"key", key,
+		"numParts", len(completeReq.Parts),
+		"totalSize", combinedData.Len(),
+		"checksum", restoredChecksum,
+		"checksumMatch", completeReq.Checksum == restoredChecksum,
+	)
+
+	// Write the combined data to the output writer
+	_, err = io.Copy(w, &combinedData)
+	return err
 }
 
 func getMultipartChunkSize(c Config) (int64, error) {
