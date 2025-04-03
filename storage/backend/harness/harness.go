@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -261,38 +260,18 @@ func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
 }
 
 func getMultipartChunkSize(c Config) int64 {
-	if chunkMB := os.Getenv("PLUGIN_MULTIPART_CHUNK_SIZE_MB"); chunkMB != "" {
-		if size, err := strconv.ParseInt(chunkMB, 10, 64); err == nil {
-			return size * 1024 * 1024 // Convert MB to bytes
-		}
-	}
 	return int64(c.MultipartChunkSize) * 1024 * 1024 // Convert MB to bytes
 }
 
 func getMultipartThresholdSize(c Config) int64 {
-	if sizeMB := os.Getenv("PLUGIN_MULTIPART_THRESHOLD_SIZE_MB"); sizeMB != "" {
-		if size, err := strconv.ParseInt(sizeMB, 10, 64); err == nil {
-			return size * 1024 * 1024 // Convert MB to bytes
-		}
-	}
 	return int64(c.MultipartThresholdSize) * 1024 * 1024 // Convert MB to bytes
 }
 
 func getMaxUploadSize(c Config) int64 {
-	if sizeMB := os.Getenv("PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB"); sizeMB != "" {
-		if size, err := strconv.ParseInt(sizeMB, 10, 64); err == nil {
-			return size * 1024 * 1024 // Convert MB to bytes
-		}
-	}
 	return int64(c.MultipartMaxUploadSize) * 1024 * 1024 // Convert MB to bytes
 }
 
 func enableMultipart(c Config) bool {
-	if enabled := os.Getenv("PLUGIN_ENABLE_MULTIPART"); enabled != "" {
-		if enabled == "true" {
-			return true
-		}
-	}
 	return c.MultipartEnabled == "true"
 }
 
