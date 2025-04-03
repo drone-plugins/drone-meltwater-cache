@@ -435,7 +435,11 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 	}
 
 	// Create test data slightly larger than multipart threshold
-	testDataSize := getMultipartThresholdSize(backend.c) + 1024*1024 // 5GB + 1MB
+	threshold, err := getMultipartThresholdSize(backend.c)
+	if err != nil {
+		t.Fatalf("Failed to get multipart threshold size: %v", err)
+	}
+	testDataSize := threshold + 1024*1024 // threshold + 1MB
 	t.Logf("Creating test data of size: %d bytes", testDataSize)
 
 	// Create a repeating pattern for test data
@@ -453,7 +457,7 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 
 	// Upload the test data
 	t.Log("Starting multipart upload...")
-	err := backend.Put(context.Background(), "test-key", testData)
+	err = backend.Put(context.Background(), "test-key", testData)
 	if err != nil {
 		t.Fatalf("Put method failed: %v", err)
 	}
@@ -485,7 +489,11 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 	}
 
 	// Verify request count
-	expectedParts := (int64(testDataSize) + getMultipartChunkSize(backend.c) - 1) / getMultipartChunkSize(backend.c)
+	chunkSize, err := getMultipartChunkSize(backend.c)
+	if err != nil {
+		t.Fatalf("Failed to get multipart chunk size: %v", err)
+	}
+	expectedParts := (int64(testDataSize) + chunkSize - 1) / chunkSize
 	expectedRequests := expectedParts + 2 // initiate + parts + complete
 	expectedRequests += expectedParts + 1 // download parts + metadata
 
