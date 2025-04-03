@@ -563,6 +563,30 @@ func main() {
 			Usage:   "cache service base url",
 			EnvVars: []string{"PLUGIN_CACHE_SERVICE_BASE_URL"},
 		},
+
+		&cli.Int64Flag{
+			Name:    "multipart.chunk.size",
+			Usage:   "chunk size in MB for multipart uploads (default: 512MB)",
+			Value:   512, //512MB
+			EnvVars: []string{"PLUGIN_MULTIPART_CHUNK_SIZE_MB"},
+		},
+		&cli.Int64Flag{
+			Name:    "multipart.max.size",
+			Usage:   "maximum allowed file size in MB for any upload (default: 51200MB = 50GB)",
+			Value:   51200, // 50GB in MB
+			EnvVars: []string{"PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB"},
+		},
+		&cli.Int64Flag{
+			Name:    "multipart.threshold.size",
+			Usage:   "threshold for initiating multipart upload in MB (default: 5120MB = 5GB)",
+			Value:   5120, // 5GB in MB
+			EnvVars: []string{"PLUGIN_MULTIPART_THRESHOLD_SIZE_MB"},
+		},
+		&cli.StringFlag{
+			Name:    "multipart.enabled",
+			Usage:   "enable multipart upload",
+			EnvVars: []string{"PLUGIN_ENABLE_MULTIPART"},
+		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
@@ -691,9 +715,13 @@ func run(c *cli.Context) error {
 			ServiceAccountEmail: c.String("oidc-service-account-email"),
 		},
 		Harness: harness.Config{
-			AccountID:     c.String("account-id"),
-			Token:         c.String("cache-service-token"),
-			ServerBaseURL: c.String("cache-service-baseurl"),
+			AccountID:              c.String("account-id"),
+			Token:                  c.String("cache-service-token"),
+			ServerBaseURL:          c.String("cache-service-baseurl"),
+			MultipartChunkSize:     c.Int("multipart.chunk.size"),
+			MultipartMaxUploadSize: c.Int("multipart.max.size"),
+			MultipartThresholdSize: c.Int("multipart.threshold.size"),
+			MultipartEnabled:       c.String("multipart.enabled"),
 		},
 
 		SkipSymlinks: c.Bool("skip-symlinks"),
