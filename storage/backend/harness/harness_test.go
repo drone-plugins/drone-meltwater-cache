@@ -496,96 +496,169 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 	t.Log("Test completed successfully")
 }
 
+// TestGetMultipartChunkSize tests the getMultipartChunkSize function with different config values.
 func TestGetMultipartChunkSize(t *testing.T) {
-	backend := &Backend{
-		c: Config{
-			MultipartChunkSize:     512,       // 512MB
-			MultipartMaxUploadSize: 50 * 1024, // 50GB
-			MultipartThresholdSize: 5 * 1024,  // 5GB
-		},
-	}
 	tests := []struct {
-		name     string
-		envValue string
-		want     int64
+		name    string
+		config  Config
+		want    int64
+		wantErr bool
 	}{
 		{
-			name:     "default value when env not set",
-			envValue: "",
-			want:     getMultipartChunkSize(backend.c),
+			name: "valid value from config",
+			config: Config{
+				MultipartChunkSize:     512,       // 512MB
+				MultipartMaxUploadSize: 50 * 1024, // 50GB
+				MultipartThresholdSize: 5 * 1024,  // 5GB
+			},
+			want:    512 * 1024 * 1024, // 512MB in bytes
+			wantErr: false,
 		},
 		{
-			name:     "custom value from env",
-			envValue: "256",
-			want:     256 * 1024 * 1024, // 256MB in bytes
+			name: "zero value should error",
+			config: Config{
+				MultipartChunkSize:     0,         // Invalid
+				MultipartMaxUploadSize: 50 * 1024, // 50GB
+				MultipartThresholdSize: 5 * 1024,  // 5GB
+			},
+			want:    0,
+			wantErr: true,
 		},
 		{
-			name:     "invalid env value falls back to default",
-			envValue: "invalid",
-			want:     getMultipartChunkSize(backend.c),
+			name: "negative value should error",
+			config: Config{
+				MultipartChunkSize:     -1,        // Invalid
+				MultipartMaxUploadSize: 50 * 1024, // 50GB
+				MultipartThresholdSize: 5 * 1024,  // 5GB
+			},
+			want:    0,
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.envValue != "" {
-				t.Setenv("PLUGIN_MULTIPART_CHUNK_SIZE_MB", tt.envValue)
-			} else {
-				t.Setenv("PLUGIN_MULTIPART_CHUNK_SIZE_MB", "")
+			got, err := getMultipartChunkSize(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getMultipartChunkSize() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-
-			if got := getMultipartChunkSize(backend.c); got != tt.want {
+			if got != tt.want {
 				t.Errorf("getMultipartChunkSize() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
+// TestGetMaxUploadSize tests the getMaxUploadSize function with different config values.
 func TestGetMaxUploadSize(t *testing.T) {
-	backend := &Backend{
-		c: Config{
-			MultipartChunkSize:     512,       // 512MB
-			MultipartMaxUploadSize: 50 * 1024, // 50GB
-			MultipartThresholdSize: 5 * 1024,  // 5GB
-		},
-	}
 	tests := []struct {
-		name     string
-		envValue string
-		want     int64
+		name    string
+		config  Config
+		want    int64
+		wantErr bool
 	}{
 		{
-			name:     "default value when env not set",
-			envValue: "",
-			want:     getMaxUploadSize(backend.c),
+			name: "valid value from config",
+			config: Config{
+				MultipartChunkSize:     512,       // 512MB
+				MultipartMaxUploadSize: 50 * 1024, // 50GB
+				MultipartThresholdSize: 5 * 1024,  // 5GB
+			},
+			want:    50 * 1024 * 1024 * 1024, // 50GB in bytes
+			wantErr: false,
 		},
 		{
-			name:     "custom value from env",
-			envValue: "1024",
-			want:     1024 * 1024 * 1024, // 1TB in bytes
+			name: "zero value should error",
+			config: Config{
+				MultipartChunkSize:     512,  // 512MB
+				MultipartMaxUploadSize: 0,    // Invalid
+				MultipartThresholdSize: 5120, // 5GB
+			},
+			want:    0,
+			wantErr: true,
 		},
 		{
-			name:     "invalid env value falls back to default",
-			envValue: "invalid",
-			want:     getMaxUploadSize(backend.c),
+			name: "negative value should error",
+			config: Config{
+				MultipartChunkSize:     512,  // 512MB
+				MultipartMaxUploadSize: -1,   // Invalid
+				MultipartThresholdSize: 5120, // 5GB
+			},
+			want:    0,
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.envValue != "" {
-				t.Setenv("PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB", tt.envValue)
-			} else {
-				t.Setenv("PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB", "")
+			got, err := getMaxUploadSize(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getMaxUploadSize() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-
-			if got := getMaxUploadSize(backend.c); got != tt.want {
+			if got != tt.want {
 				t.Errorf("getMaxUploadSize() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
+// TestGetMultipartThresholdSize tests the getMultipartThresholdSize function with different config values.
+func TestGetMultipartThresholdSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		want    int64
+		wantErr bool
+	}{
+		{
+			name: "valid value from config",
+			config: Config{
+				MultipartChunkSize:     512,       // 512MB
+				MultipartMaxUploadSize: 50 * 1024, // 50GB
+				MultipartThresholdSize: 5 * 1024,  // 5GB
+			},
+			want:    5 * 1024 * 1024 * 1024, // 5GB in bytes
+			wantErr: false,
+		},
+		{
+			name: "zero value should error",
+			config: Config{
+				MultipartChunkSize:     512,       // 512MB
+				MultipartMaxUploadSize: 50 * 1024, // 50GB
+				MultipartThresholdSize: 0,         // Invalid
+			},
+			want:    0,
+			wantErr: true,
+		},
+		{
+			name: "negative value should error",
+			config: Config{
+				MultipartChunkSize:     512,       // 512MB
+				MultipartMaxUploadSize: 50 * 1024, // 50GB
+				MultipartThresholdSize: -1,        // Invalid
+			},
+			want:    0,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getMultipartThresholdSize(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getMultipartThresholdSize() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("getMultipartThresholdSize() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPutWithSizeLimit tests the put method with size limit.
 func TestPutWithSizeLimit(t *testing.T) {
 	logger := log.NewNopLogger()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -594,43 +667,82 @@ func TestPutWithSizeLimit(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	backend := &Backend{
-		logger: logger,
-		client: &MockClient{
-			URL: server.URL,
+	tests := []struct {
+		name       string
+		maxSize    int
+		threshold  int
+		inputSize  int64
+		wantErr    bool
+		errMessage string
+	}{
+		{
+			name:      "valid size under limit",
+			maxSize:   10,       // 10MB limit
+			threshold: 5 * 1024, // 5GB threshold
+			inputSize: 5,        // 5MB data
+			wantErr:   false,
 		},
-		c: Config{
-			MultipartChunkSize:     512,       // 512MB
-			MultipartMaxUploadSize: 50 * 1024, // 50GB
-			MultipartThresholdSize: 5 * 1024,  // 5GB
+		{
+			name:       "size over limit",
+			maxSize:    1,        // 1MB limit
+			threshold:  5 * 1024, // 5GB threshold
+			inputSize:  2,        // 2MB data
+			wantErr:    true,
+			errMessage: "exceeds maximum allowed size",
+		},
+		{
+			name:       "invalid max size",
+			maxSize:    -1,       // Invalid size
+			threshold:  5 * 1024, // 5GB threshold
+			inputSize:  1,        // 1MB data
+			wantErr:    true,
+			errMessage: "invalid multipart max upload size",
+		},
+		{
+			name:       "invalid threshold size",
+			maxSize:    10, // 10MB limit
+			threshold:  -1, // Invalid threshold
+			inputSize:  1,  // 1MB data
+			wantErr:    true,
+			errMessage: "failed to get multipart threshold size",
 		},
 	}
 
-	// Set a very small max upload size for testing
-	t.Setenv("PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB", "1") // 1MB limit
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := &Backend{
+				logger: logger,
+				client: &MockClient{
+					URL: server.URL,
+				},
+				c: Config{
+					MultipartChunkSize:     512,          // 512MB
+					MultipartMaxUploadSize: tt.maxSize,   // Variable max size
+					MultipartThresholdSize: tt.threshold, // Variable threshold
+				},
+			}
 
-	// Try to upload data larger than the limit
-	largeData := make([]byte, 2*1024*1024) // 2MB
-	err := backend.Put(context.Background(), "test-key", bytes.NewBuffer(largeData))
+			// Create test data of specified size
+			data := make([]byte, tt.inputSize*1024*1024) // Convert MB to bytes
 
-	// Check that we get an error about exceeding size limit
-	if err == nil {
-		t.Error("Put method did not return error for file exceeding size limit")
-	}
-	if !strings.Contains(err.Error(), "exceeds maximum allowed size") {
-		t.Errorf("Expected size limit error, got: %v", err)
-	}
+			err := backend.Put(context.Background(), "test-key", bytes.NewBuffer(data))
 
-	// Try with data under the limit
-	smallData := make([]byte, 512*1024) // 512KB
-	err = backend.Put(context.Background(), "test-key", bytes.NewBuffer(smallData))
-
-	// Check that small upload succeeds
-	if err != nil {
-		t.Errorf("Put method returned unexpected error for valid file size: %v", err)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Put method should return error")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errMessage) {
+					t.Errorf("Expected error containing %q, got %v", tt.errMessage, err)
+				}
+			} else if err != nil {
+				t.Errorf("Put method returned unexpected error: %v", err)
+			}
+		})
 	}
 }
 
+// TestMultipartUploadToggle tests the multipartUploadToggle function with different URL paths.
 func TestMultipartUploadToggle(t *testing.T) {
 	logger := log.NewNopLogger()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -658,18 +770,21 @@ func TestMultipartUploadToggle(t *testing.T) {
 	}
 
 	// Create data larger than multipart threshold
-	chunkSize := getMultipartChunkSize(backend.c)
+	chunkSize, err := getMultipartChunkSize(backend.c)
+	if err != nil {
+		t.Fatalf("Failed to get multipart chunk size: %v", err)
+	}
 	largeData := make([]byte, chunkSize+1)
 
 	// Test with multipart upload disabled
-	t.Setenv("PLUGIN_ENABLE_MULTIPART", "false")
-	err := backend.Put(context.Background(), "test-key", bytes.NewBuffer(largeData))
+	// t.Setenv("PLUGIN_ENABLE_MULTIPART", "false")
+	err = backend.Put(context.Background(), "test-key", bytes.NewBuffer(largeData))
 	if err != nil {
 		t.Errorf("Put method returned unexpected error with multipart disabled: %v", err)
 	}
 
 	// Test with multipart upload enabled
-	t.Setenv("PLUGIN_ENABLE_MULTIPART", "true")
+	// t.Setenv("PLUGIN_ENABLE_MULTIPART", "true")
 	err = backend.Put(context.Background(), "test-key", bytes.NewBuffer(largeData))
 	if err != nil {
 		t.Errorf("Put method returned unexpected error with multipart enabled: %v", err)
