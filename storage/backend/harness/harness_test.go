@@ -431,6 +431,7 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 			MultipartChunkSize:     512,       // 512MB
 			MultipartMaxUploadSize: 50 * 1024, // 50GB
 			MultipartThresholdSize: 5 * 1024,  // 5GB
+			MultipartEnabled:       "true",
 		},
 	}
 
