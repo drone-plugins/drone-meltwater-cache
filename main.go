@@ -567,19 +567,19 @@ func main() {
 		&cli.Int64Flag{
 			Name:    "multipart.chunk.size",
 			Usage:   "chunk size in MB for multipart uploads (default: 512MB)",
-			Value:   512,
+			Value:   512, //512MB
 			EnvVars: []string{"PLUGIN_MULTIPART_CHUNK_SIZE_MB"},
 		},
 		&cli.Int64Flag{
 			Name:    "multipart.max.size",
-			Usage:   "maximum allowed file size in MB for any upload (default: 50GB)",
-			Value:   50 * 1024, // 50GB in MB
+			Usage:   "maximum allowed file size in MB for any upload (default: 51200MB = 50GB)",
+			Value:   51200, // 50GB in MB
 			EnvVars: []string{"PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB"},
 		},
 		&cli.Int64Flag{
 			Name:    "multipart.threshold.size",
-			Usage:   "threshold for initiating multipart upload in MB (default: 5GB)",
-			Value:   5 * 1024, // 5GB in MB
+			Usage:   "threshold for initiating multipart upload in MB (default: 5120MB = 5GB)",
+			Value:   5120, // 5GB in MB
 			EnvVars: []string{"PLUGIN_MULTIPART_THRESHOLD_SIZE_MB"},
 		},
 		&cli.StringFlag{

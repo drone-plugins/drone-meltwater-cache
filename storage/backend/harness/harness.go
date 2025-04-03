@@ -9,9 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -84,39 +82,28 @@ func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
 	return nil
 }
 
-func getMultipartChunkSize(c Config) int64 {
-	if chunkMB := os.Getenv("PLUGIN_MULTIPART_CHUNK_SIZE_MB"); chunkMB != "" {
-		if size, err := strconv.ParseInt(chunkMB, 10, 64); err == nil {
-			return size * 1024 * 1024 // Convert MB to bytes
-		}
+func getMultipartChunkSize(c Config) (int64, error) {
+	if c.MultipartChunkSize <= 0 {
+		return 0, fmt.Errorf("invalid multipart chunk size: %d MB, must be greater than 0", c.MultipartChunkSize)
 	}
-	return int64(c.MultipartChunkSize) * 1024 * 1024 // Convert MB to bytes
+	return int64(c.MultipartChunkSize) * 1024 * 1024, nil // Convert MB to bytes
 }
 
-func getMultipartThresholdSize(c Config) int64 {
-	if sizeMB := os.Getenv("PLUGIN_MULTIPART_THRESHOLD_SIZE_MB"); sizeMB != "" {
-		if size, err := strconv.ParseInt(sizeMB, 10, 64); err == nil {
-			return size * 1024 * 1024 // Convert MB to bytes
-		}
+func getMultipartThresholdSize(c Config) (int64, error) {
+	if c.MultipartThresholdSize <= 0 {
+		return 0, fmt.Errorf("invalid multipart threshold size: %d MB, must be greater than 0", c.MultipartThresholdSize)
 	}
-	return int64(c.MultipartThresholdSize) * 1024 * 1024 // Convert MB to bytes
+	return int64(c.MultipartThresholdSize) * 1024 * 1024, nil // Convert MB to bytes
 }
 
-func getMaxUploadSize(c Config) int64 {
-	if sizeMB := os.Getenv("PLUGIN_MULTIPART_MAX_UPLOAD_SIZE_MB"); sizeMB != "" {
-		if size, err := strconv.ParseInt(sizeMB, 10, 64); err == nil {
-			return size * 1024 * 1024 // Convert MB to bytes
-		}
+func getMaxUploadSize(c Config) (int64, error) {
+	if c.MultipartMaxUploadSize <= 0 {
+		return 0, fmt.Errorf("invalid multipart max upload size: %d MB, must be greater than 0", c.MultipartMaxUploadSize)
 	}
-	return int64(c.MultipartMaxUploadSize) * 1024 * 1024 // Convert MB to bytes
+	return int64(c.MultipartMaxUploadSize) * 1024 * 1024, nil // Convert MB to bytes
 }
 
 func enableMultipart(c Config) bool {
-	if enabled := os.Getenv("PLUGIN_ENABLE_MULTIPART"); enabled != "" {
-		if enabled == "true" {
-			return true
-		}
-	}
 	return c.MultipartEnabled == "true"
 }
 
@@ -164,7 +151,10 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 	r = buf
 
 	// Check if file size exceeds maximum allowed size
-	maxSize := getMaxUploadSize(b.c)
+	maxSize, err := getMaxUploadSize(b.c)
+	if err != nil {
+		return err
+	}
 	if totalSize > maxSize {
 		return fmt.Errorf("file size %d bytes exceeds maximum allowed size of %d bytes", totalSize, maxSize)
 	}
@@ -177,17 +167,24 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 	)
 
 	// Log multipart upload configuration
-	multipartChunkSize := getMultipartChunkSize(b.c)
+	multipartChunkSize, err := getMultipartChunkSize(b.c)
+	if err != nil {
+		return err
+	}
 
 	b.logger.Log(
 		"msg", "checking multipart upload configuration",
-		"PLUGIN_ENABLE_MULTIPART", os.Getenv("PLUGIN_ENABLE_MULTIPART"),
+		"PLUGIN_ENABLE_MULTIPART", enableMultipart(b.c),
 		"Configured Chunk size", multipartChunkSize,
-		"Configured max file size", getMaxUploadSize(b.c),
+		"Configured max file size", maxSize,
 	)
 
 	// Use multipart upload for files larger than 5GB if enabled via env var
-	if enableMultipart(b.c) && totalSize > getMultipartThresholdSize(b.c) {
+	threshold, err := getMultipartThresholdSize(b.c)
+	if err != nil {
+		return fmt.Errorf("failed to get multipart threshold size: %w", err)
+	}
+	if enableMultipart(b.c) && totalSize > threshold {
 		// Get a new presigned URL for initiating multipart upload
 		queryParams := url.Values{}
 		queryParams.Set("key", key)
