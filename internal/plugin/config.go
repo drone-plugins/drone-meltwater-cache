@@ -35,6 +35,7 @@ type Config struct {
 	CompressionLevel           int
 	StorageOperationTimeout    time.Duration
 	EnableCacheKeySeparator    bool
+	StrictKeyMatching          bool
 
 	Mount []string
 

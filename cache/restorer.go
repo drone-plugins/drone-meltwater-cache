@@ -35,13 +35,14 @@ type restorer struct {
 	enableCacheKeySeparator bool
 	backend                 string
 	accountID               string
+	strictKeyMatching       bool
 }
 
 var cacheFileMutex sync.Mutex // To ensure thread-safe writes to the file
 
 // NewRestorer creates a new cache.Restorer.
-func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, backend, accountID string) Restorer { // nolint:lll
-	return restorer{logger, a, s, g, fg, namespace, failIfKeyNotPresent, enableCacheKeySeparator, backend, accountID}
+func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, backend, accountID string, strictKeyMatching bool) Restorer { // nolint:lll
+	return restorer{logger, a, s, g, fg, namespace, failIfKeyNotPresent, enableCacheKeySeparator, backend, accountID, strictKeyMatching}
 }
 
 // Restore restores files from the cache provided with given paths.
@@ -75,6 +76,27 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				prefix = r.accountID + "/intel/" + prefix
 			}
 
+			// If strict key matching is enabled, filter entries to only include
+			// those that belong specifically to this exact key
+			if r.strictKeyMatching {
+				exactKeyPrefix := prefix
+				if !strings.HasSuffix(exactKeyPrefix, getSeparator()) {
+					exactKeyPrefix = exactKeyPrefix + getSeparator()
+				}
+
+				var validEntries []common.FileEntry
+				for _, e := range entries {
+					// Check if path starts with exact key prefix and doesn't contain another instance of the key
+					pathRemainder := strings.TrimPrefix(e.Path, exactKeyPrefix)
+					if strings.HasPrefix(e.Path, exactKeyPrefix) && !strings.Contains(pathRemainder, key) {
+						validEntries = append(validEntries, e)
+					} else {
+						level.Debug(r.logger).Log("msg", "skipping path from different key", "path", e.Path, "key", key)
+					}
+				}
+				entries = validEntries
+			}
+
 			for _, e := range entries {
 				if r.enableCacheKeySeparator {
 					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix))
@@ -99,7 +121,13 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 			defer wg.Done()
 
 			if err := r.restore(src, dst, cacheFileName); err != nil {
-				errs.Add(fmt.Errorf("download from <%s> to <%s>, %w", src, dst, err))
+				// Skip "object doesn't exist" errors if strict key matching is enabled
+				// This provides a more graceful degradation when paths are incorrect
+				if r.strictKeyMatching && strings.Contains(err.Error(), "storage: object doesn't exist") {
+					level.Warn(r.logger).Log("msg", "cache object not found, skipping", "path", src)
+				} else {
+					errs.Add(fmt.Errorf("download from <%s> to <%s>, %w", src, dst, err))
+				}
 			}
 		}(src, dst)
 	}

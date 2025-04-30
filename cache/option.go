@@ -9,6 +9,7 @@ type options struct {
 	failRestoreIfKeyNotPresent bool
 	gracefulDetect             bool
 	enableCacheKeySeparator    bool
+	strictKeyMatching          bool
 }
 
 // Option overrides behavior of Archive.
@@ -61,5 +62,12 @@ func WithFailRestoreIfKeyNotPresent(b bool) Option {
 func WithEnableCacheKeySeparator(b bool) Option {
 	return optionFunc(func(o *options) {
 		o.enableCacheKeySeparator = b
+	})
+}
+
+// WithStrictKeyMatching enables strict key matching to avoid prefix collisions.
+func WithStrictKeyMatching(b bool) Option {
+	return optionFunc(func(o *options) {
+		o.strictKeyMatching = b
 	})
 }
