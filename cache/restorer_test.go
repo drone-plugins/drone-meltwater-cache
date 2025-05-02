@@ -161,7 +161,7 @@ func TestRestoreWithStrictKeyMatching(t *testing.T) {
 func TestRestoreWithFlexibleKeyMatching(t *testing.T) {
 	// Setup
 	namespace := "repo"
-	key := "project-cache-12345678"
+	key := "project-cache"  // Note this is just a prefix!
 	
 	// Test case: storage returns entries with prefix collisions, flexible mode handles them
 	t.Run("FlexibleMode_ProcessesAllMatchingEntries", func(t *testing.T) {
@@ -170,12 +170,13 @@ func TestRestoreWithFlexibleKeyMatching(t *testing.T) {
 		
 		// Mock list function to return paths from multiple keys
 		mockS.listFunc = func(p string) ([]common.FileEntry, error) {
-			// Return entries from multiple keys with shared prefix
+			// Return entries from multiple keys that all start with the prefix "project-cache"
 			return []common.FileEntry{
 				{Path: "repo/project-cache-12345678/dir1/file1.txt"},
 				{Path: "repo/project-cache-12345678/dir2/file2.txt"},
-				// Entry from a different key that shares the prefix
-				{Path: "repo/project-cache-12345678-extended/dir3/file3.txt"},
+				{Path: "repo/project-cache-87654321/dir3/file3.txt"},
+				// This entry shouldn't match as it doesn't start with the key prefix
+				{Path: "repo/other-project/dir4/file4.txt"},
 			}, nil
 		}
 		
@@ -196,34 +197,35 @@ func TestRestoreWithFlexibleKeyMatching(t *testing.T) {
 		if err != nil {
 			t.Errorf("Expected no error, got %v", err)
 		}
-		
-		// In flexible mode, we should get calls to all paths
-		// The exact number and order may vary based on implementation details
-		if len(mockS.getCalls) < 2 {
-			t.Errorf("Expected at least 2 Get calls, only got %d: %v", len(mockS.getCalls), mockS.getCalls)
+
+		// In flexible mode, we expect calls to the actual file paths
+		// for all entries that start with our key prefix
+		expectedPaths := map[string]bool{
+			"repo/project-cache-12345678/dir1/file1.txt": true,
+			"repo/project-cache-12345678/dir2/file2.txt": true,
+			"repo/project-cache-87654321/dir3/file3.txt": true,
 		}
 		
-		// Count how many of our expected paths were called
-		expectedPaths := []string{
-			"repo/project-cache-12345678/dir1/file1.txt",
-			"repo/project-cache-12345678/dir2/file2.txt",
-			"repo/project-cache-12345678-extended/dir3/file3.txt",
+		unexpectedPaths := map[string]bool{
+			"repo/other-project/dir4/file4.txt": true, // This one shouldn't be called
 		}
 		
-		pathsFound := 0
-		for _, expectedPath := range expectedPaths {
-			for _, call := range mockS.getCalls {
-				if call == expectedPath {
-					pathsFound++
-					break
-				}
+		// Check that we have the expected number of Get calls
+		if len(mockS.getCalls) < 3 {
+			t.Errorf("Expected at least 3 Get calls, got %d: %v", len(mockS.getCalls), mockS.getCalls)
+		}
+		
+		// Check that each expected path was called
+		for _, call := range mockS.getCalls {
+			// It should be one of our expected paths
+			if !expectedPaths[call] && !unexpectedPaths[call] {
+				t.Errorf("Unexpected path in Get calls: %s", call)
 			}
-		}
-		
-		// We should have found at least 2 of our expected paths
-		// (The implementation may handle paths differently than our test expects)
-		if pathsFound < 2 {
-			t.Errorf("Expected to find at least 2 expected paths in Get calls, found %d", pathsFound)
+			
+			// Paths that shouldn't match shouldn't be in the calls
+			if unexpectedPaths[call] {
+				t.Errorf("Unexpected path should not have been called: %s", call)
+			}
 		}
 	})
 	
