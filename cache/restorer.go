@@ -61,6 +61,10 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 		errs      = &internal.MultiError{}
 		namespace = filepath.ToSlash(filepath.Clean(r.namespace))
 	)
+	
+	// A map to store custom source paths for each destination in flexible matching mode
+	sourcePaths := make(map[string]string)
+	
 	if len(dsts) == 0 {
 		prefix := filepath.Join(namespace, key)
 		if !strings.HasSuffix(prefix, getSeparator()) && r.enableCacheKeySeparator {
@@ -76,14 +80,14 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				prefix = r.accountID + "/intel/" + prefix
 			}
 
-			// If strict key matching is enabled, filter entries to only include
-			// those that belong specifically to this exact key
+			// Process entries differently based on key matching strategy
 			if r.strictKeyMatching {
+				// Strict key matching: only include entries from the exact key
 				exactKeyPrefix := prefix
 				if !strings.HasSuffix(exactKeyPrefix, getSeparator()) {
 					exactKeyPrefix = exactKeyPrefix + getSeparator()
 				}
-
+				
 				var validEntries []common.FileEntry
 				for _, e := range entries {
 					// Check if path starts with exact key prefix and doesn't contain another instance of the key
@@ -95,14 +99,53 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 					}
 				}
 				entries = validEntries
-			}
-
-			for _, e := range entries {
-				if r.enableCacheKeySeparator {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix))
-				} else {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
+				
+				// Process entries with standard path construction
+				for _, e := range entries {
+					if r.enableCacheKeySeparator {
+						dsts = append(dsts, strings.TrimPrefix(e.Path, prefix))
+					} else {
+						dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
+					}
 				}
+			} else {
+				// Flexible key matching: process all entries but construct paths correctly
+				sep := getSeparator()
+				namespacePrefix := namespace + sep
+				
+				// Detect all valid entries and extract their actual keys
+				for _, e := range entries {
+					// Extract the key portion from the path
+					pathWithoutNamespace := strings.TrimPrefix(e.Path, namespacePrefix)
+					
+					// Skip entries that don't start with the namespace
+					if len(pathWithoutNamespace) == len(e.Path) {
+						continue
+					}
+					
+					parts := strings.SplitN(pathWithoutNamespace, sep, 2)
+					
+					if len(parts) >= 2 {
+						entryKey := parts[0]
+						remainingPath := parts[1]
+						
+						// Destination is just the remaining path
+						dst := remainingPath
+						
+						// But source needs to be constructed with the actual key from the entry
+						src := filepath.Join(namespace, entryKey, remainingPath)
+						
+						level.Debug(r.logger).Log("msg", "found matching cache entry", 
+						                          "entryKey", entryKey, 
+												  "remainingPath", remainingPath)
+						
+						// Add to our destinations and map the correct source path
+						dsts = append(dsts, dst)
+						sourcePaths[dst] = src
+					}
+				}
+				
+				level.Info(r.logger).Log("msg", "flexible key matching", "entries_found", len(dsts))
 			}
 		} else if err != common.ErrNotImplemented {
 			return err
@@ -110,7 +153,14 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	}
 
 	for _, dst := range dsts {
-		src := filepath.Join(namespace, key, dst)
+		// If in flexible mode and we have a custom source path, use it
+		src := ""
+		if !r.strictKeyMatching && sourcePaths[dst] != "" {
+			src = sourcePaths[dst]
+		} else {
+			// Default path construction
+			src = filepath.Join(namespace, key, dst)
+		}
 
 		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
 		level.Debug(r.logger).Log("msg", "restoring directory", "remote", src)
@@ -121,9 +171,8 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 			defer wg.Done()
 
 			if err := r.restore(src, dst, cacheFileName); err != nil {
-				// Skip "object doesn't exist" errors if strict key matching is enabled
-				// This provides a more graceful degradation when paths are incorrect
-				if r.strictKeyMatching && strings.Contains(err.Error(), "storage: object doesn't exist") {
+				// Handle "object doesn't exist" errors gracefully in both modes
+				if strings.Contains(err.Error(), "storage: object doesn't exist") {
 					level.Warn(r.logger).Log("msg", "cache object not found, skipping", "path", src)
 				} else {
 					errs.Add(fmt.Errorf("download from <%s> to <%s>, %w", src, dst, err))
