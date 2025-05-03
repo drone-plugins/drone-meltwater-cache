@@ -121,15 +121,26 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				
 				// Detect all valid entries and extract their actual keys
 				for _, e := range entries {
-					// Extract the key portion from the path
-					pathWithoutNamespace := strings.TrimPrefix(e.Path, namespacePrefix)
+					entryPath := e.Path
+					level.Info(r.logger).Log("msg", "flexible mode - processing entry", "path", entryPath)
 					
-					// Skip entries that don't start with the namespace
-					if len(pathWithoutNamespace) == len(e.Path) {
-						level.Info(r.logger).Log("msg", "flexible mode - entry doesn't start with namespace", 
-						                          "path", e.Path, "namespace", namespacePrefix)
-						continue
+					var pathWithoutNamespace string
+					
+					// Handle the case where entries might not include the namespace
+					// This happens with some storage backends
+					if strings.HasPrefix(entryPath, namespacePrefix) {
+						// Normal case - extract the path without namespace
+						pathWithoutNamespace = strings.TrimPrefix(entryPath, namespacePrefix)
+					} else {
+						// The entry doesn't have the namespace prefix
+						// This can happen in some storage backends
+						// In this case, we'll use the entry path directly
+						pathWithoutNamespace = entryPath
 					}
+					
+					level.Info(r.logger).Log("msg", "flexible mode - extracted path", 
+					                         "path", entryPath,
+											 "pathWithoutNamespace", pathWithoutNamespace)
 					
 					// For flexible mode, we just need to check if the path starts with our search key
 					// We don't need to do complex parsing
