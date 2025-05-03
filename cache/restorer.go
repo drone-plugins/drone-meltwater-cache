@@ -114,9 +114,9 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				namespacePrefix := namespace + sep
 				
 				// Debug the entries we found
-				level.Debug(r.logger).Log("msg", "flexible mode - entries found", "count", len(entries))
+				level.Info(r.logger).Log("msg", "flexible mode - entries found", "count", len(entries))
 				for _, e := range entries {
-					level.Debug(r.logger).Log("msg", "flexible mode - entry path", "path", e.Path)
+					level.Info(r.logger).Log("msg", "flexible mode - entry path", "path", e.Path)
 				}
 				
 				// Detect all valid entries and extract their actual keys
@@ -126,45 +126,47 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 					
 					// Skip entries that don't start with the namespace
 					if len(pathWithoutNamespace) == len(e.Path) {
-						level.Debug(r.logger).Log("msg", "flexible mode - entry doesn't start with namespace", 
-						                           "path", e.Path, "namespace", namespacePrefix)
+						level.Info(r.logger).Log("msg", "flexible mode - entry doesn't start with namespace", 
+						                          "path", e.Path, "namespace", namespacePrefix)
 						continue
 					}
 					
-					// Extract the actual key and path
-					entryPath := e.Path
-					remainingPath := ""
-					
-					// Check if the entry key starts with the search key
-					// This ensures we only match entries that have the search key as a prefix
+					// For flexible mode, we just need to check if the path starts with our search key
+					// We don't need to do complex parsing
 					if strings.HasPrefix(pathWithoutNamespace, key) {
-						// Find the correct separator after the key
-						keyEndPos := strings.Index(pathWithoutNamespace[len(key):], sep)
-						if keyEndPos == -1 {
-							// No separator found after key, might be a file directly under the key
-							keyEndPos = len(pathWithoutNamespace) - len(key)
+						level.Info(r.logger).Log("msg", "flexible mode - matched entry", 
+						                          "path", e.Path, 
+												  "searchKey", key)
+						
+						// Split the path to get the key component and the remaining file path
+						pathComponents := strings.SplitN(pathWithoutNamespace, "/", 2)
+						
+						var entryKey, remainingPath string
+						if len(pathComponents) > 0 {
+							entryKey = pathComponents[0]
+						}
+						
+						if len(pathComponents) > 1 {
+							// There's a path after the key
+							remainingPath = pathComponents[1]
 						} else {
-							keyEndPos += len(key) // Adjust for the offset of the search
+							// This is a file directly under the key
+							remainingPath = ""
 						}
 						
-						// Extract the full entry key and remaining path
-						entryKey := pathWithoutNamespace[:keyEndPos]
-						if keyEndPos < len(pathWithoutNamespace) {
-							remainingPath = pathWithoutNamespace[keyEndPos+1:] // +1 to skip the separator
+						level.Info(r.logger).Log("msg", "flexible mode - extracted paths", 
+						                        "fullPath", e.Path,
+												"entryKey", entryKey,
+												"remainingPath", remainingPath)
+						
+						// Add to our destinations with the full path as source
+						if remainingPath != "" {
+							dsts = append(dsts, remainingPath)
+							sourcePaths[remainingPath] = e.Path
 						}
-						
-						level.Debug(r.logger).Log("msg", "flexible mode - matched entry",
-							"path", entryPath,
-							"pathWithoutNamespace", pathWithoutNamespace,
-							"entryKey", entryKey,
-							"remainingPath", remainingPath)
-						
-						// Add to our destinations and map the correct source path
-						dsts = append(dsts, remainingPath)
-						sourcePaths[remainingPath] = entryPath
 					} else {
-						level.Debug(r.logger).Log("msg", "flexible mode - entry doesn't match search key",
-							"path", entryPath,
+						level.Info(r.logger).Log("msg", "flexible mode - entry doesn't match search key",
+							"path", e.Path,
 							"pathWithoutNamespace", pathWithoutNamespace,
 							"searchKey", key)
 					}
