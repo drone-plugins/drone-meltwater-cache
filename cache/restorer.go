@@ -60,6 +60,10 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 		errs      = &internal.MultiError{}
 		namespace = filepath.ToSlash(filepath.Clean(r.namespace))
 	)
+
+	// A map to store the original paths for each destination
+	sourcePaths := make(map[string]string)
+
 	if len(dsts) == 0 {
 		prefix := filepath.Join(namespace, key)
 		if !strings.HasSuffix(prefix, getSeparator()) && r.enableCacheKeySeparator {
@@ -76,10 +80,27 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 			}
 
 			for _, e := range entries {
+				entryPath := e.Path
+				var dst string
+
 				if r.enableCacheKeySeparator {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix))
+					dst = strings.TrimPrefix(entryPath, prefix)
 				} else {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
+					dst = strings.TrimPrefix(entryPath, prefix+getSeparator())
+				}
+
+				if strings.HasPrefix(dst, namespace) {
+					pathComponents := strings.Split(entryPath, getSeparator())
+
+					skipCount := len(strings.Split(namespace, getSeparator()))
+					if len(pathComponents) > skipCount+1 {
+						dst = strings.Join(pathComponents[skipCount+1:], getSeparator())
+					}
+				}
+
+				if dst != "" {
+					dsts = append(dsts, dst)
+					sourcePaths[dst] = entryPath
 				}
 			}
 		} else if err != common.ErrNotImplemented {
@@ -88,7 +109,12 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	}
 
 	for _, dst := range dsts {
-		src := filepath.Join(namespace, key, dst)
+		var src string
+		if originalPath, exists := sourcePaths[dst]; exists {
+			src = originalPath
+		} else {
+			src = filepath.Join(namespace, key, dst)
+		}
 
 		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
 		level.Debug(r.logger).Log("msg", "restoring directory", "remote", src)
