@@ -83,18 +83,29 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				entryPath := e.Path
 				var dst string
 
+				level.Info(r.logger).Log("msg", "processing entry", "entryPath", entryPath, "prefix", prefix, "key", key)
+				
 				if r.enableCacheKeySeparator {
 					dst = strings.TrimPrefix(entryPath, prefix)
 				} else {
 					dst = strings.TrimPrefix(entryPath, prefix+getSeparator())
 				}
+				
+				level.Info(r.logger).Log("msg", "after initial trim", "dst", dst, "entryPath", entryPath)
 
 				if strings.HasPrefix(dst, namespace) {
+					level.Info(r.logger).Log("msg", "path still contains namespace", "dst", dst, "namespace", namespace)
+					
 					pathComponents := strings.Split(entryPath, getSeparator())
+					level.Info(r.logger).Log("msg", "path components", "components", fmt.Sprintf("%v", pathComponents))
+					
 					for i, component := range pathComponents {
+						level.Info(r.logger).Log("msg", "checking component", "index", i, "component", component, "key", key, "contains", strings.Contains(component, key))
 						if strings.Contains(component, key) {
 							if i+1 < len(pathComponents) {
+								oldDst := dst
 								dst = strings.Join(pathComponents[i+1:], getSeparator())
+								level.Info(r.logger).Log("msg", "extracted path", "oldDst", oldDst, "newDst", dst, "keyComponent", component)
 								break
 							}
 						}
@@ -102,6 +113,7 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				}
 
 				if dst != "" {
+					level.Info(r.logger).Log("msg", "adding to destinations", "dst", dst, "sourcePath", entryPath)
 					dsts = append(dsts, dst)
 					sourcePaths[dst] = entryPath
 				}
