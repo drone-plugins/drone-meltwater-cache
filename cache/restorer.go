@@ -91,10 +91,13 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 				if strings.HasPrefix(dst, namespace) {
 					pathComponents := strings.Split(entryPath, getSeparator())
-
-					skipCount := len(strings.Split(namespace, getSeparator()))
-					if len(pathComponents) > skipCount+1 {
-						dst = strings.Join(pathComponents[skipCount+1:], getSeparator())
+					for i, component := range pathComponents {
+						if strings.Contains(component, key) {
+							if i+1 < len(pathComponents) {
+								dst = strings.Join(pathComponents[i+1:], getSeparator())
+								break
+							}
+						}
 					}
 				}
 
