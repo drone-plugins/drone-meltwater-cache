@@ -81,10 +81,12 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 			for _, e := range entries {
 				entryPath := e.Path
+				origPath := entryPath // Save original for source path mapping
 				var dst string
 
 				level.Info(r.logger).Log("msg", "processing entry", "entryPath", entryPath, "prefix", prefix, "key", key)
 				
+				// First, attempt standard trimming based on separator settings
 				if r.enableCacheKeySeparator {
 					dst = strings.TrimPrefix(entryPath, prefix)
 				} else {
@@ -93,29 +95,40 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				
 				level.Info(r.logger).Log("msg", "after initial trim", "dst", dst, "entryPath", entryPath)
 
-				if strings.HasPrefix(dst, namespace) {
-					level.Info(r.logger).Log("msg", "path still contains namespace", "dst", dst, "namespace", namespace)
+				// If path wasn't correctly trimmed (prefix didn't match exactly)
+				if strings.HasPrefix(dst, namespace) || strings.Contains(dst, key) {
+					level.Info(r.logger).Log("msg", "path needs special processing", "dst", dst)
 					
+					// Extract just the path portion by identifying where keys are used
 					pathComponents := strings.Split(entryPath, getSeparator())
 					level.Info(r.logger).Log("msg", "path components", "components", fmt.Sprintf("%v", pathComponents))
 					
+					// Find where the key part ends and real path starts
+					keyComponentIndex := -1
 					for i, component := range pathComponents {
-						level.Info(r.logger).Log("msg", "checking component", "index", i, "component", component, "key", key, "contains", strings.Contains(component, key))
 						if strings.Contains(component, key) {
-							if i+1 < len(pathComponents) {
-								oldDst := dst
-								dst = strings.Join(pathComponents[i+1:], getSeparator())
-								level.Info(r.logger).Log("msg", "extracted path", "oldDst", oldDst, "newDst", dst, "keyComponent", component)
-								break
-							}
+							keyComponentIndex = i
+							level.Info(r.logger).Log("msg", "found key component", "index", i, "component", component)
 						}
+					}
+					
+					// If we found the key component, extract just the path after it
+					if keyComponentIndex >= 0 && keyComponentIndex+1 < len(pathComponents) {
+						// Extract ONLY the path portion - this is the critical change
+						pathOnly := strings.Join(pathComponents[keyComponentIndex+1:], getSeparator())
+						level.Info(r.logger).Log("msg", "extracted pure path", "pathOnly", pathOnly)
+						dst = pathOnly
+					} else {
+						level.Info(r.logger).Log("msg", "couldn't extract path", "keyComponentIndex", keyComponentIndex, "totalComponents", len(pathComponents))
 					}
 				}
 
 				if dst != "" {
-					level.Info(r.logger).Log("msg", "adding to destinations", "dst", dst, "sourcePath", entryPath)
+					level.Info(r.logger).Log("msg", "adding to destinations", "dst", dst, "sourcePath", origPath)
 					dsts = append(dsts, dst)
-					sourcePaths[dst] = entryPath
+					sourcePaths[dst] = origPath
+				} else {
+					level.Info(r.logger).Log("msg", "skipping empty destination", "entryPath", entryPath)
 				}
 			}
 		} else if err != common.ErrNotImplemented {
