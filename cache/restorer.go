@@ -135,7 +135,7 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 			src = filepath.Join(namespace, key, dst)
 		}
 
-		level.Debug(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
+		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
 		level.Debug(r.logger).Log("msg", "restoring directory", "remote", src)
 
 		wg.Add(1)
