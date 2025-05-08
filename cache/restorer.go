@@ -60,6 +60,10 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 		errs      = &internal.MultiError{}
 		namespace = filepath.ToSlash(filepath.Clean(r.namespace))
 	)
+
+	// A map to store the original paths for each destination
+	sourcePaths := make(map[string]string)
+
 	if len(dsts) == 0 {
 		prefix := filepath.Join(namespace, key)
 		if !strings.HasSuffix(prefix, getSeparator()) && r.enableCacheKeySeparator {
@@ -76,10 +80,46 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 			}
 
 			for _, e := range entries {
+				entryPath := e.Path
+				origPath := entryPath
+				var dst string
+
+				level.Info(r.logger).Log("msg", "processing entry", "entryPath", entryPath, "prefix", prefix, "key", key)
+
 				if r.enableCacheKeySeparator {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix))
+					dst = strings.TrimPrefix(entryPath, prefix)
 				} else {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
+					dst = strings.TrimPrefix(entryPath, prefix+getSeparator())
+				}
+
+				level.Debug(r.logger).Log("msg", "initial path trim", "dst", dst, "entryPath", entryPath)
+
+				if strings.HasPrefix(dst, namespace) || strings.Contains(dst, key) {
+					level.Debug(r.logger).Log("msg", "path needs special processing", "dst", dst)
+
+					pathComponents := strings.Split(entryPath, getSeparator())
+
+					keyComponentIndex := -1
+					for i, component := range pathComponents {
+						if strings.Contains(component, key) {
+							keyComponentIndex = i
+						}
+					}
+
+					if keyComponentIndex >= 0 && keyComponentIndex+1 < len(pathComponents) {
+						// Extract ONLY the path portion
+						pathOnly := strings.Join(pathComponents[keyComponentIndex+1:], getSeparator())
+						level.Debug(r.logger).Log("msg", "extracted path", "pathOnly", pathOnly)
+						dst = pathOnly
+					}
+				}
+
+				if dst != "" {
+					level.Debug(r.logger).Log("msg", "adding destination", "dst", dst, "sourcePath", origPath)
+					dsts = append(dsts, dst)
+					sourcePaths[dst] = origPath
+				} else {
+					level.Debug(r.logger).Log("msg", "skipping empty destination", "entryPath", entryPath)
 				}
 			}
 		} else if err != common.ErrNotImplemented {
@@ -88,7 +128,12 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	}
 
 	for _, dst := range dsts {
-		src := filepath.Join(namespace, key, dst)
+		var src string
+		if originalPath, exists := sourcePaths[dst]; exists {
+			src = originalPath
+		} else {
+			src = filepath.Join(namespace, key, dst)
+		}
 
 		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
 		level.Debug(r.logger).Log("msg", "restoring directory", "remote", src)
