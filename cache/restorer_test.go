@@ -393,6 +393,138 @@ func TestFlexibleKeyMatchingRestoration(t *testing.T) {
 }
 
 // Tests the enableCacheKeySeparator option with both true and false settings
+// Tests the strictKeyMatching option with both true and false settings
+func TestStrictKeyMatchingOptions(t *testing.T) {
+	// Define test cases for different key matching settings
+	testCases := []struct {
+		name              string
+		strictKeyMatching bool
+		namespace         string
+		key               string
+		entries           []common.FileEntry
+		expectedMatches   []string          // Paths that should be matched
+		expectedSkips     []string          // Paths that should be skipped
+	}{
+		{
+			name:              "StrictMatchingEnabled",
+			strictKeyMatching: true,
+			namespace:         "repo",
+			key:               "key-pattern",
+			entries: []common.FileEntry{
+				{Path: "repo/key-pattern/path1"},           // Exact match - will be processed
+				{Path: "repo/key-pattern-1/path2"},         // Not exact match - will be skipped
+				{Path: "repo/key-pattern-suffix/path3"},    // Not exact match - will be skipped
+			},
+			expectedMatches: []string{"path1"},
+			expectedSkips:   []string{"repo/key-pattern-1/path2", "repo/key-pattern-suffix/path3"},
+		},
+		{
+			name:              "FlexibleMatchingEnabled",
+			strictKeyMatching: false,
+			namespace:         "repo",
+			key:               "key-pattern",
+			entries: []common.FileEntry{
+				{Path: "repo/key-pattern/path1"},           // Will be processed
+				{Path: "repo/key-pattern-1/path2"},         // Will be processed
+				{Path: "repo/key-pattern-suffix/path3"},    // Will be processed
+			},
+			expectedMatches: []string{"path1", "path2", "path3"},
+			expectedSkips:   []string{},
+		},
+		{
+			name:              "MixedPattern",
+			strictKeyMatching: true,
+			namespace:         "repo",
+			key:               "pattern",
+			entries: []common.FileEntry{
+				{Path: "repo/pattern/path1"},           // Exact match - will be processed
+				{Path: "repo/prefix-pattern/path2"},    // Not exact match - will be skipped
+				{Path: "repo/pattern-suffix/path3"},   // Not exact match - will be skipped
+			},
+			expectedMatches: []string{"path1"},
+			expectedSkips:   []string{"repo/prefix-pattern/path2", "repo/pattern-suffix/path3"},
+		},
+		{
+			name:              "RealWorldScenario",
+			strictKeyMatching: true,
+			namespace:         "ns",
+			key:               "build-cache-key",
+			entries: []common.FileEntry{
+				{Path: "ns/build-cache-key/path1"},      // Exact prefix match - will be processed
+				{Path: "ns/build-cache-key1/path2"},    // Numeric suffix - should be skipped 
+				{Path: "ns/build-cache-key-1/path3"},   // Dash suffix - should be skipped
+				{Path: "ns/other-key/path4"},          // Different key - should be skipped
+			},
+			expectedMatches: []string{"path1"},
+			expectedSkips:   []string{"ns/build-cache-key1/path2", "ns/build-cache-key-1/path3", "ns/other-key/path4"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mocks
+			mockStorage := &MockStorage{
+				ListFunc: func(p string) ([]common.FileEntry, error) {
+					return tc.entries, nil
+				},
+			}
+			
+			mockArchive := &MockArchive{}
+			
+			// Create the restorer with the specified strictKeyMatching setting
+			r := restorer{
+				logger:                log.NewNopLogger(),
+				a:                     mockArchive,
+				s:                     mockStorage,
+				g:                     generator.NewStatic(tc.key),
+				namespace:             tc.namespace,
+				strictKeyMatching:     tc.strictKeyMatching,
+			}
+			
+			// Call the Restore method
+			err := r.Restore([]string{}, "")
+			if err != nil {
+				t.Fatalf("Error calling Restore: %v", err)
+			}
+			
+			// Wait for goroutines to complete
+			time.Sleep(100 * time.Millisecond)
+			
+			// Build a map of extracted paths
+			extractPaths := make(map[string]bool)
+			for _, call := range mockArchive.ExtractCalls {
+				extractPaths[call.Dst] = true
+			}
+			
+			// Check that all expected matches were processed
+			for _, expectedMatch := range tc.expectedMatches {
+				if !extractPaths[expectedMatch] {
+					t.Errorf("Expected path '%s' to be processed but it wasn't", expectedMatch)
+				}
+			}
+			
+			// Check that expected skips were not processed
+			for _, path := range mockStorage.GetCalls {
+				for _, skip := range tc.expectedSkips {
+					if path == skip {
+						t.Errorf("Path '%s' should have been skipped but was processed", skip)
+					}
+				}
+			}
+			
+			// Log debug info
+			if testing.Verbose() {
+				var extractedPaths []string
+				for _, call := range mockArchive.ExtractCalls {
+					extractedPaths = append(extractedPaths, call.Dst)
+				}
+				t.Logf("Extracted paths: %v", extractedPaths)
+				t.Logf("Get calls: %v", mockStorage.GetCalls)
+			}
+		})
+	}
+}
+
 func TestCacheKeySeparatorOptions(t *testing.T) {
 	// Define test cases for different separator settings
 	testCases := []struct {

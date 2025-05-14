@@ -337,6 +337,12 @@ func main() {
 			Value:   false,
 			EnvVars: []string{"PLUGIN_ENABLE_SEPARATOR"},
 		},
+		&cli.BoolFlag{
+			Name:    "strict-key-matching",
+			Usage:   "Strictly match cache keys to avoid prefix collisions (defaults to true)",
+			Value:   true,
+			EnvVars: []string{"PLUGIN_STRICT_KEY_MATCHING"},
+		},
 
 		// Backends Configs
 
@@ -659,6 +665,7 @@ func run(c *cli.Context) error {
 		Override:                   c.Bool("override"),
 		FailRestoreIfKeyNotPresent: c.Bool("fail-restore-if-key-not-present"),
 		EnableCacheKeySeparator:    c.Bool("enable-cache-key-separator"),
+		StrictKeyMatching:          c.Bool("strict-key-matching"),
 
 		StorageOperationTimeout: c.Duration("backend.operation-timeout"),
 		FileSystem: filesystem.Config{
