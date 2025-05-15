@@ -197,19 +197,19 @@ func TestRestorerWithDifferentKeyFormats(t *testing.T) {
 		{
 			name:      "RealWorldExample",
 			namespace: "repo",
-			key:       "opCI17216cacherestorepathissuekeypattern-keypattern",
+			key:       "opCI17216cacherestorepath-keypattern",
 			entries: []common.FileEntry{
-				{Path: "repo/opCI17216cacherestorepathissuekeypattern-keypattern-1/path1"},
-				{Path: "repo/opCI17216cacherestorepathissuekeypattern-keypattern-2/path2"},
-				{Path: "repo/opCI17216cacherestorepathissuekeypattern-keypattern-3/path3"},
-				{Path: "repo/opCI17216cacherestorepathissuekeypattern-keypattern-4/path4"},
+				{Path: "repo/opCI17216cacherestorepath-keypattern-1/path1"},
+				{Path: "repo/opCI17216cacherestorepath-keypattern-2/path2"},
+				{Path: "repo/opCI17216cacherestorepath-keypattern-3/path3"},
+				{Path: "repo/opCI17216cacherestorepath-keypattern-4/path4"},
 				{Path: "repo/unrelated-entry/path5"},
 			},
 			expectedCorrectPaths: map[string]string{
-				"path1": "repo/opCI17216cacherestorepathissuekeypattern-keypattern-1/path1",
-				"path2": "repo/opCI17216cacherestorepathissuekeypattern-keypattern-2/path2",
-				"path3": "repo/opCI17216cacherestorepathissuekeypattern-keypattern-3/path3",
-				"path4": "repo/opCI17216cacherestorepathissuekeypattern-keypattern-4/path4",
+				"path1": "repo/opCI17216cacherestorepath-keypattern-1/path1",
+				"path2": "repo/opCI17216cacherestorepath-keypattern-2/path2",
+				"path3": "repo/opCI17216cacherestorepath-keypattern-3/path3",
+				"path4": "repo/opCI17216cacherestorepath-keypattern-4/path4",
 			},
 		},
 		{
