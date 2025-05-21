@@ -94,7 +94,6 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 			for _, e := range entries {
 				entryPath := e.Path
-				origPath := entryPath
 				var dst string
 
 				level.Info(r.logger).Log("msg", "processing entry", "entryPath", entryPath, "prefix", prefix, "key", key)
@@ -117,11 +116,11 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 					if strings.HasPrefix(firstComponent, key) && len(firstComponent) > len(key) {
 						// The component starts with our key but has additional characters
 						extraPart := firstComponent[len(key):]
-						level.Debug(r.logger).Log("msg", "detected key with suffix", "component", firstComponent, 
+						level.Debug(r.logger).Log("msg", "detected key with suffix", "component", firstComponent,
 							"key", key, "extra", extraPart)
 
 						// Only allow if it's exactly the key (no suffix)
-						level.Debug(r.logger).Log("msg", "skipping entry with key suffix in strict mode", 
+						level.Debug(r.logger).Log("msg", "skipping entry with key suffix in strict mode",
 							"entryPath", entryPath, "key", key, "component", firstComponent)
 						continue
 					}
@@ -157,38 +156,63 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 					}
 				}
 
+				var remotePath string
+				remotePath = entryPath
+				level.Debug(r.logger).Log("msg", "original remote path", "remotePath", remotePath, "strictMode", r.strictKeyMatching)
+
+				// Initial path extraction based on separator settings
 				if r.enableCacheKeySeparator {
 					dst = strings.TrimPrefix(entryPath, prefix)
 				} else {
 					dst = strings.TrimPrefix(entryPath, prefix+getSeparator())
 				}
 
-				level.Debug(r.logger).Log("msg", "initial path trim", "dst", dst, "entryPath", entryPath)
+				level.Debug(r.logger).Log("msg", "initial path trim", "dst", dst, "entryPath", entryPath, "prefix", prefix)
 
 				if strings.HasPrefix(dst, namespace) || strings.Contains(dst, key) {
-					level.Debug(r.logger).Log("msg", "path needs special processing", "dst", dst)
+					level.Debug(r.logger).Log("msg", "path needs special processing", "dst", dst, "keyInPath", strings.Contains(dst, key))
 
+					// Extract path components for more precise processing
 					pathComponents := strings.Split(entryPath, getSeparator())
+					level.Debug(r.logger).Log("msg", "path components", "components", fmt.Sprintf("%v", pathComponents))
 
+					// Find the component containing our key
 					keyComponentIndex := -1
 					for i, component := range pathComponents {
 						if strings.Contains(component, key) {
 							keyComponentIndex = i
+							level.Debug(r.logger).Log("msg", "found key in component", "index", i, "component", component)
+							break
 						}
 					}
 
 					if keyComponentIndex >= 0 && keyComponentIndex+1 < len(pathComponents) {
-						// Extract ONLY the path portion
 						pathOnly := strings.Join(pathComponents[keyComponentIndex+1:], getSeparator())
-						level.Debug(r.logger).Log("msg", "extracted path", "pathOnly", pathOnly)
+						level.Debug(r.logger).Log("msg", "extracted path after key component", "pathOnly", pathOnly, "keyComponent", pathComponents[keyComponentIndex])
 						dst = pathOnly
+					} else if keyComponentIndex >= 0 && !r.strictKeyMatching {
+						// In flexible mode, we should still process entries even if they don't have components after the key
+						// This is especially important for entries like "keypattern1" when searching for "keypattern"
+						level.Debug(r.logger).Log("msg", "flexible mode - using key component as path", "component", pathComponents[keyComponentIndex])
+
+						// For entries that match the key pattern directly but have no path after,
+						// extract the unique part to be used as the destination
+						component := pathComponents[keyComponentIndex]
+						if strings.HasPrefix(component, key) && len(component) > len(key) {
+							// Use the component itself as the path
+							dst = component
+						} else if len(pathComponents) > keyComponentIndex {
+							// If there are no more components, use the key component as is
+							dst = component
+						}
 					}
 				}
 
 				if dst != "" {
-					level.Debug(r.logger).Log("msg", "adding destination", "dst", dst, "sourcePath", origPath)
+					// Always use the actual remotePath for source path mapping to ensure correct file retrieval
+					level.Debug(r.logger).Log("msg", "adding destination", "dst", dst, "sourcePath", remotePath)
 					dsts = append(dsts, dst)
-					sourcePaths[dst] = origPath
+					sourcePaths[dst] = remotePath
 				} else {
 					level.Debug(r.logger).Log("msg", "skipping empty destination", "entryPath", entryPath)
 				}
