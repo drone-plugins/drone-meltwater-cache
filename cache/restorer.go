@@ -33,6 +33,7 @@ type restorer struct {
 	namespace               string
 	failIfKeyNotPresent     bool
 	enableCacheKeySeparator bool
+	strictKeyMatching       bool
 	backend                 string
 	accountID               string
 }
@@ -40,8 +41,20 @@ type restorer struct {
 var cacheFileMutex sync.Mutex // To ensure thread-safe writes to the file
 
 // NewRestorer creates a new cache.Restorer.
-func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, backend, accountID string) Restorer { // nolint:lll
-	return restorer{logger, a, s, g, fg, namespace, failIfKeyNotPresent, enableCacheKeySeparator, backend, accountID}
+func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, strictKeyMatching bool, backend, accountID string) Restorer { // nolint:lll
+	return restorer{
+		logger:                  logger,
+		a:                       a,
+		s:                       s,
+		g:                       g,
+		fg:                      fg,
+		namespace:               namespace,
+		failIfKeyNotPresent:     failIfKeyNotPresent,
+		enableCacheKeySeparator: enableCacheKeySeparator,
+		strictKeyMatching:       strictKeyMatching,
+		backend:                 backend,
+		accountID:               accountID,
+	}
 }
 
 // Restore restores files from the cache provided with given paths.
@@ -60,6 +73,10 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 		errs      = &internal.MultiError{}
 		namespace = filepath.ToSlash(filepath.Clean(r.namespace))
 	)
+
+	// A map to store the original paths for each destination
+	sourcePaths := make(map[string]string)
+
 	if len(dsts) == 0 {
 		prefix := filepath.Join(namespace, key)
 		if !strings.HasSuffix(prefix, getSeparator()) && r.enableCacheKeySeparator {
@@ -76,10 +93,128 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 			}
 
 			for _, e := range entries {
+				entryPath := e.Path
+				var dst string
+
+				level.Info(r.logger).Log("msg", "processing entry", "entryPath", entryPath, "prefix", prefix, "key", key)
+
+				// Check if we're in strict matching mode and skip entries that don't exactly match the key pattern
+				// In strict mode: we only want to match entries where:
+				// 1. The entry path exactly equals the prefix, OR
+				// 2. The entry path starts with the prefix + separator, OR
+				// 3. A path component exactly matches the key
+				if r.strictKeyMatching {
+					// REAL WORLD KEY PATTERN CHECK - Check for when key is a substring at the beginning
+					// Example: key="keypattern", entry="keypattern1/path"
+					pathParts := strings.Split(entryPath, getSeparator())
+					firstComponent := ""
+					if len(pathParts) > 0 {
+						firstComponent = pathParts[0]
+					}
+
+					// Check for key + number pattern (e.g., "keypattern1")
+					if strings.HasPrefix(firstComponent, key) && len(firstComponent) > len(key) {
+						// The component starts with our key but has additional characters
+						extraPart := firstComponent[len(key):]
+						level.Debug(r.logger).Log("msg", "detected key with suffix", "component", firstComponent,
+							"key", key, "extra", extraPart)
+
+						// Only allow if it's exactly the key (no suffix)
+						level.Debug(r.logger).Log("msg", "skipping entry with key suffix in strict mode",
+							"entryPath", entryPath, "key", key, "component", firstComponent)
+						continue
+					}
+
+					// Standard matching cases
+					if entryPath == prefix {
+						// Case 1: Exact match with the prefix
+						// Example: key="pattern", prefix="repo/pattern", entryPath="repo/pattern"
+						level.Debug(r.logger).Log("msg", "strict match: exact prefix", "entryPath", entryPath, "prefix", prefix)
+					} else if strings.HasPrefix(entryPath, prefix+getSeparator()) {
+						// Case 2: Entry starts with prefix + separator
+						// Example: key="pattern", prefix="repo/pattern", entryPath="repo/pattern/path1"
+						level.Debug(r.logger).Log("msg", "strict match: path starts with prefix+separator", "entryPath", entryPath, "prefix", prefix)
+					} else {
+						// Case 3: Check if any path component exactly matches the key
+						pathComponents := strings.Split(entryPath, getSeparator())
+						exactMatch := false
+
+						for _, component := range pathComponents {
+							if component == key {
+								exactMatch = true
+								break
+							}
+						}
+
+						if !exactMatch {
+							level.Debug(r.logger).Log("msg", "skipping non-exact match in strict mode",
+								"entryPath", entryPath, "key", key, "prefix", prefix)
+							continue
+						} else {
+							level.Debug(r.logger).Log("msg", "strict match: component exactly matches key", "entryPath", entryPath, "key", key)
+						}
+					}
+				}
+
+				var remotePath string
+				remotePath = entryPath
+				level.Debug(r.logger).Log("msg", "original remote path", "remotePath", remotePath, "strictMode", r.strictKeyMatching)
+
+				// Initial path extraction based on separator settings
 				if r.enableCacheKeySeparator {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix))
+					dst = strings.TrimPrefix(entryPath, prefix)
 				} else {
-					dsts = append(dsts, strings.TrimPrefix(e.Path, prefix+getSeparator()))
+					dst = strings.TrimPrefix(entryPath, prefix+getSeparator())
+				}
+
+				level.Debug(r.logger).Log("msg", "initial path trim", "dst", dst, "entryPath", entryPath, "prefix", prefix)
+
+				if strings.HasPrefix(dst, namespace) || strings.Contains(dst, key) {
+					level.Debug(r.logger).Log("msg", "path needs special processing", "dst", dst, "keyInPath", strings.Contains(dst, key))
+
+					// Extract path components for more precise processing
+					pathComponents := strings.Split(entryPath, getSeparator())
+					level.Debug(r.logger).Log("msg", "path components", "components", fmt.Sprintf("%v", pathComponents))
+
+					// Find the component containing our key
+					keyComponentIndex := -1
+					for i, component := range pathComponents {
+						if strings.Contains(component, key) {
+							keyComponentIndex = i
+							level.Debug(r.logger).Log("msg", "found key in component", "index", i, "component", component)
+							break
+						}
+					}
+
+					if keyComponentIndex >= 0 && keyComponentIndex+1 < len(pathComponents) {
+						pathOnly := strings.Join(pathComponents[keyComponentIndex+1:], getSeparator())
+						level.Debug(r.logger).Log("msg", "extracted path after key component", "pathOnly", pathOnly, "keyComponent", pathComponents[keyComponentIndex])
+						dst = pathOnly
+					} else if keyComponentIndex >= 0 && !r.strictKeyMatching {
+						// In flexible mode, we should still process entries even if they don't have components after the key
+						// This is especially important for entries like "keypattern1" when searching for "keypattern"
+						level.Debug(r.logger).Log("msg", "flexible mode - using key component as path", "component", pathComponents[keyComponentIndex])
+
+						// For entries that match the key pattern directly but have no path after,
+						// extract the unique part to be used as the destination
+						component := pathComponents[keyComponentIndex]
+						if strings.HasPrefix(component, key) && len(component) > len(key) {
+							// Use the component itself as the path
+							dst = component
+						} else if len(pathComponents) > keyComponentIndex {
+							// If there are no more components, use the key component as is
+							dst = component
+						}
+					}
+				}
+
+				if dst != "" {
+					// Always use the actual remotePath for source path mapping to ensure correct file retrieval
+					level.Debug(r.logger).Log("msg", "adding destination", "dst", dst, "sourcePath", remotePath)
+					dsts = append(dsts, dst)
+					sourcePaths[dst] = remotePath
+				} else {
+					level.Debug(r.logger).Log("msg", "skipping empty destination", "entryPath", entryPath)
 				}
 			}
 		} else if err != common.ErrNotImplemented {
@@ -88,7 +223,12 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	}
 
 	for _, dst := range dsts {
-		src := filepath.Join(namespace, key, dst)
+		var src string
+		if originalPath, exists := sourcePaths[dst]; exists {
+			src = originalPath
+		} else {
+			src = filepath.Join(namespace, key, dst)
+		}
 
 		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
 		level.Debug(r.logger).Log("msg", "restoring directory", "remote", src)

@@ -9,6 +9,7 @@ type options struct {
 	failRestoreIfKeyNotPresent bool
 	gracefulDetect             bool
 	enableCacheKeySeparator    bool
+	strictKeyMatching          bool
 }
 
 // Option overrides behavior of Archive.
@@ -57,9 +58,17 @@ func WithFailRestoreIfKeyNotPresent(b bool) Option {
 	})
 }
 
-// WithEnableCacheKeySeparator enables addition of '/' to the specified cache key.
-func WithEnableCacheKeySeparator(b bool) Option {
+// WithEnableCacheKeySeparator controls whether a separator is used when structuring cache paths.
+func WithEnableCacheKeySeparator(enableCacheKeySeparator bool) Option {
 	return optionFunc(func(o *options) {
-		o.enableCacheKeySeparator = b
+		o.enableCacheKeySeparator = enableCacheKeySeparator
+	})
+}
+
+// WithStrictKeyMatching controls whether cache keys must match exactly.
+// When true, prevents unintended cache restoration with similar keys (e.g., "key" vs "key1").
+func WithStrictKeyMatching(strictKeyMatching bool) Option {
+	return optionFunc(func(o *options) {
+		o.strictKeyMatching = strictKeyMatching
 	})
 }
