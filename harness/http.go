@@ -47,13 +47,13 @@ type HTTPClient struct {
 
 // getUploadURL will get the 'put' presigned url from cache service
 func (c *HTTPClient) GetUploadURL(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf(StoreEndpoint, c.AccountID, key)
+	path := c.buildEndpointPath(StoreEndpoint, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
 // GetUploadURLWithQuery will get the 'put' presigned url from cache service with additional query parameters
 func (c *HTTPClient) GetUploadURLWithQuery(ctx context.Context, key string, query url.Values) (string, error) {
-	path := fmt.Sprintf(StoreEndpoint, c.AccountID, key)
+	path := c.buildEndpointPath(StoreEndpoint, key)
 	fullURL := c.Endpoint + path
 	if len(query) > 0 {
 		if strings.Contains(fullURL, "?") {
@@ -74,19 +74,19 @@ func (c *HTTPClient) GetUploadURLWithQuery(ctx context.Context, key string, quer
 
 // GetDownloadURL will get the 'get' presigned url from cache service
 func (c *HTTPClient) GetDownloadURL(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf(RestoreEndpoint, c.AccountID, key)
+	path := c.buildEndpointPath(RestoreEndpoint, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
 // GetExistsURL will get the 'exists' presigned url from cache service
 func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf(ExistsEndpoint, c.AccountID, key)
+	path := c.buildEndpointPath(ExistsEndpoint, key)
 	return c.getLink(ctx, c.Endpoint+path)
 }
 
 // GetListURL will get the list of all entries
 func (c *HTTPClient) GetEntriesList(ctx context.Context, prefix string) ([]common.FileEntry, error) {
-	path := fmt.Sprintf(ListEntriesEndpoint, c.AccountID, prefix)
+	path := c.buildEndpointPath(ListEntriesEndpoint, prefix)
 	req, err := http.NewRequestWithContext(ctx, "GET", c.Endpoint+path, nil)
 	if err != nil {
 		return nil, err
@@ -140,4 +140,12 @@ func (c *HTTPClient) getLink(ctx context.Context, path string) (string, error) {
 
 func (c *HTTPClient) client() *http.Client {
 	return c.Client
+}
+
+// buildEndpointPath constructs a properly formatted and URL-encoded API endpoint path
+// This centralizes the URL encoding of path components to handle Windows backslashes
+func (c *HTTPClient) buildEndpointPath(endpointFormat string, key string) string {
+	// URL encode the key to handle Windows backslashes and other special characters
+	encodedKey := url.QueryEscape(key)
+	return fmt.Sprintf(endpointFormat, c.AccountID, encodedKey)
 }
