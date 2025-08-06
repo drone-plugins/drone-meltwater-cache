@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -73,6 +74,15 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 			return errors.New("no file info")
 		}
 
+		level.Info(logger).Log(
+			"msg", "TAR Create: Preparing to archive",
+			"local_path", path,
+			"original_mod_time", fi.ModTime().Format(time.RFC3339Nano), // Original ModTime from local file
+			"original_is_dir", fi.IsDir(),
+			"original_size", fi.Size(),
+			"original_mode", fi.Mode().String(),
+		)
+
 		// Create header for Regular files and Directories
 		h, err := tar.FileInfoHeader(fi, fi.Name())
 		if err != nil {
@@ -104,6 +114,14 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 		}
 
 		h.Name = name
+		level.Info(logger).Log(
+			"msg", "TAR Create: Writing header to archive",
+			"archive_entry_name", h.Name,
+			"header_mod_time", h.ModTime.Format(time.RFC3339Nano), // ModTime as stored in the header
+			"header_type", h.Typeflag,
+			"header_size", h.Size,
+			"header_mode", os.FileMode(h.Mode).String(),
+		)
 
 		if err := tw.WriteHeader(h); err != nil {
 			return fmt.Errorf("write header for <%s>, %w", path, err)
@@ -176,21 +194,28 @@ func writeFileToArchive(tw io.Writer, path string) (n int64, err error) {
 }
 
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
+type entryMetadata struct {
+	Path  string
+	Mtime time.Time
+	Atime time.Time
+}
+
 func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 	var (
-		written int64
-		tr      = tar.NewReader(r)
+		written         int64
+		tr              = tar.NewReader(r)
+		metadataEntries []entryMetadata
 	)
 
 	for {
 		h, err := tr.Next()
 
 		switch {
-		case err == io.EOF: // if no more files are found return
-			return written, nil
-		case err != nil: // return any other error
+		case err == io.EOF:
+			goto SecondPass // All entries extracted, jump to second pass
+		case err != nil:
 			return written, fmt.Errorf("tar reader <%v>, %w", err, ErrArchiveNotReadable)
-		case h == nil: // if the header is nil, skip it
+		case h == nil:
 			continue
 		}
 
@@ -208,16 +233,38 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 		level.Debug(a.logger).Log("msg", "extracting archive", "path", target)
 
+		level.Info(a.logger).Log(
+			"msg", "TAR Extract: Processing archive entry",
+			"archive_entry_name", h.Name,
+			"target_local_path", target,
+			"archive_mod_time_in_header", h.ModTime.Format(time.RFC3339Nano), // ModTime *from the tar header*
+			"archive_type", h.Typeflag,
+			"archive_size", h.Size,
+			"archive_permissions", os.FileMode(h.Mode).String(),
+		)
+
 		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
 			return 0, fmt.Errorf("ensure directory <%s>, %w", target, err)
 		}
+		metadataEntries = append(metadataEntries, entryMetadata{
+			Path:  target,
+			Mtime: h.ModTime,
+			Atime: h.ModTime, // Use mod time for atime since atime is not in tar spec
+		})
 
 		switch h.Typeflag {
 		case tar.TypeDir:
+			level.Debug(a.logger).Log("msg", "TAR Extract: Handling explicit directory entry from archive", "path", target)
 			if err := extractDir(h, target); err != nil {
 				return written, err
 			}
-
+			level.Info(a.logger).Log("msg", "TAR Extract: Extracted explicit directory entry", "path", target)
+			// --- POTENTIAL FIX: Set directory timestamps ---
+			if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
+				level.Error(a.logger).Log("msg", "TAR Extract: Failed to set directory times (explicit entry)", "path", target, "err", err)
+			} else {
+				level.Info(a.logger).Log("msg", "TAR Extract: Successfully set directory times (explicit entry)", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
+			}
 			continue
 		case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
 			n, err := extractRegular(h, tr, target)
@@ -226,33 +273,64 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 			if err != nil {
 				return written, fmt.Errorf("extract regular file, %w", err)
 			}
-
+			level.Info(a.logger).Log("msg", "TAR Extract: Extracted regular file", "path", target, "bytes", n)
+			// --- POTENTIAL FIX: Set regular file timestamps ---
+			if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
+				level.Error(a.logger).Log("msg", "TAR Extract: Failed to set file times", "path", target, "err", err)
+			} else {
+				level.Info(a.logger).Log("msg", "TAR Extract: Successfully set file times", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
+			}
+			level.Info(a.logger).Log("msg", "TAR Extract: Extracted symlink", "path", target, "link_target", h.Linkname)
 			continue
 		case tar.TypeSymlink:
 			if err := extractSymlink(h, target); err != nil {
 				return written, fmt.Errorf("extract symbolic link, %w", err)
 			}
+			level.Debug(a.logger).Log("msg", "TAR Extract: Extracted hard link", "path", target, "link_target", h.Linkname)
 
 			continue
 		case tar.TypeLink:
 			if err := extractLink(h, target); err != nil {
 				return written, fmt.Errorf("extract link, %w", err)
 			}
+			level.Info(a.logger).Log("msg", "TAR Extract: Extracted hard link", "path", target, "link_target", h.Linkname)
 
 			continue
 		case tar.TypeXGlobalHeader:
+			level.Info(a.logger).Log("msg", "TAR Extract: Skipping global header")
+
 			continue
 		default:
 			return written, fmt.Errorf("extract %s, unknown type flag: %c", target, h.Typeflag)
 		}
 	}
+
+SecondPass:
+	// --- Pass 2: Apply timestamps and permissions ---
+	level.Info(a.logger).Log("msg", "TAR Extract: Second pass - applying timestamps and permissions")
+	for _, entry := range metadataEntries {
+		if err := os.Chtimes(entry.Path, entry.Atime, entry.Mtime); err != nil {
+			// This is a warning because Chtimes can fail on read-only filesystems
+			level.Warn(a.logger).Log("msg", "TAR Extract: Failed to set times", "path", entry.Path, "err", err)
+		}
+		// os.Chmod() for permissions
+		fi, err := os.Lstat(entry.Path)
+		if err == nil {
+			if err := os.Chmod(entry.Path, fi.Mode()|0755); err != nil {
+				level.Warn(a.logger).Log("msg", "TAR Extract: Failed to set permissions", "path", entry.Path, "err", err)
+			}
+		}
+	}
+	level.Info(a.logger).Log("msg", "TAR Extract: Timestamps and permissions applied successfully")
+
+	return written, nil
 }
 
 func extractDir(h *tar.Header, target string) error {
 	if err := os.MkdirAll(target, os.FileMode(h.Mode)); err != nil {
 		return fmt.Errorf("create directory <%s>, %w", target, err)
 	}
-
+	os.Chtimes(target, h.ModTime, h.ModTime)
 	return nil
 }
 
@@ -268,7 +346,7 @@ func extractRegular(h *tar.Header, tr io.Reader, target string) (n int64, err er
 	if err != nil {
 		return written, fmt.Errorf("copy extracted file for writing <%s>, %w", target, err)
 	}
-
+	os.Chtimes(target, h.ModTime, h.ModTime)
 	return written, nil
 }
 
