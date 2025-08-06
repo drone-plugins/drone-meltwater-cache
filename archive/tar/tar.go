@@ -194,21 +194,28 @@ func writeFileToArchive(tw io.Writer, path string) (n int64, err error) {
 }
 
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
+type entryMetadata struct {
+	Path  string
+	Mtime time.Time
+	Atime time.Time
+}
+
 func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 	var (
-		written int64
-		tr      = tar.NewReader(r)
+		written         int64
+		tr              = tar.NewReader(r)
+		metadataEntries []entryMetadata
 	)
 
 	for {
 		h, err := tr.Next()
 
 		switch {
-		case err == io.EOF: // if no more files are found return
-			return written, nil
-		case err != nil: // return any other error
+		case err == io.EOF:
+			goto SecondPass // All entries extracted, jump to second pass
+		case err != nil:
 			return written, fmt.Errorf("tar reader <%v>, %w", err, ErrArchiveNotReadable)
-		case h == nil: // if the header is nil, skip it
+		case h == nil:
 			continue
 		}
 
@@ -239,6 +246,11 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
 			return 0, fmt.Errorf("ensure directory <%s>, %w", target, err)
 		}
+		metadataEntries = append(metadataEntries, entryMetadata{
+			Path:  target,
+			Mtime: h.ModTime,
+			Atime: h.ModTime, // Use mod time for atime since atime is not in tar spec
+		})
 
 		switch h.Typeflag {
 		case tar.TypeDir:
@@ -292,6 +304,26 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 			return written, fmt.Errorf("extract %s, unknown type flag: %c", target, h.Typeflag)
 		}
 	}
+
+SecondPass:
+	// --- Pass 2: Apply timestamps and permissions ---
+	level.Info(a.logger).Log("msg", "TAR Extract: Second pass - applying timestamps and permissions")
+	for _, entry := range metadataEntries {
+		if err := os.Chtimes(entry.Path, entry.Atime, entry.Mtime); err != nil {
+			// This is a warning because Chtimes can fail on read-only filesystems
+			level.Warn(a.logger).Log("msg", "TAR Extract: Failed to set times", "path", entry.Path, "err", err)
+		}
+		// os.Chmod() for permissions
+		fi, err := os.Lstat(entry.Path)
+		if err == nil {
+			if err := os.Chmod(entry.Path, fi.Mode()|0755); err != nil {
+				level.Warn(a.logger).Log("msg", "TAR Extract: Failed to set permissions", "path", entry.Path, "err", err)
+			}
+		}
+	}
+	level.Info(a.logger).Log("msg", "TAR Extract: Timestamps and permissions applied successfully")
+
+	return written, nil
 }
 
 func extractDir(h *tar.Header, target string) error {
