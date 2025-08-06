@@ -32,6 +32,11 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newBazelPreparer(),
 		},
 		{
+			globToDetect: "MODULE.bazel",
+			tool:         "bazel",
+			preparer:     newBzlmodPreparer(),
+		},
+		{
 			globToDetect: "package.json",
 			tool:         "node",
 			preparer:     newNodePreparer(),
