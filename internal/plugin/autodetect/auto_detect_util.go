@@ -32,6 +32,11 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newBazelPreparer(),
 		},
 		{
+			globToDetect: "MODULE.bazel",
+			tool:         "bazel",
+			preparer:     newBzlmodPreparer(),
+		},
+		{
 			globToDetect: "package.json",
 			tool:         "node",
 			preparer:     newNodePreparer(),
@@ -89,13 +94,22 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 				return nil, nil, "", err
 			}
 
-			directoriesToCache = append(directoriesToCache, dirToCache)
-			buildToolsDetected = append(buildToolsDetected, supportedTool.tool)
+			directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+			buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
 			hashes += hash
 		}
 	}
 
 	return directoriesToCache, buildToolsDetected, hashes, nil
+}
+
+func appendIfMissing(slice []string, elem string) []string {
+	for _, v := range slice {
+		if v == elem {
+			return slice
+		}
+	}
+	return append(slice, elem)
 }
 
 func hashIfFileExist(glob string) (string, string, error) {
