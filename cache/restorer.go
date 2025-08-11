@@ -36,12 +36,13 @@ type restorer struct {
 	strictKeyMatching       bool
 	backend                 string
 	accountID               string
+	preserveMetadata        bool
 }
 
 var cacheFileMutex sync.Mutex // To ensure thread-safe writes to the file
 
 // NewRestorer creates a new cache.Restorer.
-func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, strictKeyMatching bool, backend, accountID string) Restorer { // nolint:lll
+func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, strictKeyMatching bool, backend, accountID string, preserveMetadata bool) Restorer { // nolint:lll
 	return restorer{
 		logger:                  logger,
 		a:                       a,
@@ -54,6 +55,7 @@ func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.
 		strictKeyMatching:       strictKeyMatching,
 		backend:                 backend,
 		accountID:               accountID,
+		preserveMetadata:        preserveMetadata,
 	}
 }
 
@@ -274,7 +276,8 @@ func (r restorer) restore(src, dst, cacheFileName string) (err error) {
 
 	level.Debug(r.logger).Log("msg", "extracting archived directory", "remote", src, "local", dst)
 
-	written, err := r.a.Extract(dst, pr)
+	written, err := r.a.Extract(dst, pr, r.preserveMetadata)
+
 	if err != nil {
 		err = fmt.Errorf("extract files from downloaded archive, pipe reader failed, %w", err)
 		if err := pr.CloseWithError(err); err != nil {

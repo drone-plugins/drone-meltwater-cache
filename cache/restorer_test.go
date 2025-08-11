@@ -77,7 +77,7 @@ type MockArchive struct {
 	mu          sync.Mutex // Protect the calls slice during concurrent access
 }
 
-func (m *MockArchive) Extract(dst string, r io.Reader) (int64, error) {
+func (m *MockArchive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64, error) {
 	if m.ExtractFunc != nil {
 		size, err := m.ExtractFunc(dst, r)
 		

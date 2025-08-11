@@ -46,7 +46,7 @@ func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64
 }
 
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
-func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
+func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64, error) {
 	zr, err := zstd.NewReader(r)
 	if err != nil {
 		return 0, fmt.Errorf("zstd create extract archive reader, %w", err)
@@ -54,7 +54,7 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 	defer internal.CloseWithErrLogf(a.logger, zr.IOReadCloser(), "zstd reader")
 
-	eBytes, err := tar.New(a.logger, a.root, a.skipSymlinks).Extract(dst, zr)
+	eBytes, err := tar.New(a.logger, a.root, a.skipSymlinks).Extract(dst, zr, preserveMetadata)
 	if err != nil {
 		return 0, fmt.Errorf("zstd extract archive, %w", err)
 	}

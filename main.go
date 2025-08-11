@@ -364,6 +364,12 @@ func main() {
 			Usage:   "AWS bucket name",
 			EnvVars: []string{"PLUGIN_BUCKET", "S3_BUCKET", "GCS_BUCKET"},
 		},
+		&cli.BoolFlag{
+			Name:    "preserve-metadata",
+			Usage:   "preserve file timestamps and ownership during cache operations",
+			Value:   false,
+			EnvVars: []string{"PLUGIN_PRESERVE_METADATA"},
+		},
 
 		// Volume specific Config flags
 
@@ -671,6 +677,7 @@ func run(c *cli.Context) error {
 		FileSystem: filesystem.Config{
 			CacheRoot: c.String("filesystem.cache-root"),
 		},
+		PreserveMetadata: c.Bool("preserve-metadata"),
 		S3: s3.Config{
 			ACL:                   c.String("acl"),
 			Bucket:                c.String("bucket"),

@@ -200,7 +200,7 @@ type entryMetadata struct {
 	Atime time.Time
 }
 
-func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
+func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64, error) {
 	var (
 		written         int64
 		tr              = tar.NewReader(r)
@@ -241,6 +241,7 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 			"archive_type", h.Typeflag,
 			"archive_size", h.Size,
 			"archive_permissions", os.FileMode(h.Mode).String(),
+			"preserve_metadata", preserveMetadata,
 		)
 
 		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
@@ -260,11 +261,11 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 			}
 			level.Info(a.logger).Log("msg", "TAR Extract: Extracted explicit directory entry", "path", target)
 			// --- POTENTIAL FIX: Set directory timestamps ---
-			if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
-				level.Error(a.logger).Log("msg", "TAR Extract: Failed to set directory times (explicit entry)", "path", target, "err", err)
-			} else {
-				level.Info(a.logger).Log("msg", "TAR Extract: Successfully set directory times (explicit entry)", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
-			}
+			// if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
+			// 	level.Error(a.logger).Log("msg", "TAR Extract: Failed to set directory times (explicit entry)", "path", target, "err", err)
+			// } else {
+			// 	level.Info(a.logger).Log("msg", "TAR Extract: Successfully set directory times (explicit entry)", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
+			// }
 			continue
 		case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
 			n, err := extractRegular(h, tr, target)
@@ -275,12 +276,12 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 			}
 			level.Info(a.logger).Log("msg", "TAR Extract: Extracted regular file", "path", target, "bytes", n)
 			// --- POTENTIAL FIX: Set regular file timestamps ---
-			if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
-				level.Error(a.logger).Log("msg", "TAR Extract: Failed to set file times", "path", target, "err", err)
-			} else {
-				level.Info(a.logger).Log("msg", "TAR Extract: Successfully set file times", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
-			}
-			level.Info(a.logger).Log("msg", "TAR Extract: Extracted symlink", "path", target, "link_target", h.Linkname)
+			// if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
+			// 	level.Error(a.logger).Log("msg", "TAR Extract: Failed to set file times", "path", target, "err", err)
+			// } else {
+			// 	level.Info(a.logger).Log("msg", "TAR Extract: Successfully set file times", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
+			// }
+			// level.Info(a.logger).Log("msg", "TAR Extract: Extracted symlink", "path", target, "link_target", h.Linkname)
 			continue
 		case tar.TypeSymlink:
 			if err := extractSymlink(h, target); err != nil {
@@ -306,22 +307,17 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 	}
 
 SecondPass:
-	// --- Pass 2: Apply timestamps and permissions ---
-	level.Info(a.logger).Log("msg", "TAR Extract: Second pass - applying timestamps and permissions")
-	for _, entry := range metadataEntries {
-		if err := os.Chtimes(entry.Path, entry.Atime, entry.Mtime); err != nil {
-			// This is a warning because Chtimes can fail on read-only filesystems
-			level.Warn(a.logger).Log("msg", "TAR Extract: Failed to set times", "path", entry.Path, "err", err)
-		}
-		// os.Chmod() for permissions
-		fi, err := os.Lstat(entry.Path)
-		if err == nil {
-			if err := os.Chmod(entry.Path, fi.Mode()|0755); err != nil {
-				level.Warn(a.logger).Log("msg", "TAR Extract: Failed to set permissions", "path", entry.Path, "err", err)
+	// --- Pass 2: Extract original timestamps ---
+	if preserveMetadata {
+		level.Info(a.logger).Log("msg", "TAR Extract: Second pass - applying timestamps and permissions")
+		for _, entry := range metadataEntries {
+			if err := os.Chtimes(entry.Path, entry.Atime, entry.Mtime); err != nil {
+				// This is a warning because Chtimes can fail on read-only filesystems
+				level.Info(a.logger).Log("msg", "TAR Extract: Failed to set times", "path", entry.Path, "err", err)
 			}
 		}
+		level.Info(a.logger).Log("msg", "TAR Extract: Timestamps and permissions applied successfully")
 	}
-	level.Info(a.logger).Log("msg", "TAR Extract: Timestamps and permissions applied successfully")
 
 	return written, nil
 }

@@ -10,6 +10,7 @@ type options struct {
 	gracefulDetect             bool
 	enableCacheKeySeparator    bool
 	strictKeyMatching          bool
+	preserveMetadata           bool
 }
 
 // Option overrides behavior of Archive.
@@ -70,5 +71,11 @@ func WithEnableCacheKeySeparator(enableCacheKeySeparator bool) Option {
 func WithStrictKeyMatching(strictKeyMatching bool) Option {
 	return optionFunc(func(o *options) {
 		o.strictKeyMatching = strictKeyMatching
+	})
+}
+
+func WithPreserveMetadata(preserveMetadata bool) Option {
+	return optionFunc(func(o *options) {
+		o.preserveMetadata = preserveMetadata
 	})
 }
