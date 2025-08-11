@@ -74,15 +74,6 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 			return errors.New("no file info")
 		}
 
-		level.Info(logger).Log(
-			"msg", "TAR Create: Preparing to archive",
-			"local_path", path,
-			"original_mod_time", fi.ModTime().Format(time.RFC3339Nano), // Original ModTime from local file
-			"original_is_dir", fi.IsDir(),
-			"original_size", fi.Size(),
-			"original_mode", fi.Mode().String(),
-		)
-
 		// Create header for Regular files and Directories
 		h, err := tar.FileInfoHeader(fi, fi.Name())
 		if err != nil {
@@ -114,14 +105,6 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 		}
 
 		h.Name = name
-		level.Info(logger).Log(
-			"msg", "TAR Create: Writing header to archive",
-			"archive_entry_name", h.Name,
-			"header_mod_time", h.ModTime.Format(time.RFC3339Nano), // ModTime as stored in the header
-			"header_type", h.Typeflag,
-			"header_size", h.Size,
-			"header_mode", os.FileMode(h.Mode).String(),
-		)
 
 		if err := tw.WriteHeader(h); err != nil {
 			return fmt.Errorf("write header for <%s>, %w", path, err)
@@ -233,17 +216,6 @@ func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64
 
 		level.Debug(a.logger).Log("msg", "extracting archive", "path", target)
 
-		level.Info(a.logger).Log(
-			"msg", "TAR Extract: Processing archive entry",
-			"archive_entry_name", h.Name,
-			"target_local_path", target,
-			"archive_mod_time_in_header", h.ModTime.Format(time.RFC3339Nano), // ModTime *from the tar header*
-			"archive_type", h.Typeflag,
-			"archive_size", h.Size,
-			"archive_permissions", os.FileMode(h.Mode).String(),
-			"preserve_metadata", preserveMetadata,
-		)
-
 		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
 			return 0, fmt.Errorf("ensure directory <%s>, %w", target, err)
 		}
@@ -259,13 +231,6 @@ func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64
 			if err := extractDir(h, target); err != nil {
 				return written, err
 			}
-			level.Info(a.logger).Log("msg", "TAR Extract: Extracted explicit directory entry", "path", target)
-			// --- POTENTIAL FIX: Set directory timestamps ---
-			// if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
-			// 	level.Error(a.logger).Log("msg", "TAR Extract: Failed to set directory times (explicit entry)", "path", target, "err", err)
-			// } else {
-			// 	level.Info(a.logger).Log("msg", "TAR Extract: Successfully set directory times (explicit entry)", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
-			// }
 			continue
 		case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
 			n, err := extractRegular(h, tr, target)
@@ -274,14 +239,6 @@ func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64
 			if err != nil {
 				return written, fmt.Errorf("extract regular file, %w", err)
 			}
-			level.Info(a.logger).Log("msg", "TAR Extract: Extracted regular file", "path", target, "bytes", n)
-			// --- POTENTIAL FIX: Set regular file timestamps ---
-			// if err := os.Chtimes(target, h.ModTime, h.ModTime); err != nil {
-			// 	level.Error(a.logger).Log("msg", "TAR Extract: Failed to set file times", "path", target, "err", err)
-			// } else {
-			// 	level.Info(a.logger).Log("msg", "TAR Extract: Successfully set file times", "path", target, "set_mtime", h.ModTime.Format(time.RFC3339Nano))
-			// }
-			// level.Info(a.logger).Log("msg", "TAR Extract: Extracted symlink", "path", target, "link_target", h.Linkname)
 			continue
 		case tar.TypeSymlink:
 			if err := extractSymlink(h, target); err != nil {
