@@ -1,6 +1,7 @@
 package autodetect
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,25 +77,23 @@ func TestBzlmodPreparerErrorHandling(t *testing.T) {
 	test.Ok(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Create a new bzlmodPreparer
-	preparer := &bzlmodPreparer{}
-
-	// Create a directory and a file that can't be written to
-	readOnlyDir := filepath.Join(tempDir, "readonly")
-	err = os.Mkdir(readOnlyDir, 0755)
-	test.Ok(t, err)
-
-	// Create the .bazelrc file but make it read-only
-	bazelrcPath := filepath.Join(readOnlyDir, ".bazelrc")
+	// Create the .bazelrc file so that osOpenFile is used instead of os.Create
+	bazelrcPath := filepath.Join(tempDir, ".bazelrc")
 	f, err := os.Create(bazelrcPath)
 	test.Ok(t, err)
 	f.Close()
 
-	// Make the file read-only
-	err = os.Chmod(bazelrcPath, 0400) // read-only file
-	test.Ok(t, err)
+	// Create a mock preparer that always returns an error
+	originalOsOpenFile := osOpenFile
+	defer func() { osOpenFile = originalOsOpenFile }()
 
-	// Test case: Permission error when writing to .bazelrc
-	_, err = preparer.PrepareRepo(readOnlyDir)
-	test.Assert(t, err != nil, "Expected error due to permission issues")
+	// Mock the os.OpenFile function to always return an error
+	osOpenFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return nil, fmt.Errorf("mock permission denied")
+	}
+
+	preparer := &bzlmodPreparer{}
+
+	_, err = preparer.PrepareRepo(tempDir)
+	test.Assert(t, strings.Contains(err.Error(), "mock permission denied"), "Error should contain 'mock permission denied'")
 }
