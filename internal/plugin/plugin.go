@@ -166,9 +166,9 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	}
 
 	options = append(options, cache.WithOverride(p.Config.Override),
-		cache.WithFailRestoreIfKeyNotPresent(p.Config.FailRestoreIfKeyNotPresent), 
+		cache.WithFailRestoreIfKeyNotPresent(p.Config.FailRestoreIfKeyNotPresent),
 		cache.WithEnableCacheKeySeparator(p.Config.EnableCacheKeySeparator),
-		cache.WithStrictKeyMatching(p.Config.StrictKeyMatching))
+		cache.WithStrictKeyMatching(p.Config.StrictKeyMatching), cache.WithPreserveMetadata(p.Config.PreserveMetadata))
 
 	// 2. Initialize storage backend.
 	b, err := backend.FromConfig(p.logger, cfg.Backend, backend.Config{
@@ -207,7 +207,6 @@ func (p *Plugin) Exec() error { // nolint:funlen
 			return Error(fmt.Sprintf("[IMPORTANT] build cache, %+v\n", err))
 		}
 	}
-
 	if cfg.Restore {
 		if err := c.Restore(p.Config.Mount, p.Config.MetricsFile); err != nil {
 			level.Debug(p.logger).Log("err", fmt.Sprintf("%+v\n", err))
