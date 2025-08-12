@@ -21,10 +21,12 @@ func (*bzlmodPreparer) PrepareRepo(dir string) (string, error) {
 	moduleCache := filepath.Join(pathToCache, "module")
 	registryCache := filepath.Join(pathToCache, "registry")
 
-	cmdToOverrideRepo := fmt.Sprintf(`build --test_tmpdir=%s
+	cmdToOverrideRepo := fmt.Sprintf(`
+	build --test_tmpdir=%s
 	test --test_tmpdir=%s
 	build --module_cache=%s
-	build --registry_cache=%s`,
+	build --registry_cache=%s
+	`,
 		runtimeCache,
 		runtimeCache,
 		moduleCache,
