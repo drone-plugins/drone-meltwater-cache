@@ -79,12 +79,22 @@ func TestBzlmodPreparerErrorHandling(t *testing.T) {
 	// Create a new bzlmodPreparer
 	preparer := &bzlmodPreparer{}
 
-	// Create a read-only directory to simulate permission errors
+	// Create a directory and a file that can't be written to
 	readOnlyDir := filepath.Join(tempDir, "readonly")
-	err = os.Mkdir(readOnlyDir, 0500) // read-only directory
+	err = os.Mkdir(readOnlyDir, 0755)
 	test.Ok(t, err)
 
-	// Test case: Permission error when creating .bazelrc
+	// Create the .bazelrc file but make it read-only
+	bazelrcPath := filepath.Join(readOnlyDir, ".bazelrc")
+	f, err := os.Create(bazelrcPath)
+	test.Ok(t, err)
+	f.Close()
+
+	// Make the file read-only
+	err = os.Chmod(bazelrcPath, 0400) // read-only file
+	test.Ok(t, err)
+
+	// Test case: Permission error when writing to .bazelrc
 	_, err = preparer.PrepareRepo(readOnlyDir)
 	test.Assert(t, err != nil, "Expected error due to permission issues")
 }
