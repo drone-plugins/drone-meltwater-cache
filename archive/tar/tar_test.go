@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/meltwater/drone-cache/test"
 
@@ -124,7 +125,7 @@ func TestCreate(t *testing.T) {
 			test.Exists(t, archivePath)
 			test.Assert(t, written == tc.written, "case %q: written bytes got %d want %v", tc.name, written, tc.written)
 
-			_, err = extract(tc.ta, archivePath, extDir)
+			_, err = extract(tc.ta, archivePath, extDir, false)
 			test.Ok(t, err)
 
 			test.EqualDirs(t, extDir, testRootMounted, relativeSrcs)
@@ -188,12 +189,13 @@ func TestExtract(t *testing.T) {
 	test.Ok(t, err)
 
 	for _, tc := range []struct {
-		name        string
-		ta          *Archive
-		archivePath string
-		srcs        []string
-		written     int64
-		err         error
+		name             string
+		ta               *Archive
+		archivePath      string
+		srcs             []string
+		written          int64
+		err              error
+		preserveMetadata bool
 	}{
 		{
 			name:        "non-existing archive",
@@ -267,6 +269,15 @@ func TestExtract(t *testing.T) {
 			written:     43,
 			err:         nil,
 		},
+		{
+			name:             "existing archive with preserved metadata",
+			ta:               New(log.NewNopLogger(), testRootMounted, false),
+			archivePath:      archivePath,
+			srcs:             files,
+			written:          43,
+			err:              nil,
+			preserveMetadata: true,
+		},
 	} {
 		tc := tc // NOTE: https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,7 +302,7 @@ func TestExtract(t *testing.T) {
 			for _, src := range absSrcs {
 				test.Ok(t, os.RemoveAll(src))
 			}
-			written, err := extract(tc.ta, tc.archivePath, dstDir)
+			written, err := extract(tc.ta, tc.archivePath, dstDir, tc.preserveMetadata)
 			if err != nil {
 				test.Expected(t, err, tc.err)
 				return
@@ -303,6 +314,21 @@ func TestExtract(t *testing.T) {
 				test.Exists(t, src)
 			}
 			test.EqualDirs(t, dstDir, testRootMounted, relativeSrcs)
+
+			if tc.preserveMetadata {
+				originalFileInfo, err := os.Stat(files[0])
+				test.Ok(t, err)
+				extractedPath := filepath.Join(dstDir, filepath.Base(files[0]))
+				extractedFileInfo, err := os.Stat(extractedPath)
+				test.Ok(t, err)
+				diff := originalFileInfo.ModTime().Sub(extractedFileInfo.ModTime())
+				if diff < 0 {
+					diff = -diff
+				}
+				test.Assert(t, diff < time.Second,
+					"case %q: modification times difference is greater than one second. Original: %v, Extracted: %v, Difference: %v",
+					tc.name, originalFileInfo.ModTime(), extractedFileInfo.ModTime(), diff)
+			}
 		})
 	}
 }
@@ -338,7 +364,7 @@ func create(a *Archive, srcs []string, dst string) (int64, error) {
 	return written, nil
 }
 
-func extract(a *Archive, src string, dst string) (int64, error) {
+func extract(a *Archive, src string, dst string, preserveMetadata bool) (int64, error) {
 	pr, pw := io.Pipe()
 	defer pr.Close()
 
@@ -356,7 +382,7 @@ func extract(a *Archive, src string, dst string) (int64, error) {
 		}
 	}()
 
-	return a.Extract(dst, pr, false)
+	return a.Extract(dst, pr, preserveMetadata)
 }
 
 // Fixtures

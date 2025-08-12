@@ -283,7 +283,6 @@ func extractDir(h *tar.Header, target string) error {
 	if err := os.MkdirAll(target, os.FileMode(h.Mode)); err != nil {
 		return fmt.Errorf("create directory <%s>, %w", target, err)
 	}
-	os.Chtimes(target, h.ModTime, h.ModTime)
 	return nil
 }
 
@@ -299,7 +298,6 @@ func extractRegular(h *tar.Header, tr io.Reader, target string) (n int64, err er
 	if err != nil {
 		return written, fmt.Errorf("copy extracted file for writing <%s>, %w", target, err)
 	}
-	os.Chtimes(target, h.ModTime, h.ModTime)
 	return written, nil
 }
 
