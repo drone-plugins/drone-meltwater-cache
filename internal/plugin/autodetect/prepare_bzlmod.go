@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 )
 
+// Variable for testing - allows mocking os.OpenFile
+var osOpenFile = os.OpenFile
+
 type bzlmodPreparer struct{}
 
 func newBzlmodPreparer() *bzlmodPreparer {
@@ -48,7 +51,7 @@ func (*bzlmodPreparer) PrepareRepo(dir string) (string, error) {
 		return pathToCache, nil
 	}
 
-	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
+	f, err := osOpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
 
 	if err != nil {
 		return "", err
