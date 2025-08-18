@@ -196,9 +196,9 @@ func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64
 		switch {
 		case err == io.EOF:
 			goto SecondPass // All entries extracted, jump to second pass
-		case err != nil:
+		case err != nil: // return any other error
 			return written, fmt.Errorf("tar reader <%v>, %w", err, ErrArchiveNotReadable)
-		case h == nil:
+		case h == nil: // if the header is nil, skip it
 			continue
 		}
 
@@ -227,7 +227,6 @@ func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64
 
 		switch h.Typeflag {
 		case tar.TypeDir:
-			level.Debug(a.logger).Log("msg", "TAR Extract: Handling explicit directory entry from archive", "path", target)
 			if err := extractDir(h, target); err != nil {
 				return written, err
 			}
@@ -244,19 +243,15 @@ func (a *Archive) Extract(dst string, r io.Reader, preserveMetadata bool) (int64
 			if err := extractSymlink(h, target); err != nil {
 				return written, fmt.Errorf("extract symbolic link, %w", err)
 			}
-			level.Debug(a.logger).Log("msg", "TAR Extract: Extracted hard link", "path", target, "link_target", h.Linkname)
 
 			continue
 		case tar.TypeLink:
 			if err := extractLink(h, target); err != nil {
 				return written, fmt.Errorf("extract link, %w", err)
 			}
-			level.Info(a.logger).Log("msg", "TAR Extract: Extracted hard link", "path", target, "link_target", h.Linkname)
 
 			continue
 		case tar.TypeXGlobalHeader:
-			level.Info(a.logger).Log("msg", "TAR Extract: Skipping global header")
-
 			continue
 		default:
 			return written, fmt.Errorf("extract %s, unknown type flag: %c", target, h.Typeflag)
