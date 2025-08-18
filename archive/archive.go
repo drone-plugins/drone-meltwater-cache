@@ -31,7 +31,7 @@ type Archive interface {
 
 	// Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
 	// Similar to io.ReaderFrom.
-	Extract(dst string, r io.Reader) (int64, error)
+	Extract(dst string, r io.Reader, preserveMetadata bool) (int64, error)
 }
 
 // FromFormat determines which archive to use from given archive format.

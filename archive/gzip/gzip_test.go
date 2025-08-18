@@ -342,7 +342,7 @@ func extract(a *Archive, src string, dst string) (int64, error) {
 		}
 	}()
 
-	return a.Extract(dst, pr)
+	return a.Extract(dst, pr, false)
 }
 
 // Fixtures
