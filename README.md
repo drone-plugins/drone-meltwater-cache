@@ -178,6 +178,7 @@ GLOBAL OPTIONS:
                                              (check https://godoc.org/compress/flate#pkg-constants for available options for gzip
                                              and https://pkg.go.dev/github.com/klauspost/compress/zstd#EncoderLevelFromZstd for zstd) (default: -1) 
    --skip-symlinks                       skip symbolic links in archive (default: false) [$PLUGIN_SKIP_SYMLINKS, $SKIP_SYMLINKS]
+   --preserve-metadata, --pm             preserve file metadata (permissions, ownership, timestamps) (default: false) [$PLUGIN_PRESERVE_METADATA]
    --debug                               debug (default: false) [$PLUGIN_DEBUG, $DEBUG]
    --backend.operation-timeout value     timeout value to use for each storage operations (default: 3m0s) [$PLUGIN_BACKEND_OPERATION_TIMEOUT, $BACKEND_OPERATION_TIMEOUT]
    --endpoint value                      endpoint for the s3/cloud storage connection [$PLUGIN_ENDPOINT, $S3_ENDPOINT, $GCS_ENDPOINT]

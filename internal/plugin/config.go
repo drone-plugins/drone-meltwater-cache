@@ -36,6 +36,7 @@ type Config struct {
 	StorageOperationTimeout    time.Duration
 	EnableCacheKeySeparator    bool
 	StrictKeyMatching          bool `envconfig:"PLUGIN_STRICT_KEY_MATCHING" default:"true"`
+	PreserveMetadata           bool
 
 	Mount []string
 

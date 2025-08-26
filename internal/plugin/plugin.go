@@ -185,12 +185,17 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	}
 
 	// 3. Initialize cache.
+	archiveOpts := []archive.Option{
+		archive.WithSkipSymlinks(cfg.SkipSymlinks),
+		archive.WithCompressionLevel(cfg.CompressionLevel),
+	}
+	if cfg.PreserveMetadata && (cfg.Backend == "s3" || cfg.Backend == "gcs") {
+		archiveOpts = append(archiveOpts, archive.WithPreserveMetadata(cfg.PreserveMetadata))
+	}
+
 	c := cache.New(p.logger,
 		storage.New(p.logger, b, cfg.StorageOperationTimeout),
-		archive.FromFormat(p.logger, localRoot, cfg.ArchiveFormat,
-			archive.WithSkipSymlinks(cfg.SkipSymlinks),
-			archive.WithCompressionLevel(cfg.CompressionLevel),
-		),
+		archive.FromFormat(p.logger, localRoot, cfg.ArchiveFormat, archiveOpts...),
 		generator,
 		cfg.Backend,
 		cfg.AccountID,

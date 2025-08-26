@@ -378,3 +378,6 @@ encryption
 
 skip_symlinks
 : skip symbolic links in archive
+
+preserve_metadata
+: preserve file metadata (permissions, ownership, timestamps)
