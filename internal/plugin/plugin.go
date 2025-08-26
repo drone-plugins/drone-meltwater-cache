@@ -166,7 +166,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	}
 
 	options = append(options, cache.WithOverride(p.Config.Override),
-		cache.WithFailRestoreIfKeyNotPresent(p.Config.FailRestoreIfKeyNotPresent), 
+		cache.WithFailRestoreIfKeyNotPresent(p.Config.FailRestoreIfKeyNotPresent),
 		cache.WithEnableCacheKeySeparator(p.Config.EnableCacheKeySeparator),
 		cache.WithStrictKeyMatching(p.Config.StrictKeyMatching))
 
@@ -190,6 +190,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 		archive.FromFormat(p.logger, localRoot, cfg.ArchiveFormat,
 			archive.WithSkipSymlinks(cfg.SkipSymlinks),
 			archive.WithCompressionLevel(cfg.CompressionLevel),
+			archive.WithPreserveMetadata(cfg.PreserveMetadata && (cfg.Backend == backend.S3 || cfg.Backend == backend.GCS)),
 		),
 		generator,
 		cfg.Backend,

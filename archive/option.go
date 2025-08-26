@@ -3,6 +3,7 @@ package archive
 type options struct {
 	compressionLevel int
 	skipSymlinks     bool
+	preserveMetadata bool
 }
 
 // Option overrides behavior of Archive.
@@ -27,5 +28,12 @@ func WithCompressionLevel(i int) Option {
 func WithSkipSymlinks(b bool) Option {
 	return optionFunc(func(o *options) {
 		o.skipSymlinks = b
+	})
+}
+
+// WithPreserveMetadata sets preserve metadata option.
+func WithPreserveMetadata(b bool) Option {
+	return optionFunc(func(o *options) {
+		o.preserveMetadata = b
 	})
 }
