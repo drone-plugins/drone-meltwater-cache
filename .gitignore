@@ -39,3 +39,9 @@ __*__
 __*__.json
 
 update_script.sh
+
+# gemini-cli settings
+.gemini/
+
+# GitHub App credentials
+gha-creds-*.json
