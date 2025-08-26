@@ -9,15 +9,16 @@ import (
 )
 
 const (
-	pomFile          = "pom.xml"
-	nestedDirectory  = "dir"
-	bazelBuildFile   = "build.gradle"
-	testFileContent  = "some_content"
-	testFileContent2 = "some_other_content"
-	toolMaven        = "maven"
-	toolMavenDir     = ".m2/repository"
-	toolGradle       = "gradle"
-	toolGradleDir    = ".gradle"
+	pomFile            = "pom.xml"
+	nestedDirectory    = "dir"
+	bazelBuildFile     = "build.gradle"
+	gradleKtsBuildFile = "build.gradle.kts"
+	testFileContent    = "some_content"
+	testFileContent2   = "some_other_content"
+	toolMaven          = "maven"
+	toolMavenDir       = ".m2/repository"
+	toolGradle         = "gradle"
+	toolGradleDir      = ".gradle"
 )
 
 func TestDetectDirectoriesToCacheMaven(t *testing.T) {
@@ -81,6 +82,27 @@ func TestDetectDirectoriesToCacheBazel(t *testing.T) {
 	directoriesToCache, buildToolsDetected, hashes, err := DetectDirectoriesToCache(false)
 
 	test.Ok(t, os.RemoveAll(bazelBuildFile))
+	test.Ok(t, err)
+
+	expectedCacheDir := []string{toolGradleDir}
+	expectedDetectedTool := []string{toolGradle}
+
+	test.Equals(t, directoriesToCache, expectedCacheDir)
+	test.Equals(t, buildToolsDetected, expectedDetectedTool)
+	test.Equals(t, hashes, "baab6c16d9143523b7865d46896e4596")
+}
+
+func TestDetectDirectoriesToCacheGradleKts(t *testing.T) {
+	f, err := os.Create(gradleKtsBuildFile)
+	test.Ok(t, err)
+	defer f.Close()
+
+	_, err = f.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, hashes, err := DetectDirectoriesToCache(false)
+
+	test.Ok(t, os.RemoveAll(gradleKtsBuildFile))
 	test.Ok(t, err)
 
 	expectedCacheDir := []string{toolGradleDir}

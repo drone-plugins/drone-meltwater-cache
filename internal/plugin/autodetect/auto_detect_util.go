@@ -22,6 +22,11 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newMavenPreparer(),
 		},
 		{
+			globToDetect: "build.gradle.kts",
+			tool:         "gradle",
+			preparer:     newGradlePreparer(),
+		},
+		{
 			globToDetect: "build.gradle",
 			tool:         "gradle",
 			preparer:     newGradlePreparer(),
