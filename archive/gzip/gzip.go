@@ -13,16 +13,22 @@ import (
 
 // Archive implements archive for gzip.
 type Archive struct {
-	logger log.Logger
+    logger log.Logger
 
-	root             string
-	compressionLevel int
-	skipSymlinks     bool
+    root             string
+    compressionLevel int
+    skipSymlinks     bool
+    preserveMeta     bool
 }
 
 // New creates an archive that uses the .tar.gz file format.
 func New(logger log.Logger, root string, skipSymlinks bool, compressionLevel int) *Archive {
-	return &Archive{logger, root, compressionLevel, skipSymlinks}
+    return &Archive{logger: logger, root: root, compressionLevel: compressionLevel, skipSymlinks: skipSymlinks}
+}
+
+// NewWithPreserve creates a gzip archive with metadata preservation setting.
+func NewWithPreserve(logger log.Logger, root string, skipSymlinks bool, compressionLevel int, preserve bool) *Archive {
+    return &Archive{logger: logger, root: root, compressionLevel: compressionLevel, skipSymlinks: skipSymlinks, preserveMeta: preserve}
 }
 
 // Create writes content of the given source to an archive, returns written bytes.
@@ -36,7 +42,7 @@ func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64
 
 	defer internal.CloseWithErrLogf(a.logger, gw, "gzip writer")
 
-	return tar.New(a.logger, a.root, a.skipSymlinks).Create(srcs, gw, isRelativePath)
+    return tar.NewWithPreserve(a.logger, a.root, a.skipSymlinks, a.preserveMeta).Create(srcs, gw, isRelativePath)
 }
 
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
@@ -48,5 +54,5 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 	defer internal.CloseWithErrLogf(a.logger, gr, "gzip reader")
 
-	return tar.New(a.logger, a.root, a.skipSymlinks).Extract(dst, gr)
+    return tar.NewWithPreserve(a.logger, a.root, a.skipSymlinks, a.preserveMeta).Extract(dst, gr)
 }

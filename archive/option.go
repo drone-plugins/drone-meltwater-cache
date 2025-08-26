@@ -1,8 +1,9 @@
 package archive
 
 type options struct {
-	compressionLevel int
-	skipSymlinks     bool
+    compressionLevel int
+    skipSymlinks     bool
+    preserveMetadata bool
 }
 
 // Option overrides behavior of Archive.
@@ -18,14 +19,21 @@ func (f optionFunc) apply(o *options) {
 
 // WithCompressionLevel sets compression level option.
 func WithCompressionLevel(i int) Option {
-	return optionFunc(func(o *options) {
-		o.compressionLevel = i
-	})
+    return optionFunc(func(o *options) {
+        o.compressionLevel = i
+    })
 }
 
 // WithSkipSymlinks sets skip symlink option.
 func WithSkipSymlinks(b bool) Option {
-	return optionFunc(func(o *options) {
-		o.skipSymlinks = b
-	})
+    return optionFunc(func(o *options) {
+        o.skipSymlinks = b
+    })
+}
+
+// WithPreserveMetadata enables metadata preservation in tar streams (mode, timestamps, and ownership where supported).
+func WithPreserveMetadata(b bool) Option {
+    return optionFunc(func(o *options) {
+        o.preserveMetadata = b
+    })
 }

@@ -185,11 +185,15 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	}
 
 	// 3. Initialize cache.
+	// Enable metadata preservation only for supported backends when requested.
+	shouldPreserve := cfg.PreserveMetadata && (cfg.Backend == backend.S3 || cfg.Backend == backend.GCS)
+
 	c := cache.New(p.logger,
 		storage.New(p.logger, b, cfg.StorageOperationTimeout),
 		archive.FromFormat(p.logger, localRoot, cfg.ArchiveFormat,
 			archive.WithSkipSymlinks(cfg.SkipSymlinks),
 			archive.WithCompressionLevel(cfg.CompressionLevel),
+			archive.WithPreserveMetadata(shouldPreserve),
 		),
 		generator,
 		cfg.Backend,

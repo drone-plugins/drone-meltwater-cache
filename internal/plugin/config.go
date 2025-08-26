@@ -13,13 +13,14 @@ import (
 
 // Config plugin-specific parameters and secrets.
 type Config struct {
-	ArchiveFormat    string
-	Backend          string
-	CacheKeyTemplate string
-	MetricsFile      string
-	RemoteRoot       string
-	LocalRoot        string
-	AccountID        string
+    ArchiveFormat    string
+    Backend          string
+    CacheKeyTemplate string
+    MetricsFile      string
+    RemoteRoot       string
+    LocalRoot        string
+    AccountID        string
+    PreserveMetadata bool
 
 	// Modes
 	Debug               bool
@@ -29,13 +30,13 @@ type Config struct {
 	AutoDetectEarlyExit bool
 
 	// Optional
-	SkipSymlinks               bool
-	Override                   bool
-	FailRestoreIfKeyNotPresent bool
-	CompressionLevel           int
-	StorageOperationTimeout    time.Duration
-	EnableCacheKeySeparator    bool
-	StrictKeyMatching          bool `envconfig:"PLUGIN_STRICT_KEY_MATCHING" default:"true"`
+    SkipSymlinks               bool
+    Override                   bool
+    FailRestoreIfKeyNotPresent bool
+    CompressionLevel           int
+    StorageOperationTimeout    time.Duration
+    EnableCacheKeySeparator    bool
+    StrictKeyMatching          bool `envconfig:"PLUGIN_STRICT_KEY_MATCHING" default:"true"`
 
 	Mount []string
 

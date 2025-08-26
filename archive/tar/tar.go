@@ -1,13 +1,15 @@
 package tar
 
 import (
-	"archive/tar"
-	"errors"
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
+    "archive/tar"
+    "errors"
+    "fmt"
+    "io"
+    "os"
+    "path/filepath"
+    "sort"
+    "strings"
+    "time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -26,23 +28,29 @@ var (
 
 // Archive implements archive for tar.
 type Archive struct {
-	logger log.Logger
+    logger log.Logger
 
-	root         string
-	skipSymlinks bool
+    root         string
+    skipSymlinks bool
+    preserveMeta bool
 }
 
 // New creates an archive that uses the .tar file format.
 func New(logger log.Logger, root string, skipSymlinks bool) *Archive {
-	return &Archive{logger, root, skipSymlinks}
+    return &Archive{logger: logger, root: root, skipSymlinks: skipSymlinks}
+}
+
+// NewWithPreserve creates an archive with metadata preservation setting.
+func NewWithPreserve(logger log.Logger, root string, skipSymlinks bool, preserve bool) *Archive {
+    return &Archive{logger: logger, root: root, skipSymlinks: skipSymlinks, preserveMeta: preserve}
 }
 
 // Create writes content of the given source to an archive, returns written bytes.
 // If isRelativePath is true, it clones using the path, else it clones using a path
 // combining archive's root with the path.
 func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64, error) {
-	tw := tar.NewWriter(w)
-	defer internal.CloseWithErrLogf(a.logger, tw, "tar writer")
+    tw := tar.NewWriter(w)
+    defer internal.CloseWithErrLogf(a.logger, tw, "tar writer")
 
 	var written int64
 
@@ -52,18 +60,18 @@ func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64
 			return written, fmt.Errorf("make sure file or directory readable <%s>: %v,, %w", src, err, ErrSourceNotReachable)
 		}
 
-		if err := filepath.Walk(src, writeToArchive(tw, a.root, a.skipSymlinks, &written, isRelativePath, a.logger)); err != nil {
-			return written, fmt.Errorf("walk, add all files to archive, %w", err)
-		}
-	}
+        if err := filepath.Walk(src, writeToArchive(tw, a.root, a.skipSymlinks, a.preserveMeta, &written, isRelativePath, a.logger)); err != nil {
+            return written, fmt.Errorf("walk, add all files to archive, %w", err)
+        }
+    }
 
 	return written, nil
 }
 
 // nolint: lll
-func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int64, isRelativePath bool, logger log.Logger) func(string, os.FileInfo, error) error {
-	return func(path string, fi os.FileInfo, err error) error {
-		level.Debug(logger).Log("path", path, "root", root) //nolint: errcheck
+func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, preserve bool, written *int64, isRelativePath bool, logger log.Logger) func(string, os.FileInfo, error) error {
+    return func(path string, fi os.FileInfo, err error) error {
+        level.Debug(logger).Log("path", path, "root", root) //nolint: errcheck
 
 		if err != nil {
 			return err
@@ -73,11 +81,11 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 			return errors.New("no file info")
 		}
 
-		// Create header for Regular files and Directories
-		h, err := tar.FileInfoHeader(fi, fi.Name())
-		if err != nil {
-			return fmt.Errorf("create header for <%s>, %w", path, err)
-		}
+        // Create header for Regular files and Directories
+        h, err := tar.FileInfoHeader(fi, fi.Name())
+        if err != nil {
+            return fmt.Errorf("create header for <%s>, %w", path, err)
+        }
 
 		if fi.Mode()&os.ModeSymlink != 0 { // isSymbolic
 			if skipSymlinks {
@@ -90,14 +98,28 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 			}
 		}
 
-		var name string
-		if filepath.IsAbs(path) {
-			name, err = filepath.Abs(path)
-		} else if isRelativePath {
-			name = path
-		} else {
-			name, err = relative(root, path)
-		}
+        // Populate extended metadata when requested
+        if preserve {
+            // Use PAX to carry AccessTime/ChangeTime when available
+            h.Format = tar.FormatPAX
+            // Best-effort: capture atime if available, otherwise leave zero
+            if at, ok := extractAtime(fi); ok {
+                h.AccessTime = at
+            }
+            // Best-effort: capture uid/gid on Unix
+            if uid, gid, ok := getOwnership(fi); ok {
+                h.Uid, h.Gid = uid, gid
+            }
+        }
+
+        var name string
+        if filepath.IsAbs(path) {
+            name, err = filepath.Abs(path)
+        } else if isRelativePath {
+            name = path
+        } else {
+            name, err = relative(root, path)
+        }
 
 		if err != nil {
 			return fmt.Errorf("relative name <%s>: <%s>, %w", path, root, err)
@@ -105,9 +127,9 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 
 		h.Name = name
 
-		if err := tw.WriteHeader(h); err != nil {
-			return fmt.Errorf("write header for <%s>, %w", path, err)
-		}
+        if err := tw.WriteHeader(h); err != nil {
+            return fmt.Errorf("write header for <%s>, %w", path, err)
+        }
 
 		if !fi.Mode().IsRegular() {
 			return nil
@@ -177,75 +199,123 @@ func writeFileToArchive(tw io.Writer, path string) (n int64, err error) {
 
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
 func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
-	var (
-		written int64
-		tr      = tar.NewReader(r)
-	)
+    var (
+        written int64
+        tr      = tar.NewReader(r)
+    )
+
+    // When preserving metadata, delay directory metadata restore until after file extraction.
+    type dirMeta struct {
+        path string
+        mode os.FileMode
+        at   *time.Time
+        mt   time.Time
+        uid  int
+        gid  int
+    }
+    var dirs []dirMeta
 
 	for {
 		h, err := tr.Next()
 
 		switch {
-		case err == io.EOF: // if no more files are found return
-			return written, nil
+        case err == io.EOF: // end of archive
+            if a.preserveMeta && len(dirs) > 0 {
+                // Apply directory metadata deepest-first
+                sort.Slice(dirs, func(i, j int) bool {
+                    // deeper path first
+                    return depth(dirs[i].path) > depth(dirs[j].path)
+                })
+                for _, d := range dirs {
+                    _ = os.Chmod(d.path, d.mode)
+                    at := d.mt
+                    if d.at != nil { at = *d.at }
+                    _ = os.Chtimes(d.path, at, d.mt)
+                    _ = chown(d.path, d.uid, d.gid)
+                }
+            }
+            return written, nil
 		case err != nil: // return any other error
 			return written, fmt.Errorf("tar reader <%v>, %w", err, ErrArchiveNotReadable)
 		case h == nil: // if the header is nil, skip it
 			continue
 		}
 
-		var target string
-		if dst == h.Name || filepath.IsAbs(h.Name) {
-			target = h.Name
-		} else {
-			name, err := relative(dst, h.Name)
-			if err != nil {
-				return 0, fmt.Errorf("relative name, %w", err)
-			}
+        var target string
+        if dst == h.Name || filepath.IsAbs(h.Name) {
+            target = h.Name
+        } else {
+            name, err := relative(dst, h.Name)
+            if err != nil {
+                return 0, fmt.Errorf("relative name, %w", err)
+            }
 
-			target = filepath.Join(dst, name)
-		}
+            target = filepath.Join(dst, name)
+        }
 
 		level.Debug(a.logger).Log("msg", "extracting archive", "path", target)
 
-		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
-			return 0, fmt.Errorf("ensure directory <%s>, %w", target, err)
-		}
+        if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
+            return 0, fmt.Errorf("ensure directory <%s>, %w", target, err)
+        }
 
-		switch h.Typeflag {
-		case tar.TypeDir:
-			if err := extractDir(h, target); err != nil {
-				return written, err
-			}
+        switch h.Typeflag {
+        case tar.TypeDir:
+            if err := extractDir(h, target); err != nil {
+                return written, err
+            }
 
-			continue
-		case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
-			n, err := extractRegular(h, tr, target)
-			written += n
+            if a.preserveMeta {
+                // Record desired directory metadata to restore later
+                var atPtr *time.Time
+                if !h.AccessTime.IsZero() {
+                    at := h.AccessTime
+                    atPtr = &at
+                }
+                dirs = append(dirs, dirMeta{path: target, mode: os.FileMode(h.Mode), at: atPtr, mt: h.ModTime, uid: h.Uid, gid: h.Gid})
+            }
 
-			if err != nil {
-				return written, fmt.Errorf("extract regular file, %w", err)
-			}
+            continue
+        case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
+            n, err := extractRegular(h, tr, target)
+            written += n
 
-			continue
-		case tar.TypeSymlink:
-			if err := extractSymlink(h, target); err != nil {
-				return written, fmt.Errorf("extract symbolic link, %w", err)
-			}
+            if err != nil {
+                return written, fmt.Errorf("extract regular file, %w", err)
+            }
 
-			continue
-		case tar.TypeLink:
-			if err := extractLink(h, target); err != nil {
-				return written, fmt.Errorf("extract link, %w", err)
-			}
+            if a.preserveMeta {
+                // Apply mode, times, and ownership best-effort
+                _ = os.Chmod(target, os.FileMode(h.Mode))
+                at := h.AccessTime
+                if at.IsZero() { at = h.ModTime }
+                _ = os.Chtimes(target, at, h.ModTime)
+                _ = chown(target, h.Uid, h.Gid)
+            }
+
+            continue
+        case tar.TypeSymlink:
+            if err := extractSymlink(h, target); err != nil {
+                return written, fmt.Errorf("extract symbolic link, %w", err)
+            }
+
+            if a.preserveMeta {
+                _ = lchown(target, h.Uid, h.Gid)
+            }
+
+            continue
+        case tar.TypeLink:
+            if err := extractLink(h, target); err != nil {
+                return written, fmt.Errorf("extract link, %w", err)
+            }
 
 			continue
 		case tar.TypeXGlobalHeader:
 			continue
-		default:
-			return written, fmt.Errorf("extract %s, unknown type flag: %c", target, h.Typeflag)
-		}
-	}
+        default:
+            return written, fmt.Errorf("extract %s, unknown type flag: %c", target, h.Typeflag)
+        }
+    }
 }
 
 func extractDir(h *tar.Header, target string) error {
@@ -297,10 +367,17 @@ func extractLink(h *tar.Header, target string) error {
 }
 
 func unlink(path string) error {
-	_, err := os.Lstat(path)
-	if err == nil {
-		return os.Remove(path)
-	}
+    _, err := os.Lstat(path)
+    if err == nil {
+        return os.Remove(path)
+    }
 
-	return nil
+    return nil
+}
+
+// depth returns a path depth for ordering directories (deeper first).
+func depth(p string) int {
+    c := filepath.Clean(p)
+    c = strings.ReplaceAll(c, "\\", "/")
+    return strings.Count(c, "/")
 }

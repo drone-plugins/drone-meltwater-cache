@@ -344,6 +344,14 @@ func main() {
 			EnvVars: []string{"PLUGIN_STRICT_KEY_MATCHING"},
 		},
 
+		// Metadata preservation (opt-in)
+		&cli.BoolFlag{
+			Name:    "preserve-metadata",
+			Usage:   "Preserve file metadata (permissions, timestamps, ownership where supported) in archive (S3/GCS only)",
+			Value:   false,
+			EnvVars: []string{"PLUGIN_PRESERVE_METADATA"},
+		},
+
 		// Backends Configs
 
 		// Shared Config flags
@@ -666,6 +674,7 @@ func run(c *cli.Context) error {
 		FailRestoreIfKeyNotPresent: c.Bool("fail-restore-if-key-not-present"),
 		EnableCacheKeySeparator:    c.Bool("enable-cache-key-separator"),
 		StrictKeyMatching:          c.Bool("strict-key-matching"),
+        PreserveMetadata:           c.Bool("preserve-metadata"),
 
 		StorageOperationTimeout: c.Duration("backend.operation-timeout"),
 		FileSystem: filesystem.Config{
