@@ -30,6 +30,7 @@ type Config struct {
 
 	// Optional
 	SkipSymlinks               bool
+	PreserveMetadata           bool
 	Override                   bool
 	FailRestoreIfKeyNotPresent bool
 	CompressionLevel           int

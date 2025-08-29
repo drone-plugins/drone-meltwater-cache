@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -30,11 +31,12 @@ type Archive struct {
 
 	root         string
 	skipSymlinks bool
+	preserve     bool
 }
 
 // New creates an archive that uses the .tar file format.
-func New(logger log.Logger, root string, skipSymlinks bool) *Archive {
-	return &Archive{logger, root, skipSymlinks}
+func New(logger log.Logger, root string, skipSymlinks bool, preserve bool) *Archive {
+	return &Archive{logger, root, skipSymlinks, preserve}
 }
 
 // Create writes content of the given source to an archive, returns written bytes.
@@ -52,7 +54,7 @@ func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64
 			return written, fmt.Errorf("make sure file or directory readable <%s>: %v,, %w", src, err, ErrSourceNotReachable)
 		}
 
-		if err := filepath.Walk(src, writeToArchive(tw, a.root, a.skipSymlinks, &written, isRelativePath, a.logger)); err != nil {
+		if err := filepath.Walk(src, writeToArchive(tw, a.root, a.skipSymlinks, a.preserve, &written, isRelativePath, a.logger)); err != nil {
 			return written, fmt.Errorf("walk, add all files to archive, %w", err)
 		}
 	}
@@ -61,7 +63,7 @@ func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64
 }
 
 // nolint: lll
-func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int64, isRelativePath bool, logger log.Logger) func(string, os.FileInfo, error) error {
+func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, preserve bool, written *int64, isRelativePath bool, logger log.Logger) func(string, os.FileInfo, error) error {
 	return func(path string, fi os.FileInfo, err error) error {
 		level.Debug(logger).Log("path", path, "root", root) //nolint: errcheck
 
@@ -88,6 +90,11 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, written *int
 			if h, err = createSymlinkHeader(fi, path); err != nil {
 				return fmt.Errorf("create header for symbolic link, %w", err)
 			}
+		}
+
+		if preserve {
+			h.Format = tar.FormatPAX
+			applyHeaderMetadata(fi, h)
 		}
 
 		var name string
@@ -182,15 +189,24 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 		tr      = tar.NewReader(r)
 	)
 
+	type dirMeta struct {
+		path     string
+		mode     os.FileMode
+		atime    time.Time
+		mtime    time.Time
+		uid, gid int
+	}
+	var dirs []dirMeta
+
 	for {
 		h, err := tr.Next()
-
-		switch {
-		case err == io.EOF: // if no more files are found return
-			return written, nil
-		case err != nil: // return any other error
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
 			return written, fmt.Errorf("tar reader <%v>, %w", err, ErrArchiveNotReadable)
-		case h == nil: // if the header is nil, skip it
+		}
+		if h == nil {
 			continue
 		}
 
@@ -206,7 +222,7 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 			target = filepath.Join(dst, name)
 		}
 
-		level.Debug(a.logger).Log("msg", "extracting archive", "path", target)
+		level.Debug(a.logger).Log("msg", "extracting archive", "path", target) //nolint: errcheck
 
 		if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
 			return 0, fmt.Errorf("ensure directory <%s>, %w", target, err)
@@ -217,35 +233,56 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 			if err := extractDir(h, target); err != nil {
 				return written, err
 			}
-
-			continue
+			if a.preserve {
+				dirs = append(dirs, dirMeta{path: target, mode: os.FileMode(h.Mode), atime: h.AccessTime, mtime: h.ModTime, uid: h.Uid, gid: h.Gid})
+			}
 		case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
 			n, err := extractRegular(h, tr, target)
 			written += n
-
 			if err != nil {
 				return written, fmt.Errorf("extract regular file, %w", err)
 			}
-
-			continue
+			if a.preserve {
+				_ = os.Chmod(target, os.FileMode(h.Mode))
+				at := h.AccessTime
+				if at.IsZero() {
+					at = h.ModTime
+				}
+				_ = os.Chtimes(target, at, h.ModTime)
+				_ = chown(target, h.Uid, h.Gid)
+			}
 		case tar.TypeSymlink:
 			if err := extractSymlink(h, target); err != nil {
 				return written, fmt.Errorf("extract symbolic link, %w", err)
 			}
-
-			continue
+			if a.preserve {
+				_ = lchown(target, h.Uid, h.Gid)
+			}
 		case tar.TypeLink:
 			if err := extractLink(h, target); err != nil {
 				return written, fmt.Errorf("extract link, %w", err)
 			}
-
-			continue
 		case tar.TypeXGlobalHeader:
-			continue
+		// no-op
 		default:
 			return written, fmt.Errorf("extract %s, unknown type flag: %c", target, h.Typeflag)
 		}
 	}
+
+	if a.preserve {
+		for i := len(dirs) - 1; i >= 0; i-- {
+			d := dirs[i]
+			_ = os.Chmod(d.path, d.mode)
+			at := d.atime
+			if at.IsZero() {
+				at = d.mtime
+			}
+			_ = os.Chtimes(d.path, at, d.mtime)
+			_ = chown(d.path, d.uid, d.gid)
+		}
+	}
+
+	return written, nil
 }
 
 func extractDir(h *tar.Header, target string) error {

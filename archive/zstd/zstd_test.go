@@ -34,14 +34,14 @@ func TestCreate(t *testing.T) {
 	}{
 		{
 			name:    "empty mount paths",
-			tzst:    New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:    New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			srcs:    []string{},
 			written: 0,
 			err:     nil,
 		},
 		{
 			name: "non-existing mount paths",
-			tzst: New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst: New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			srcs: []string{
 				"iamnotexists",
 				"metoo",
@@ -51,21 +51,21 @@ func TestCreate(t *testing.T) {
 		},
 		{
 			name:    "existing mount paths",
-			tzst:    New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:    New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			srcs:    exampleFileTree(t, "zstd_create"),
 			written: 43, // 3 x tmpfile in dir, 1 tmpfile
 			err:     nil,
 		},
 		{
 			name:    "existing mount nested paths",
-			tzst:    New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:    New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			srcs:    exampleNestedFileTree(t, "tar_create"),
 			written: 56, // 4 x tmpfile in dir, 1 tmpfile
 			err:     nil,
 		},
 		{
 			name:    "existing mount paths with symbolic links",
-			tzst:    New(log.NewNopLogger(), testRootMounted, false, flate.DefaultCompression),
+			tzst:    New(log.NewNopLogger(), testRootMounted, false, flate.DefaultCompression, false),
 			srcs:    exampleFileTreeWithSymlinks(t, "zstd_create_symlink"),
 			written: 43,
 			err:     nil,
@@ -106,7 +106,7 @@ func TestExtract(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(testRoot) })
 
 	// Setup
-	tzst := New(log.NewNopLogger(), testRootMounted, false, flate.DefaultCompression)
+	tzst := New(log.NewNopLogger(), testRootMounted, false, flate.DefaultCompression, false)
 
 	arcDir, arcDirClean := test.CreateTempDir(t, "zstd_extract_archive")
 	t.Cleanup(arcDirClean)
@@ -143,7 +143,7 @@ func TestExtract(t *testing.T) {
 	}{
 		{
 			name:        "non-existing archive",
-			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			archivePath: "iamnotexists",
 			srcs:        []string{},
 			written:     0,
@@ -151,7 +151,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "non-existing root destination",
-			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			archivePath: emptyArchivePath,
 			srcs:        []string{},
 			written:     0,
@@ -159,7 +159,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "empty archive",
-			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			archivePath: emptyArchivePath,
 			srcs:        []string{},
 			written:     0,
@@ -167,7 +167,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "bad archives",
-			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			archivePath: badArchivePath,
 			srcs:        []string{},
 			written:     0,
@@ -175,7 +175,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "existing archive",
-			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			archivePath: archivePath,
 			srcs:        files,
 			written:     43,
@@ -183,7 +183,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "existing archive with nested files",
-			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression),
+			tzst:        New(log.NewNopLogger(), testRootMounted, true, flate.DefaultCompression, false),
 			archivePath: nestedArchivePath,
 			srcs:        nestedFiles,
 			written:     56,
@@ -191,7 +191,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "existing archive with symbolic links",
-			tzst:        New(log.NewNopLogger(), testRootMounted, false, flate.DefaultCompression),
+			tzst:        New(log.NewNopLogger(), testRootMounted, false, flate.DefaultCompression, false),
 			archivePath: archiveWithSymlinkPath,
 			srcs:        filesWithSymlink,
 			written:     43,

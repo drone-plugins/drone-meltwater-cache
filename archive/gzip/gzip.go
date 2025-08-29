@@ -18,11 +18,12 @@ type Archive struct {
 	root             string
 	compressionLevel int
 	skipSymlinks     bool
+	preserveMetadata bool
 }
 
 // New creates an archive that uses the .tar.gz file format.
-func New(logger log.Logger, root string, skipSymlinks bool, compressionLevel int) *Archive {
-	return &Archive{logger, root, compressionLevel, skipSymlinks}
+func New(logger log.Logger, root string, skipSymlinks bool, compressionLevel int, preserveMetadata bool) *Archive {
+	return &Archive{logger, root, compressionLevel, skipSymlinks, preserveMetadata}
 }
 
 // Create writes content of the given source to an archive, returns written bytes.
@@ -36,7 +37,7 @@ func (a *Archive) Create(srcs []string, w io.Writer, isRelativePath bool) (int64
 
 	defer internal.CloseWithErrLogf(a.logger, gw, "gzip writer")
 
-	return tar.New(a.logger, a.root, a.skipSymlinks).Create(srcs, gw, isRelativePath)
+	return tar.New(a.logger, a.root, a.skipSymlinks, a.preserveMetadata).Create(srcs, gw, isRelativePath)
 }
 
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
@@ -48,5 +49,5 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 	defer internal.CloseWithErrLogf(a.logger, gr, "gzip reader")
 
-	return tar.New(a.logger, a.root, a.skipSymlinks).Extract(dst, gr)
+	return tar.New(a.logger, a.root, a.skipSymlinks, a.preserveMetadata).Extract(dst, gr)
 }

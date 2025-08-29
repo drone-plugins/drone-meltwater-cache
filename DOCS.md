@@ -378,3 +378,6 @@ encryption
 
 skip_symlinks
 : skip symbolic links in archive
+
+preserve_metadata
+: preserve file permissions, ownership, and timestamps when storing and restoring caches (S3/GCS only)

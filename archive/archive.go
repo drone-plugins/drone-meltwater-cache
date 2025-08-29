@@ -46,13 +46,13 @@ func FromFormat(logger log.Logger, root string, format string, opts ...Option) A
 
 	switch format {
 	case Gzip:
-		return gzip.New(logger, root, options.skipSymlinks, options.compressionLevel)
+		return gzip.New(logger, root, options.skipSymlinks, options.compressionLevel, options.preserveMetadata)
 	case Zstd:
-		return zstd.New(logger, root, options.skipSymlinks, options.compressionLevel)
+		return zstd.New(logger, root, options.skipSymlinks, options.compressionLevel, options.preserveMetadata)
 	case Tar:
-		return tar.New(logger, root, options.skipSymlinks)
+		return tar.New(logger, root, options.skipSymlinks, options.preserveMetadata)
 	default:
 		level.Error(logger).Log("msg", "unknown archive format", "format", format)
-		return tar.New(logger, root, options.skipSymlinks) // DefaultArchiveFormat
+		return tar.New(logger, root, options.skipSymlinks, options.preserveMetadata) // DefaultArchiveFormat
 	}
 }
