@@ -49,9 +49,11 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	}
 
 	var (
-		wg        sync.WaitGroup
-		errs      = &internal.MultiError{}
-		namespace = filepath.ToSlash(filepath.Clean(r.namespace))
+		wg               sync.WaitGroup
+		errs             = &internal.MultiError{}
+		namespace        = filepath.ToSlash(filepath.Clean(r.namespace))
+		successCount     int
+		totalDirectories int
 	)
 
 	for _, src := range srcs {
@@ -86,11 +88,21 @@ func (r rebuilder) Rebuild(srcs []string) error {
 
 			if err := r.rebuild(src, dst); err != nil {
 				errs.Add(fmt.Errorf("upload from <%s> to <%s>, %w", src, dst, err))
+			} else {
+				successCount++
 			}
 		}(dst, src)
 	}
 
 	wg.Wait()
+
+	totalDirectories = len(srcs)
+
+	if successCount > 0 {
+		level.Info(r.logger).Log("msg", "cache built", "took", time.Since(now),
+			"status", fmt.Sprintf("%d/%d directories cached", successCount, totalDirectories))
+		return nil
+	}
 
 	if errs.Err() != nil {
 		return fmt.Errorf("rebuild failed, %w", errs)
