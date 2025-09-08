@@ -42,14 +42,14 @@ func TestCreate(t *testing.T) {
 	}{
 		{
 			name:    "empty mount paths",
-			ta:      New(log.NewNopLogger(), testRootMounted, true),
+			ta:      New(log.NewNopLogger(), testRootMounted, true, false),
 			srcs:    []string{},
 			written: 0,
 			err:     nil,
 		},
 		{
 			name: "non-existing mount paths",
-			ta:   New(log.NewNopLogger(), testRootMounted, true),
+			ta:   New(log.NewNopLogger(), testRootMounted, true, false),
 			srcs: []string{
 				"idonotexist",
 				"metoo",
@@ -59,28 +59,28 @@ func TestCreate(t *testing.T) {
 		},
 		{
 			name:    "existing mount paths",
-			ta:      New(log.NewNopLogger(), testRootMounted, true),
+			ta:      New(log.NewNopLogger(), testRootMounted, true, false),
 			srcs:    exampleFileTree(t, "tar_create", testRootMounted),
 			written: 43, // 3 x tmpfile in dir, 1 tmpfile
 			err:     nil,
 		},
 		{
 			name:    "existing mount nested paths",
-			ta:      New(log.NewNopLogger(), testRootMounted, true),
+			ta:      New(log.NewNopLogger(), testRootMounted, true, false),
 			srcs:    exampleNestedFileTree(t, "tar_create"),
 			written: 56, // 4 x tmpfile in dir, 1 tmpfile
 			err:     nil,
 		},
 		{
 			name:    "existing mount paths with symbolic links",
-			ta:      New(log.NewNopLogger(), testRootMounted, false),
+			ta:      New(log.NewNopLogger(), testRootMounted, false, false),
 			srcs:    exampleFileTreeWithSymlinks(t, "tar_create_symlink"),
 			written: 43,
 			err:     nil,
 		},
 		{
 			name:    "absolute mount paths",
-			ta:      New(log.NewNopLogger(), testRootMounted, true),
+			ta:      New(log.NewNopLogger(), testRootMounted, true, false),
 			srcs:    exampleFileTree(t, "tar_create", testAbs),
 			written: 43,
 			err:     nil,
@@ -150,7 +150,7 @@ func TestExtract(t *testing.T) {
 	})
 
 	// Setup
-	ta := New(log.NewNopLogger(), testRootMounted, false)
+	ta := New(log.NewNopLogger(), testRootMounted, false, false)
 
 	arcDir, arcDirClean := test.CreateTempDir(t, "tar_extract_archives", testRootMounted)
 	t.Cleanup(arcDirClean)
@@ -197,7 +197,7 @@ func TestExtract(t *testing.T) {
 	}{
 		{
 			name:        "non-existing archive",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: "idonotexist",
 			srcs:        []string{},
 			written:     0,
@@ -205,7 +205,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "non-existing root destination",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: emptyArchivePath,
 			srcs:        []string{},
 			written:     0,
@@ -213,7 +213,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "empty archive",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: emptyArchivePath,
 			srcs:        []string{},
 			written:     0,
@@ -221,7 +221,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "bad archives",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: badArchivePath,
 			srcs:        []string{},
 			written:     0,
@@ -229,7 +229,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "existing archive",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: archivePath,
 			srcs:        files,
 			written:     43,
@@ -237,7 +237,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "existing archive with nested files",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: nestedArchivePath,
 			srcs:        nestedFiles,
 			written:     56,
@@ -245,7 +245,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "existing archive with symbolic links",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: archiveWithSymlinkPath,
 			srcs:        filesWithSymlink,
 			written:     43,
@@ -253,7 +253,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "existing archive with hidden symbolic links",
-			ta:          New(log.NewNopLogger(), testRootMounted, false),
+			ta:          New(log.NewNopLogger(), testRootMounted, false, false),
 			archivePath: archiveWithSymlinkHiddenPath,
 			srcs:        filesWithSymlinkHidden,
 			written:     43,
@@ -261,7 +261,7 @@ func TestExtract(t *testing.T) {
 		},
 		{
 			name:        "absolute mount paths",
-			ta:          New(log.NewNopLogger(), testRootMounted, true),
+			ta:          New(log.NewNopLogger(), testRootMounted, true, false),
 			archivePath: archiveAbsPath,
 			srcs:        filesAbs,
 			written:     43,
