@@ -1,4 +1,4 @@
-//go:build linux
+//go:build darwin
 
 package tar
 
@@ -16,8 +16,8 @@ func applyHeaderMetadata(fi os.FileInfo, h *tar.Header) {
 	}
 	h.Uid = int(st.Uid)
 	h.Gid = int(st.Gid)
-	atime := time.Unix(int64(st.Atim.Sec), int64(st.Atim.Nsec))
+	atime := time.Unix(st.Atimespec.Sec, st.Atimespec.Nsec)
 	h.AccessTime = atime
-	ctime := time.Unix(int64(st.Ctim.Sec), int64(st.Ctim.Nsec))
+	ctime := time.Unix(st.Ctimespec.Sec, st.Ctimespec.Nsec)
 	h.ChangeTime = ctime
 }
