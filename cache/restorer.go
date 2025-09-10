@@ -69,9 +69,11 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	}
 
 	var (
-		wg        sync.WaitGroup
-		errs      = &internal.MultiError{}
-		namespace = filepath.ToSlash(filepath.Clean(r.namespace))
+		wg               sync.WaitGroup
+		errs             = &internal.MultiError{}
+		namespace        = filepath.ToSlash(filepath.Clean(r.namespace))
+		successCount     int // Counter to track how many directories were successfully restored
+		totalDirectories int // Counter for total directories to process
 	)
 
 	// A map to store the original paths for each destination
@@ -240,11 +242,27 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 			if err := r.restore(src, dst, cacheFileName); err != nil {
 				errs.Add(fmt.Errorf("download from <%s> to <%s>, %w", src, dst, err))
+			} else {
+				// Increment success counter if directory is successfully restored
+				successCount++
 			}
 		}(src, dst)
 	}
 
 	wg.Wait()
+
+	totalDirectories = len(dsts)
+
+	// If at least one directory was successfully restored, consider the operation successful
+	if successCount > 0 {
+		if successCount == totalDirectories {
+			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now), "status", "all directories successfully restored")
+		} else {
+			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now),
+				"status", fmt.Sprintf("partially restored (%d/%d directories)", successCount, totalDirectories))
+		}
+		return nil
+	}
 
 	if errs.Err() != nil {
 		return fmt.Errorf("restore failed, %w", errs)
