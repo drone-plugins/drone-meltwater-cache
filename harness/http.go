@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
+	"github.com/go-kit/kit/log"
 	"github.com/meltwater/drone-cache/storage/common"
 )
 
@@ -28,6 +30,7 @@ func New(endpoint, accountID, bearerToken string, skipverify bool) *HTTPClient {
 		Endpoint:    endpoint,
 		BearerToken: bearerToken,
 		AccountID:   accountID,
+		Logger:      log.NewNopLogger(), // Default no-op logger
 		Client: &http.Client{
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -37,12 +40,20 @@ func New(endpoint, accountID, bearerToken string, skipverify bool) *HTTPClient {
 	return client
 }
 
+// NewWithLogger returns a new HTTPClient with a logger.
+func NewWithLogger(endpoint, accountID, bearerToken string, skipverify bool, logger log.Logger) *HTTPClient {
+	client := New(endpoint, accountID, bearerToken, skipverify)
+	client.Logger = logger
+	return client
+}
+
 // HTTPClient provides an http service client.
 type HTTPClient struct {
 	Client      *http.Client
 	Endpoint    string
 	AccountID   string
 	BearerToken string
+	Logger      log.Logger
 }
 
 // getUploadURL will get the 'put' presigned url from cache service
@@ -87,7 +98,12 @@ func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, erro
 // GetListURL will get the list of all entries
 func (c *HTTPClient) GetEntriesList(ctx context.Context, prefix string) ([]common.FileEntry, error) {
 	path := c.buildEndpointPath(ListEntriesEndpoint, prefix)
-	req, err := http.NewRequestWithContext(ctx, "GET", c.Endpoint+path, nil)
+	fullURL := c.Endpoint + path
+
+	// Add backend query parameter based on environment variable
+	fullURL = c.addBackendParameter(fullURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +130,9 @@ func (c *HTTPClient) GetEntriesList(ctx context.Context, prefix string) ([]commo
 }
 
 func (c *HTTPClient) getLink(ctx context.Context, path string) (string, error) {
+	// Add backend query parameter based on environment variable
+	path = c.addBackendParameter(path)
+
 	req, err := http.NewRequestWithContext(ctx, "GET", path, nil)
 	if err != nil {
 		return "", err
@@ -140,6 +159,29 @@ func (c *HTTPClient) getLink(ctx context.Context, path string) (string, error) {
 
 func (c *HTTPClient) client() *http.Client {
 	return c.Client
+}
+
+// getBackendType returns the backend type based on environment variable
+// Returns "gcs" if HARNESS_CI_USE_GCS_CACHE_SERVICE is set to "true", "s3" otherwise
+func (c *HTTPClient) getBackendType() string {
+	if strings.ToLower(os.Getenv("HARNESS_CI_USE_GCS_CACHE_SERVICE")) == "true" {
+		return "gcs"
+	}
+	return "s3"
+}
+
+// addBackendParameter adds the backend query parameter to the URL
+func (c *HTTPClient) addBackendParameter(urlStr string) string {
+	backend := c.getBackendType()
+	if backend != "" {
+		c.Logger.Log("msg", "routing cache request to backend", "backend", backend)
+		if strings.Contains(urlStr, "?") {
+			return urlStr + "&backend=" + backend
+		} else {
+			return urlStr + "?backend=" + backend
+		}
+	}
+	return urlStr
 }
 
 // buildEndpointPath constructs a properly formatted and URL-encoded API endpoint path
