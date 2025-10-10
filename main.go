@@ -565,6 +565,12 @@ func main() {
 			EnvVars: []string{"SFTP_PORT"},
 		},
 		&cli.StringFlag{
+			Name:    "cache-type",
+			Usage:   "cache type for Harness backend unified APIs (e.g., intel, step)",
+			EnvVars: []string{"PLUGIN_CACHE_TYPE"},
+		},
+
+		&cli.StringFlag{
 			Name:    "cache-service-token",
 			Usage:   "cache service token",
 			EnvVars: []string{"PLUGIN_CACHE_SERVICE_BEARER_TOKEN"},
@@ -730,6 +736,7 @@ func run(c *cli.Context) error {
 			AccountID:              c.String("account-id"),
 			Token:                  c.String("cache-service-token"),
 			ServerBaseURL:          c.String("cache-service-baseurl"),
+			CacheType:              c.String("cache-type"),
 			MultipartChunkSize:     c.Int("multipart.chunk.size"),
 			MultipartMaxUploadSize: c.Int("multipart.max.size"),
 			MultipartThresholdSize: c.Int("multipart.threshold.size"),

@@ -35,3 +35,22 @@ type Client interface {
 	// GetUploadURLWithQuery returns a presigned URL for uploading a file with the given query
 	GetUploadURLWithQuery(ctx context.Context, key string, query url.Values) (string, error)
 }
+
+// UnifiedClient exposes cacheType-aware unified endpoints without changing the legacy Client.
+// Implemented by HTTPClient.
+type UnifiedClient interface {
+	// GetUploadURLForType returns a presigned URL for uploading for a given cacheType.
+	GetUploadURLForType(ctx context.Context, cacheType string, key string) (string, error)
+
+	// GetDownloadURLForType returns a presigned URL for downloading for a given cacheType.
+	GetDownloadURLForType(ctx context.Context, cacheType string, key string) (string, error)
+
+	// GetExistsURLForType returns a presigned URL for existence check for a given cacheType.
+	GetExistsURLForType(ctx context.Context, cacheType string, key string) (string, error)
+
+	// GetEntriesListForType lists entries for a given prefix and cacheType.
+	GetEntriesListForType(ctx context.Context, cacheType string, prefix string) ([]common.FileEntry, error)
+
+	// GetUploadURLWithQueryForType returns presigned URL for uploading with extra query params for cacheType.
+	GetUploadURLWithQueryForType(ctx context.Context, cacheType string, key string, query url.Values) (string, error)
+}
