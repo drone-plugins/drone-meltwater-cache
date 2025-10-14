@@ -26,10 +26,10 @@ const (
 // Unified endpoints (cacheType-aware). These do not embed the cache type in the path
 // and instead expect it to be provided as a query parameter.
 const (
-	UnifiedRestoreEndpoint     = "/cache/download?accountId=%s&cacheKey=%s"
-	UnifiedStoreEndpoint       = "/cache/upload?accountId=%s&cacheKey=%s"
-	UnifiedExistsEndpoint      = "/cache/exists?accountId=%s&cacheKey=%s"
-	UnifiedListEntriesEndpoint = "/cache/list_entries?accountId=%s&cacheKeyPrefix=%s"
+	UnifiedRestoreEndpoint     = "/cache/unified/download?accountId=%s&cacheKey=%s"
+	UnifiedStoreEndpoint       = "/cache/unified/upload?accountId=%s&cacheKey=%s"
+	UnifiedExistsEndpoint      = "/cache/unified/exists?accountId=%s&cacheKey=%s"
+	UnifiedListEntriesEndpoint = "/cache/unified/list_entries?accountId=%s&cacheKeyPrefix=%s"
 )
 
 // NewHTTPClient returns a new HTTPClient.
