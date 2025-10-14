@@ -170,6 +170,11 @@ func (p *Plugin) Exec() error { // nolint:funlen
 		cache.WithEnableCacheKeySeparator(p.Config.EnableCacheKeySeparator),
 		cache.WithStrictKeyMatching(p.Config.StrictKeyMatching))
 
+	// Thread cache type from Harness backend config to cache layer to decide unified vs legacy behavior
+	if cfg.Backend == backend.Harness {
+		options = append(options, cache.WithCacheType(cfg.Harness.CacheType))
+	}
+
 	// 2. Initialize storage backend.
 	b, err := backend.FromConfig(p.logger, cfg.Backend, backend.Config{
 		Debug:      cfg.Debug,

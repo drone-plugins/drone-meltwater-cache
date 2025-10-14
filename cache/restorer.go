@@ -36,12 +36,13 @@ type restorer struct {
 	strictKeyMatching       bool
 	backend                 string
 	accountID               string
+	cacheType               string
 }
 
 var cacheFileMutex sync.Mutex // To ensure thread-safe writes to the file
 
 // NewRestorer creates a new cache.Restorer.
-func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, strictKeyMatching bool, backend, accountID string) Restorer { // nolint:lll
+func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, strictKeyMatching bool, backend, accountID string, cacheType string) Restorer { // nolint:lll
 	return restorer{
 		logger:                  logger,
 		a:                       a,
@@ -54,6 +55,7 @@ func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.
 		strictKeyMatching:       strictKeyMatching,
 		backend:                 backend,
 		accountID:               accountID,
+		cacheType:               cacheType,
 	}
 }
 
@@ -91,7 +93,10 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				return fmt.Errorf("key %s does not exist", prefix)
 			}
 			if r.backend == "harness" {
-				prefix = r.accountID + "/intel/" + prefix
+				// Only prepend legacy intel prefix when unified cache type is not enabled
+				if strings.TrimSpace(r.cacheType) == "" {
+					prefix = r.accountID + "/intel/" + prefix
+				}
 			}
 
 			for _, e := range entries {
@@ -158,8 +163,7 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 					}
 				}
 
-				var remotePath string
-				remotePath = entryPath
+				remotePath := entryPath
 				level.Debug(r.logger).Log("msg", "original remote path", "remotePath", remotePath, "strictMode", r.strictKeyMatching)
 
 				// Initial path extraction based on separator settings
