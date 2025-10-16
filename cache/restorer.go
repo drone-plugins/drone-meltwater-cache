@@ -257,17 +257,23 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 	totalDirectories = len(dsts)
 
+	metrics := make(map[string]string)
 	// If at least one directory was successfully restored, consider the operation successful
+	metrics["cache_hit"] = "false"
 	if successCount > 0 {
+		metrics["cache_hit"] = "true"
 		if successCount == totalDirectories {
+			metrics["cache_state"] = "complete"
 			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now), "status", "all directories successfully restored")
 		} else {
+			metrics["cache_state"] = "partial"
 			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now),
 				"status", fmt.Sprintf("partially restored (%d/%d directories)", successCount, totalDirectories))
 		}
+		r.exportMetricsIfUnified(metrics)
 		return nil
 	}
-
+	r.exportMetricsIfUnified(metrics)
 	if errs.Err() != nil {
 		return fmt.Errorf("restore failed, %w", errs)
 	}
@@ -349,6 +355,48 @@ func getSeparator() string {
 	}
 
 	return "/"
+}
+
+// exportMetricsIfUnified exports metrics only for unified cache flow
+func (r restorer) exportMetricsIfUnified(metrics map[string]string) {
+	// Only export metrics for unified cache flow
+	if strings.TrimSpace(r.cacheType) == "" {
+		return
+	}
+
+	if err := exportRestoreMetrics(r.logger, metrics); err != nil {
+		level.Error(r.logger).Log("msg", "failed to export restore metrics", "err", err)
+	}
+}
+
+func exportRestoreMetrics(logger log.Logger, outputs map[string]string) error {
+	// Check if DRONE_OUTPUT environment variable is set
+	outputPath := os.Getenv("DRONE_OUTPUT")
+	if outputPath == "" {
+		return fmt.Errorf("DRONE_OUTPUT environment variable is not set")
+	}
+
+	// Open the file with append mode
+	outputFile, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open output file %s: %w", outputPath, err)
+	}
+	defer outputFile.Close()
+
+	// Write all key-value pairs
+	for key, value := range outputs {
+		if key == "" {
+			continue // Skip empty keys
+		}
+		_, err = fmt.Fprintf(outputFile, "%s=%s\n", key, value)
+		if err != nil {
+			// Log error but continue with next key
+			level.Error(logger).Log("msg", "failed to export metric", "key", key, "err", err)
+			continue
+		}
+	}
+
+	return nil
 }
 
 func writeCacheMetadata(data CacheMetadata, filename string) error {
