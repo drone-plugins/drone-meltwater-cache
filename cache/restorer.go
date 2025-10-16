@@ -22,6 +22,16 @@ import (
 	"github.com/meltwater/drone-cache/storage/common"
 )
 
+// Restore metric constants
+const (
+	metricKeyCacheHit   = "cache_hit"
+	metricKeyCacheState = "cache_state"
+	metricValueTrue     = "true"
+	metricValueFalse    = "false"
+	metricValueComplete = "complete"
+	metricValuePartial  = "partial"
+)
+
 type restorer struct {
 	logger log.Logger
 
@@ -36,12 +46,13 @@ type restorer struct {
 	strictKeyMatching       bool
 	backend                 string
 	accountID               string
+	cacheType               string
 }
 
 var cacheFileMutex sync.Mutex // To ensure thread-safe writes to the file
 
 // NewRestorer creates a new cache.Restorer.
-func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, strictKeyMatching bool, backend, accountID string) Restorer { // nolint:lll
+func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, failIfKeyNotPresent bool, enableCacheKeySeparator bool, strictKeyMatching bool, backend, accountID string, cacheType string) Restorer { // nolint:lll
 	return restorer{
 		logger:                  logger,
 		a:                       a,
@@ -54,6 +65,7 @@ func NewRestorer(logger log.Logger, s storage.Storage, a archive.Archive, g key.
 		strictKeyMatching:       strictKeyMatching,
 		backend:                 backend,
 		accountID:               accountID,
+		cacheType:               cacheType,
 	}
 }
 
@@ -91,7 +103,10 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 				return fmt.Errorf("key %s does not exist", prefix)
 			}
 			if r.backend == "harness" {
-				prefix = r.accountID + "/intel/" + prefix
+				// Only prepend legacy intel prefix when unified cache type is not enabled
+				if strings.TrimSpace(r.cacheType) == "" {
+					prefix = r.accountID + "/intel/" + prefix
+				}
 			}
 
 			for _, e := range entries {
@@ -158,8 +173,7 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 					}
 				}
 
-				var remotePath string
-				remotePath = entryPath
+				remotePath := entryPath
 				level.Debug(r.logger).Log("msg", "original remote path", "remotePath", remotePath, "strictMode", r.strictKeyMatching)
 
 				// Initial path extraction based on separator settings
@@ -253,17 +267,23 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 	totalDirectories = len(dsts)
 
+	metrics := make(map[string]string)
 	// If at least one directory was successfully restored, consider the operation successful
+	metrics[metricKeyCacheHit] = metricValueFalse
 	if successCount > 0 {
+		metrics[metricKeyCacheHit] = metricValueTrue
 		if successCount == totalDirectories {
+			metrics[metricKeyCacheState] = metricValueComplete
 			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now), "status", "all directories successfully restored")
 		} else {
+			metrics[metricKeyCacheState] = metricValuePartial
 			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now),
 				"status", fmt.Sprintf("partially restored (%d/%d directories)", successCount, totalDirectories))
 		}
+		r.exportMetricsIfUnified(metrics)
 		return nil
 	}
-
+	r.exportMetricsIfUnified(metrics)
 	if errs.Err() != nil {
 		return fmt.Errorf("restore failed, %w", errs)
 	}
@@ -345,6 +365,48 @@ func getSeparator() string {
 	}
 
 	return "/"
+}
+
+// exportMetricsIfUnified exports metrics only for unified cache flow
+func (r restorer) exportMetricsIfUnified(metrics map[string]string) {
+	// Only export metrics for unified cache flow
+	if strings.TrimSpace(r.cacheType) == "" {
+		return
+	}
+
+	if err := exportRestoreMetrics(r.logger, metrics); err != nil {
+		level.Error(r.logger).Log("msg", "failed to export restore metrics", "err", err)
+	}
+}
+
+func exportRestoreMetrics(logger log.Logger, outputs map[string]string) error {
+	// Check if DRONE_OUTPUT environment variable is set
+	outputPath := os.Getenv("DRONE_OUTPUT")
+	if outputPath == "" {
+		return fmt.Errorf("DRONE_OUTPUT environment variable is not set")
+	}
+
+	// Open the file with append mode
+	outputFile, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open output file %s: %w", outputPath, err)
+	}
+	defer outputFile.Close()
+
+	// Write all key-value pairs
+	for key, value := range outputs {
+		if key == "" {
+			continue // Skip empty keys
+		}
+		_, err = fmt.Fprintf(outputFile, "%s=%s\n", key, value)
+		if err != nil {
+			// Log error but continue with next key
+			level.Error(logger).Log("msg", "failed to export metric", "key", key, "err", err)
+			continue
+		}
+	}
+
+	return nil
 }
 
 func writeCacheMetadata(data CacheMetadata, filename string) error {

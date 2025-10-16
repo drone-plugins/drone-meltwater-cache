@@ -23,6 +23,15 @@ const (
 	ListEntriesEndpoint = "/cache/intel/list_entries?accountId=%s&cacheKeyPrefix=%s"
 )
 
+// Unified endpoints (cacheType-aware). These do not embed the cache type in the path
+// and instead expect it to be provided as a query parameter.
+const (
+	UnifiedRestoreEndpoint     = "/cache/unified/download?accountId=%s&cacheKey=%s"
+	UnifiedStoreEndpoint       = "/cache/unified/upload?accountId=%s&cacheKey=%s"
+	UnifiedExistsEndpoint      = "/cache/unified/exists?accountId=%s&cacheKey=%s"
+	UnifiedListEntriesEndpoint = "/cache/unified/list_entries?accountId=%s&cacheKeyPrefix=%s"
+)
+
 // NewHTTPClient returns a new HTTPClient.
 func New(endpoint, accountID, bearerToken string, skipverify bool) *HTTPClient {
 	endpoint = strings.TrimSuffix(endpoint, "/")
@@ -83,6 +92,32 @@ func (c *HTTPClient) GetUploadURLWithQuery(ctx context.Context, key string, quer
 	return presignedURL, err
 }
 
+// GetUploadURLWithQueryForType returns a presigned URL for uploading with additional query parameters for a given cacheType.
+func (c *HTTPClient) GetUploadURLWithQueryForType(ctx context.Context, cacheType string, key string, query url.Values) (string, error) {
+	path := c.buildEndpointPath(UnifiedStoreEndpoint, key)
+	base := c.Endpoint + path
+
+	if query == nil {
+		query = url.Values{}
+	}
+	query.Set("cacheType", cacheType)
+
+	fullURL := base
+	if len(query) > 0 {
+		if strings.Contains(fullURL, "?") {
+			fullURL += "&" + query.Encode()
+		} else {
+			fullURL += "?" + query.Encode()
+		}
+	}
+
+	presignedURL, err := c.getLink(ctx, fullURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to get presigned URL: %w", err)
+	}
+	return presignedURL, nil
+}
+
 // GetDownloadURL will get the 'get' presigned url from cache service
 func (c *HTTPClient) GetDownloadURL(ctx context.Context, key string) (string, error) {
 	path := c.buildEndpointPath(RestoreEndpoint, key)
@@ -99,6 +134,73 @@ func (c *HTTPClient) GetExistsURL(ctx context.Context, key string) (string, erro
 func (c *HTTPClient) GetEntriesList(ctx context.Context, prefix string) ([]common.FileEntry, error) {
 	path := c.buildEndpointPath(ListEntriesEndpoint, prefix)
 	fullURL := c.Endpoint + path
+
+	// Add backend query parameter based on environment variable
+	fullURL = c.addBackendParameter(fullURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.BearerToken != "" {
+		req.Header.Add("X-Harness-Token", c.BearerToken)
+	}
+
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get list of entries with status %d", resp.StatusCode)
+	}
+	var entries []common.FileEntry
+	err = json.NewDecoder(resp.Body).Decode(&entries)
+	if err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+// GetUploadURLForType returns a presigned URL for uploading for the given cacheType using unified endpoints.
+func (c *HTTPClient) GetUploadURLForType(ctx context.Context, cacheType string, key string) (string, error) {
+	path := c.buildEndpointPath(UnifiedStoreEndpoint, key)
+	// Append cacheType as query param
+	q := url.Values{}
+	q.Set("cacheType", cacheType)
+	fullURL := c.appendQuery(c.Endpoint+path, q)
+	return c.getLink(ctx, fullURL)
+}
+
+// GetDownloadURLForType returns a presigned URL for downloading for the given cacheType using unified endpoints.
+func (c *HTTPClient) GetDownloadURLForType(ctx context.Context, cacheType string, key string) (string, error) {
+	path := c.buildEndpointPath(UnifiedRestoreEndpoint, key)
+	q := url.Values{}
+	q.Set("cacheType", cacheType)
+	fullURL := c.appendQuery(c.Endpoint+path, q)
+	return c.getLink(ctx, fullURL)
+}
+
+// GetExistsURLForType returns a presigned URL for existence check for the given cacheType using unified endpoints.
+func (c *HTTPClient) GetExistsURLForType(ctx context.Context, cacheType string, key string) (string, error) {
+	path := c.buildEndpointPath(UnifiedExistsEndpoint, key)
+	q := url.Values{}
+	q.Set("cacheType", cacheType)
+	fullURL := c.appendQuery(c.Endpoint+path, q)
+	return c.getLink(ctx, fullURL)
+}
+
+// GetEntriesListForType lists entries for a given prefix and cacheType using unified endpoints.
+func (c *HTTPClient) GetEntriesListForType(ctx context.Context, cacheType string, prefix string) ([]common.FileEntry, error) {
+	path := c.buildEndpointPath(UnifiedListEntriesEndpoint, prefix)
+	baseURL := c.Endpoint + path
+
+	// Add cacheType as a query parameter
+	q := url.Values{}
+	q.Set("cacheType", cacheType)
+	fullURL := c.appendQuery(baseURL, q)
 
 	// Add backend query parameter based on environment variable
 	fullURL = c.addBackendParameter(fullURL)
@@ -182,6 +284,17 @@ func (c *HTTPClient) addBackendParameter(urlStr string) string {
 		}
 	}
 	return urlStr
+}
+
+// appendQuery appends the provided query values to the given URL string.
+func (c *HTTPClient) appendQuery(urlStr string, q url.Values) string {
+	if len(q) == 0 {
+		return urlStr
+	}
+	if strings.Contains(urlStr, "?") {
+		return urlStr + "&" + q.Encode()
+	}
+	return urlStr + "?" + q.Encode()
 }
 
 // buildEndpointPath constructs a properly formatted and URL-encoded API endpoint path

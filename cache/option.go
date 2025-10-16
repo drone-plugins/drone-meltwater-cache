@@ -10,6 +10,7 @@ type options struct {
 	gracefulDetect             bool
 	enableCacheKeySeparator    bool
 	strictKeyMatching          bool
+	cacheType                  string
 }
 
 // Option overrides behavior of Archive.
@@ -70,5 +71,12 @@ func WithEnableCacheKeySeparator(enableCacheKeySeparator bool) Option {
 func WithStrictKeyMatching(strictKeyMatching bool) Option {
 	return optionFunc(func(o *options) {
 		o.strictKeyMatching = strictKeyMatching
+	})
+}
+
+// WithCacheType threads the cache type into cache components (used to select unified vs legacy behavior).
+func WithCacheType(cacheType string) Option {
+	return optionFunc(func(o *options) {
+		o.cacheType = cacheType
 	})
 }

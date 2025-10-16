@@ -61,9 +61,30 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	return backend, nil
 }
 
+func (b *Backend) useUnified() bool {
+	return strings.TrimSpace(b.c.CacheType) != ""
+}
+
+func (b *Backend) unifiedClient() harness.UnifiedClient {
+	if uc, ok := b.client.(harness.UnifiedClient); ok {
+		return uc
+	}
+	return nil
+}
+
 func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
 	// First try to get the XML file that contains part information
-	preSignedURL, err := b.client.GetDownloadURL(ctx, key)
+	var preSignedURL string
+	var err error
+	if b.useUnified() {
+		if uc := b.unifiedClient(); uc != nil {
+			preSignedURL, err = uc.GetDownloadURLForType(ctx, b.c.CacheType, key)
+		} else {
+			preSignedURL, err = b.client.GetDownloadURL(ctx, key)
+		}
+	} else {
+		preSignedURL, err = b.client.GetDownloadURL(ctx, key)
+	}
 	if err != nil {
 		return err
 	}
@@ -144,7 +165,16 @@ func (b *Backend) Get(ctx context.Context, key string, w io.Writer) error {
 						"attempt", attempt+1,
 					)
 
-					partURL, err := b.client.GetDownloadURL(ctx, part.Key)
+					var partURL string
+					if b.useUnified() {
+						if uc := b.unifiedClient(); uc != nil {
+							partURL, err = uc.GetDownloadURLForType(ctx, b.c.CacheType, part.Key)
+						} else {
+							partURL, err = b.client.GetDownloadURL(ctx, part.Key)
+						}
+					} else {
+						partURL, err = b.client.GetDownloadURL(ctx, part.Key)
+					}
 					if err != nil {
 						if attempt < maxDownloadRetries-1 {
 							time.Sleep(backoff)
@@ -293,7 +323,17 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 		key = strings.TrimSuffix(key, "\\") + "/"
 
 		// For directories, just create an empty object with trailing slash
-		preSignedURL, err := b.client.GetUploadURL(ctx, key)
+		var preSignedURL string
+		var err error
+		if b.useUnified() {
+			if uc := b.unifiedClient(); uc != nil {
+				preSignedURL, err = uc.GetUploadURLForType(ctx, b.c.CacheType, key)
+			} else {
+				preSignedURL, err = b.client.GetUploadURL(ctx, key)
+			}
+		} else {
+			preSignedURL, err = b.client.GetUploadURL(ctx, key)
+		}
 		if err != nil {
 			return err
 		}
@@ -366,7 +406,16 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 		queryParams.Set("key", key)
 		queryParams.Set("uploads", "")
 
-		initiateURL, err := b.client.GetUploadURLWithQuery(ctx, key, queryParams)
+		var initiateURL string
+		if b.useUnified() {
+			if uc := b.unifiedClient(); uc != nil {
+				initiateURL, err = uc.GetUploadURLWithQueryForType(ctx, b.c.CacheType, key, queryParams)
+			} else {
+				initiateURL, err = b.client.GetUploadURLWithQuery(ctx, key, queryParams)
+			}
+		} else {
+			initiateURL, err = b.client.GetUploadURLWithQuery(ctx, key, queryParams)
+		}
 		if err != nil {
 			return err
 		}
@@ -451,7 +500,16 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 						queryParams.Set("partNumber", fmt.Sprintf("%d", job.partNumber))
 						queryParams.Set("uploadId", uploadID)
 
-						partURL, err := b.client.GetUploadURLWithQuery(ctx, partKey, queryParams)
+						var partURL string
+						if b.useUnified() {
+							if uc := b.unifiedClient(); uc != nil {
+								partURL, err = uc.GetUploadURLWithQueryForType(ctx, b.c.CacheType, partKey, queryParams)
+							} else {
+								partURL, err = b.client.GetUploadURLWithQuery(ctx, partKey, queryParams)
+							}
+						} else {
+							partURL, err = b.client.GetUploadURLWithQuery(ctx, partKey, queryParams)
+						}
 						if err != nil {
 							if attempt < maxRetries-1 {
 								time.Sleep(backoff)
@@ -600,7 +658,16 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 		// Get a new presigned URL for completing the upload
 		queryParams = url.Values{}
 		queryParams.Set("uploadId", uploadID)
-		completeURL, err := b.client.GetUploadURLWithQuery(ctx, key, queryParams)
+		var completeURL string
+		if b.useUnified() {
+			if uc := b.unifiedClient(); uc != nil {
+				completeURL, err = uc.GetUploadURLWithQueryForType(ctx, b.c.CacheType, key, queryParams)
+			} else {
+				completeURL, err = b.client.GetUploadURLWithQuery(ctx, key, queryParams)
+			}
+		} else {
+			completeURL, err = b.client.GetUploadURLWithQuery(ctx, key, queryParams)
+		}
 		if err != nil {
 			return err
 		}
@@ -635,7 +702,17 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 		return nil
 	} else {
 		// Get regular upload URL
-		preSignedURL, err := b.client.GetUploadURL(ctx, key)
+		var preSignedURL string
+		var err error
+		if b.useUnified() {
+			if uc := b.unifiedClient(); uc != nil {
+				preSignedURL, err = uc.GetUploadURLForType(ctx, b.c.CacheType, key)
+			} else {
+				preSignedURL, err = b.client.GetUploadURL(ctx, key)
+			}
+		} else {
+			preSignedURL, err = b.client.GetUploadURL(ctx, key)
+		}
 		if err != nil {
 			return err
 		}
@@ -654,7 +731,17 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader) error {
 }
 
 func (b *Backend) Exists(ctx context.Context, key string) (bool, error) {
-	preSignedURL, err := b.client.GetExistsURL(ctx, key)
+	var preSignedURL string
+	var err error
+	if b.useUnified() {
+		if uc := b.unifiedClient(); uc != nil {
+			preSignedURL, err = uc.GetExistsURLForType(ctx, b.c.CacheType, key)
+		} else {
+			preSignedURL, err = b.client.GetExistsURL(ctx, key)
+		}
+	} else {
+		preSignedURL, err = b.client.GetExistsURL(ctx, key)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -673,7 +760,17 @@ func (b *Backend) Exists(ctx context.Context, key string) (bool, error) {
 }
 
 func (b *Backend) List(ctx context.Context, prefix string) ([]common.FileEntry, error) {
-	entries, err := b.client.GetEntriesList(ctx, prefix)
+	var entries []common.FileEntry
+	var err error
+	if b.useUnified() {
+		if uc := b.unifiedClient(); uc != nil {
+			entries, err = uc.GetEntriesListForType(ctx, b.c.CacheType, prefix)
+		} else {
+			entries, err = b.client.GetEntriesList(ctx, prefix)
+		}
+	} else {
+		entries, err = b.client.GetEntriesList(ctx, prefix)
+	}
 	return entries, err
 }
 
