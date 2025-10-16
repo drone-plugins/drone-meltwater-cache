@@ -22,6 +22,16 @@ import (
 	"github.com/meltwater/drone-cache/storage/common"
 )
 
+// Restore metric constants
+const (
+	metricKeyCacheHit   = "cache_hit"
+	metricKeyCacheState = "cache_state"
+	metricValueTrue     = "true"
+	metricValueFalse    = "false"
+	metricValueComplete = "complete"
+	metricValuePartial  = "partial"
+)
+
 type restorer struct {
 	logger log.Logger
 
@@ -259,14 +269,14 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 	metrics := make(map[string]string)
 	// If at least one directory was successfully restored, consider the operation successful
-	metrics["cache_hit"] = "false"
+	metrics[metricKeyCacheHit] = metricValueFalse
 	if successCount > 0 {
-		metrics["cache_hit"] = "true"
+		metrics[metricKeyCacheHit] = metricValueTrue
 		if successCount == totalDirectories {
-			metrics["cache_state"] = "complete"
+			metrics[metricKeyCacheState] = metricValueComplete
 			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now), "status", "all directories successfully restored")
 		} else {
-			metrics["cache_state"] = "partial"
+			metrics[metricKeyCacheState] = metricValuePartial
 			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now),
 				"status", fmt.Sprintf("partially restored (%d/%d directories)", successCount, totalDirectories))
 		}
