@@ -94,7 +94,7 @@ pipeline:
                   identifier: build
                   spec:
                     connectorRef: Plugins_Docker_Hub_Connector
-                    image: golang:1.22.4-alpine3.19
+                    image: golang:1.23.0-alpine3.19
                     shell: Sh
                     command: |-
                       apk add --update make git
@@ -108,7 +108,7 @@ pipeline:
                   identifier: test
                   spec:
                     connectorRef: Plugins_Docker_Hub_Connector
-                    image: golang:1.22.4-alpine3.19
+                    image: golang:1.23.0-alpine3.19
                     shell: Sh
                     command: go test -mod=vendor -short -cover -tags=integration -timeout 20m ./...
                     envVariables:
@@ -324,7 +324,7 @@ pipeline:
                       name: build
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.22.4
+                        image: golang:1.23.0
                         shell: Sh
                         command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
                         envVariables:
@@ -337,7 +337,7 @@ pipeline:
                       identifier: Run_2_2
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.22.4
+                        image: golang:1.23.0
                         shell: Sh
                         command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
                         envVariables:
@@ -399,7 +399,7 @@ pipeline:
                       identifier: Run_1_1
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.22.4
+                        image: golang:1.23.0
                         shell: Sh
                         command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
                         envVariables:
@@ -412,7 +412,7 @@ pipeline:
                       identifier: Run_1_2
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.22.4
+                        image: golang:1.23.0
                         shell: Sh
                         command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
                         envVariables:
@@ -477,7 +477,7 @@ pipeline:
                       name: build
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.22.4
+                        image: golang:1.23.0
                         shell: Sh
                         command: |-
                           echo $env:DRONE_SEMVER_SHORT
@@ -543,7 +543,7 @@ pipeline:
                       name: build
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.22.4
+                        image: golang:1.23.0
                         shell: Sh
                         command: |-
                           echo $env:DRONE_SEMVER_SHORT
