@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	stdlog "log"
 	"os"
 
@@ -499,6 +501,24 @@ func main() {
 
 		// Azure specific Config flags
 
+		// Service Principal Authentication (Priority 1)
+		&cli.StringFlag{
+			Name:    "azure.client-id",
+			Usage:   "Azure Service Principal Client ID (Application ID)",
+			EnvVars: []string{"PLUGIN_AZURE_CLIENT_ID", "AZURE_CLIENT_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "azure.client-secret",
+			Usage:   "Azure Service Principal Client Secret",
+			EnvVars: []string{"PLUGIN_AZURE_CLIENT_SECRET", "AZURE_CLIENT_SECRET"},
+		},
+		&cli.StringFlag{
+			Name:    "azure.tenant-id",
+			Usage:   "Azure Tenant ID",
+			EnvVars: []string{"PLUGIN_AZURE_TENANT_ID", "AZURE_TENANT_ID"},
+		},
+
+		// Shared Key Authentication (Priority 2, fallback)
 		&cli.StringFlag{
 			Name:    "azure.account-name",
 			Usage:   "Azure Blob Storage Account Name",
@@ -509,10 +529,12 @@ func main() {
 			Usage:   "Azure Blob Storage Account Key",
 			EnvVars: []string{"PLUGIN_ACCOUNT_KEY", "AZURE_ACCOUNT_KEY"},
 		},
+
+		// Storage Configuration
 		&cli.StringFlag{
 			Name:    "azure.container-name",
 			Usage:   "Azure Blob Storage container name",
-			EnvVars: []string{"PLUGIN_CONTAINER", "AZURE_CONTAINER_NAME"},
+			EnvVars: []string{"PLUGIN_CONTAINER", "AZURE_CONTAINER_NAME", "AZURE_CONTAINER"},
 		},
 		&cli.StringFlag{
 			Name:    "azure.blob-storage-url",
@@ -700,12 +722,19 @@ func run(c *cli.Context) error {
 			UserRoleExternalID:    c.String("user-role-external-id"),
 		},
 		Azure: azure.Config{
+			// Service Principal Authentication
+			ClientID:     c.String("azure.client-id"),
+			ClientSecret: c.String("azure.client-secret"),
+			TenantID:     c.String("azure.tenant-id"),
+			// Shared Key Authentication (fallback)
 			AccountName:    c.String("azure.account-name"),
 			AccountKey:     c.String("azure.account-key"),
-			ContainerName:  c.String("azure.container-name"),
-			BlobStorageURL: c.String("azure.blob-storage-url"),
-			Azurite:        false,
-			Timeout:        c.Duration("backend.operation-timeout"),
+			// Storage Configuration
+			ContainerName:    c.String("azure.container-name"),
+			BlobStorageURL:   c.String("azure.blob-storage-url"),
+			MaxRetryRequests: c.Int("azure.blob-max-retry-requets"),
+			Azurite:          false,
+			Timeout:          c.Duration("backend.operation-timeout"),
 		},
 		SFTP: sftp.Config{
 			CacheRoot: c.String("sftp.cache-root"),
@@ -746,6 +775,12 @@ func run(c *cli.Context) error {
 		SkipSymlinks:     c.Bool("skip-symlinks"),
 		PreserveMetadata: c.Bool("preserve-metadata"),
 	}
+
+	data, _ := json.MarshalIndent(plg.Metadata, "", "  ")
+	fmt.Printf("Here1: plugin metadata : %s\n", string(data))
+
+	data, _ = json.MarshalIndent(plg.Config, "", "  ")
+	fmt.Printf("Here2: plugin config : %s\n", string(data))
 
 	err := plg.Exec()
 	if err == nil {
