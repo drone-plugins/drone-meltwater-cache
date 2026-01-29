@@ -32,7 +32,7 @@ steps:
   - name: build
     # there is an issue in golang 1.17.7-alpine3.15 -- with make files so using 1.17.3 here
     # https://gitlab.alpinelinux.org/alpine/aports/-/issues/12396
-    image: golang:1.22.4-alpine3.19
+    image: golang:1.24.11-alpine3.23
     commands:
       - apk add --update make git
       - make drone-cache
@@ -41,7 +41,7 @@ steps:
 
     
   - name: test
-    image: golang:1.22.4-alpine3.19
+    image: golang:1.24.11-alpine3.23
     commands:
       - go test -mod=vendor -short -cover -tags=integration ./...
     environment:
@@ -248,7 +248,7 @@ platform:
 steps:
   - name: build-push
     pull: always
-    image: golang:1.22.4
+    image: golang:1.24.11
     commands:
       - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
     environment:
@@ -256,7 +256,7 @@ steps:
       GO111MODULE: on
   - name: build-tag
     pull: always
-    image: golang:1.22.4
+    image: golang:1.24.11
     commands:
       - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
     environment:
@@ -303,7 +303,7 @@ platform:
 steps:
   - name: build-push
     pull: always
-    image: golang:1.22.4
+    image: golang:1.24.11
     commands:
       - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
     environment:
@@ -311,7 +311,7 @@ steps:
       GO111MODULE: on
   - name: build-tag
     pull: always
-    image: golang:1.22.4
+    image: golang:1.24.11
     commands:
       - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
     environment:
@@ -357,7 +357,7 @@ platform:
 
 steps:
   - name: build
-    image: golang:1.22.4
+    image: golang:1.24.11
     commands:
       - echo $env:DRONE_SEMVER_SHORT
       - go build -o release/windows/amd64/drone-cache.exe
@@ -404,7 +404,7 @@ platform:
 
 steps:
   - name: build
-    image: golang:1.22.4
+    image: golang:1.24.11
     commands:
       - echo $env:DRONE_SEMVER_SHORT
       - go build -o release/windows/amd64/drone-cache.exe
@@ -480,7 +480,7 @@ pool:
 
 steps:
   - name: build
-    image: golang:1.22.4
+    image: golang:1.24.11
     commands:
       - GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
       - GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
