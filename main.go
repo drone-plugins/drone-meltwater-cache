@@ -505,17 +505,17 @@ func main() {
 		&cli.StringFlag{
 			Name:    "azure.client-id",
 			Usage:   "Azure Service Principal Client ID (Application ID)",
-			EnvVars: []string{"PLUGIN_AZURE_CLIENT_ID", "AZURE_CLIENT_ID"},
+			EnvVars: []string{"PLUGIN_AZURE_CLIENT_ID", "AZURE_CLIENT_ID", "CLIENT_ID"},
 		},
 		&cli.StringFlag{
 			Name:    "azure.client-secret",
 			Usage:   "Azure Service Principal Client Secret",
-			EnvVars: []string{"PLUGIN_AZURE_CLIENT_SECRET", "AZURE_CLIENT_SECRET"},
+			EnvVars: []string{"PLUGIN_AZURE_CLIENT_SECRET", "AZURE_CLIENT_SECRET", "CLIENT_SECRET"},
 		},
 		&cli.StringFlag{
 			Name:    "azure.tenant-id",
 			Usage:   "Azure Tenant ID",
-			EnvVars: []string{"PLUGIN_AZURE_TENANT_ID", "AZURE_TENANT_ID"},
+			EnvVars: []string{"PLUGIN_AZURE_TENANT_ID", "AZURE_TENANT_ID", "TENANT_ID"},
 		},
 
 		// Shared Key Authentication (Priority 2, fallback)
@@ -727,8 +727,8 @@ func run(c *cli.Context) error {
 			ClientSecret: c.String("azure.client-secret"),
 			TenantID:     c.String("azure.tenant-id"),
 			// Shared Key Authentication (fallback)
-			AccountName:    c.String("azure.account-name"),
-			AccountKey:     c.String("azure.account-key"),
+			AccountName: c.String("azure.account-name"),
+			AccountKey:  c.String("azure.account-key"),
 			// Storage Configuration
 			ContainerName:    c.String("azure.container-name"),
 			BlobStorageURL:   c.String("azure.blob-storage-url"),
