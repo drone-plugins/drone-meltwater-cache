@@ -15,8 +15,12 @@ func newGradlePreparer() *gradlePreparer {
 
 func (*gradlePreparer) PrepareRepo(dir string) (string, error) {
 	fileName := filepath.Join(dir, "gradle.properties")
-	pathToCache := ".gradle"
-	cmdToOverrideRepo := fmt.Sprintf("systemProp.gradle.user.home=/%s/\norg.gradle.caching=true\n", pathToCache)
+
+	// Use project directory + .gradle as the cache location
+	// This ensures Gradle and the plugin use the same path
+	// e.g., if dir=/harness, pathToCache=/harness/.gradle
+	pathToCache := filepath.Join(dir, ".gradle")
+	cmdToOverrideRepo := fmt.Sprintf("systemProp.gradle.user.home=%s\norg.gradle.caching=true\n", pathToCache)
 
 	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
 		f, err := os.Create(fileName)
