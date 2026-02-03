@@ -84,7 +84,9 @@ func TestDetectDirectoriesToCacheBazel(t *testing.T) {
 	test.Ok(t, os.RemoveAll(bazelBuildFile))
 	test.Ok(t, err)
 
-	expectedCacheDir := []string{toolGradleDir}
+	// Gradle preparer now returns absolute path
+	gradlePath, _ := filepath.Abs(toolGradleDir)
+	expectedCacheDir := []string{gradlePath}
 	expectedDetectedTool := []string{toolGradle}
 
 	test.Equals(t, directoriesToCache, expectedCacheDir)
@@ -105,7 +107,9 @@ func TestDetectDirectoriesToCacheGradleKts(t *testing.T) {
 	test.Ok(t, os.RemoveAll(gradleKtsBuildFile))
 	test.Ok(t, err)
 
-	expectedCacheDir := []string{toolGradleDir}
+	// Gradle preparer now returns absolute path
+	gradlePath, _ := filepath.Abs(toolGradleDir)
+	expectedCacheDir := []string{gradlePath}
 	expectedDetectedTool := []string{toolGradle}
 
 	test.Equals(t, directoriesToCache, expectedCacheDir)
@@ -136,7 +140,9 @@ func TestDetectDirectoriesToCacheCombined(t *testing.T) {
 	test.Ok(t, err)
 
 	path1, _ := filepath.Abs(toolMavenDir)
-	expectedCacheDir := []string{path1, toolGradleDir}
+	// Gradle preparer now returns absolute path
+	gradlePath, _ := filepath.Abs(toolGradleDir)
+	expectedCacheDir := []string{path1, gradlePath}
 	expectedDetectedTool := []string{toolMaven, toolGradle}
 
 	test.Equals(t, directoriesToCache, expectedCacheDir)
