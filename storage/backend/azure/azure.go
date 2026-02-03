@@ -45,7 +45,6 @@ func New(l log.Logger, c Config) (*Backend, error) {
 		c.MaxRetryRequests = DefaultBlobMaxRetryRequests
 	}
 
-	// Validate container name is provided
 	if c.ContainerName == "" {
 		return nil, errors.New("azure container name is required")
 	}
@@ -54,11 +53,10 @@ func New(l log.Logger, c Config) (*Backend, error) {
 	var cred azcore.TokenCredential
 	var err error
 
-	// Authentication: Priority 0 - OIDC (highest priority)
+	// Authentication: Priority 0 - OIDC
 	if c.OIDCTokenID != "" && c.TenantID != "" {
 		level.Info(l).Log("msg", "using OIDC token authentication", "tenantID", c.TenantID)
 
-		// For OIDC, we need AccountName and ClientID to construct the URL and credential
 		if c.AccountName == "" {
 			return nil, errors.New("azure account name is required when using OIDC authentication")
 		}
@@ -67,14 +65,11 @@ func New(l log.Logger, c Config) (*Backend, error) {
 		}
 		accountName = c.AccountName
 
-		// Use ClientAssertionCredential with OIDC token as the assertion
-		// The OIDC token from the CI/CD system is used directly as the client assertion
 		oidcToken := c.OIDCTokenID
 		getAssertion := func(ctx context.Context) (string, error) {
 			return oidcToken, nil
 		}
 
-		// Create ClientAssertionCredential using OIDC token as assertion
 		cred, err = azidentity.NewClientAssertionCredential(c.TenantID, c.ClientID, getAssertion, nil)
 		if err != nil {
 			return nil, fmt.Errorf("azure, failed to create OIDC client assertion credential, %w", err)
@@ -84,13 +79,11 @@ func New(l log.Logger, c Config) (*Backend, error) {
 	} else if c.ClientID != "" && c.ClientSecret != "" && c.TenantID != "" {
 		level.Info(l).Log("msg", "using service principal authentication", "clientID", c.ClientID, "tenantID", c.TenantID)
 
-		// For Service Principal, we need AccountName to construct the URL
 		if c.AccountName == "" {
 			return nil, errors.New("azure account name is required when using service principal authentication")
 		}
 		accountName = c.AccountName
 
-		// Create Service Principal credential using the new Azure SDK
 		cred, err = azidentity.NewClientSecretCredential(c.TenantID, c.ClientID, c.ClientSecret, nil)
 		if err != nil {
 			return nil, fmt.Errorf("azure, failed to create service principal credential, %w", err)
@@ -102,19 +95,14 @@ func New(l log.Logger, c Config) (*Backend, error) {
 
 		accountName = c.AccountName
 
-		// For Shared Key, we need to create a credential
-		// The new SDK uses azblob.NewSharedKeyCredential for shared key auth
-		// But we'll use the account name and key to create the client directly
 		// Note: The new SDK doesn't have a direct SharedKeyCredential in azidentity
 		// We'll construct the service URL and use account key authentication
 		cred = nil // Shared key will be handled via service URL
 
 	} else {
-		// No valid authentication method found
 		return nil, errors.New("azure authentication requires either (OIDCTokenID + TenantID + ClientID), (ClientID + ClientSecret + TenantID), or (AccountName + AccountKey)")
 	}
 
-	// Construct blob storage service URL
 	var serviceURL string
 	if c.Azurite {
 		serviceURL = fmt.Sprintf("http://%s/%s", c.BlobStorageURL, accountName)
@@ -127,19 +115,16 @@ func New(l log.Logger, c Config) (*Backend, error) {
 	// Create Azure Blob Storage client
 	var client *azblob.Client
 	if c.OIDCTokenID != "" && c.TenantID != "" {
-		// OIDC authentication - use credential
 		client, err = azblob.NewClient(serviceURL, cred, nil)
 		if err != nil {
 			return nil, fmt.Errorf("azure, failed to create client with OIDC, %w", err)
 		}
 	} else if c.ClientID != "" && c.ClientSecret != "" && c.TenantID != "" && c.OIDCTokenID == "" {
-		// Service Principal authentication - use credential
 		client, err = azblob.NewClient(serviceURL, cred, nil)
 		if err != nil {
 			return nil, fmt.Errorf("azure, failed to create client with service principal, %w", err)
 		}
 	} else {
-		// Shared Key authentication
 		sharedKeyCred, err := azblob.NewSharedKeyCredential(accountName, c.AccountKey)
 		if err != nil {
 			return nil, fmt.Errorf("azure, invalid shared key credentials, %w", err)
@@ -150,7 +135,6 @@ func New(l log.Logger, c Config) (*Backend, error) {
 		}
 	}
 
-	// Ensure container exists - try to create it (idempotent operation)
 	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
 	defer cancel()
 
@@ -161,15 +145,11 @@ func New(l log.Logger, c Config) (*Backend, error) {
 	if err != nil {
 		var respErr *azcore.ResponseError
 		if errors.As(err, &respErr) {
-			// Check for ContainerAlreadyExists error code
 			if respErr.ErrorCode == "ContainerAlreadyExists" {
-				// Container already exists - this is expected and fine, continue
 				level.Info(l).Log("msg", "container already exists, continuing", "container", c.ContainerName)
-				err = nil // Clear error so we can continue
+				err = nil
 			} else {
-				// Other storage error - check if container actually exists
 				level.Info(l).Log("msg", "container creation failed with storage error, verifying container exists", "container", c.ContainerName, "errorCode", respErr.ErrorCode)
-				// Try to list blobs in the container to verify it exists
 				maxResults := int32(1)
 				pager := client.NewListBlobsFlatPager(c.ContainerName, &azblob.ListBlobsFlatOptions{MaxResults: &maxResults})
 				_, checkErr := pager.NextPage(ctx)
