@@ -4,22 +4,18 @@ import "time"
 
 // Config is a structure to store Azure backend configuration.
 type Config struct {
-	// Authentication - OIDC (Priority 0, highest)
-	OIDCTokenID string // OIDC token ID for authentication
-	TenantID    string // Azure Tenant ID (required for OIDC)
+	OIDCTokenID string
+	TenantID    string
 
-	// Authentication - Service Principal (Priority 1)
-	ClientID     string // Azure Application (Client) ID
-	ClientSecret string // Azure Application Secret
+	ClientID     string
+	ClientSecret string
 
-	// Authentication - Shared Key (Priority 2, fallback)
-	AccountName string // Azure Storage Account Name
-	AccountKey  string // Azure Storage Account Key
+	AccountName string
+	AccountKey  string
 
-	// Storage Configuration
 	ContainerName    string
-	BlobStorageURL    string
-	Azurite           bool
-	MaxRetryRequests  int
-	Timeout           time.Duration
+	BlobStorageURL   string
+	Azurite          bool
+	MaxRetryRequests int
+	Timeout          time.Duration
 }

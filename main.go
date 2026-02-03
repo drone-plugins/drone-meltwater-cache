@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	stdlog "log"
 	"os"
 
@@ -777,12 +775,6 @@ func run(c *cli.Context) error {
 		SkipSymlinks:     c.Bool("skip-symlinks"),
 		PreserveMetadata: c.Bool("preserve-metadata"),
 	}
-
-	data, _ := json.MarshalIndent(plg.Metadata, "", "  ")
-	fmt.Printf("Here1: plugin metadata : %s\n", string(data))
-
-	data, _ = json.MarshalIndent(plg.Config, "", "  ")
-	fmt.Printf("Here2: plugin config : %s\n", string(data))
 
 	err := plg.Exec()
 	if err == nil {
