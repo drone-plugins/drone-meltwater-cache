@@ -22,7 +22,6 @@ import (
 // time.Time is used in common.FileEntry.LastModified
 var _ time.Time
 
-
 const (
 	// DefaultBlobMaxRetryRequests Default value for Azure Blob Storage Max Retry Requests.
 	DefaultBlobMaxRetryRequests = 4
@@ -33,10 +32,10 @@ const (
 
 // Backend implements storage.Backend for Azure Blob Storage.
 type Backend struct {
-	logger         log.Logger
-	cfg            Config
-	client         *azblob.Client
-	containerName  string
+	logger        log.Logger
+	cfg           Config
+	client        *azblob.Client
+	containerName string
 }
 
 // New creates an AzureBlob backend.
@@ -55,8 +54,34 @@ func New(l log.Logger, c Config) (*Backend, error) {
 	var cred azcore.TokenCredential
 	var err error
 
-	// Authentication: Priority 1 - Service Principal (ClientID + ClientSecret + TenantID)
-	if c.ClientID != "" && c.ClientSecret != "" && c.TenantID != "" {
+	// Authentication: Priority 0 - OIDC (highest priority)
+	if c.OIDCTokenID != "" && c.TenantID != "" {
+		level.Info(l).Log("msg", "using OIDC token authentication", "tenantID", c.TenantID)
+
+		// For OIDC, we need AccountName and ClientID to construct the URL and credential
+		if c.AccountName == "" {
+			return nil, errors.New("azure account name is required when using OIDC authentication")
+		}
+		if c.ClientID == "" {
+			return nil, errors.New("azure client ID is required when using OIDC authentication")
+		}
+		accountName = c.AccountName
+
+		// Use ClientAssertionCredential with OIDC token as the assertion
+		// The OIDC token from the CI/CD system is used directly as the client assertion
+		oidcToken := c.OIDCTokenID
+		getAssertion := func(ctx context.Context) (string, error) {
+			return oidcToken, nil
+		}
+
+		// Create ClientAssertionCredential using OIDC token as assertion
+		cred, err = azidentity.NewClientAssertionCredential(c.TenantID, c.ClientID, getAssertion, nil)
+		if err != nil {
+			return nil, fmt.Errorf("azure, failed to create OIDC client assertion credential, %w", err)
+		}
+
+		// Authentication: Priority 1 - Service Principal (ClientID + ClientSecret + TenantID)
+	} else if c.ClientID != "" && c.ClientSecret != "" && c.TenantID != "" {
 		level.Info(l).Log("msg", "using service principal authentication", "clientID", c.ClientID, "tenantID", c.TenantID)
 
 		// For Service Principal, we need AccountName to construct the URL
@@ -86,7 +111,7 @@ func New(l log.Logger, c Config) (*Backend, error) {
 
 	} else {
 		// No valid authentication method found
-		return nil, errors.New("azure authentication requires either (ClientID + ClientSecret + TenantID) or (AccountName + AccountKey)")
+		return nil, errors.New("azure authentication requires either (OIDCTokenID + TenantID + ClientID), (ClientID + ClientSecret + TenantID), or (AccountName + AccountKey)")
 	}
 
 	// Construct blob storage service URL
@@ -101,7 +126,13 @@ func New(l log.Logger, c Config) (*Backend, error) {
 
 	// Create Azure Blob Storage client
 	var client *azblob.Client
-	if c.ClientID != "" && c.ClientSecret != "" && c.TenantID != "" {
+	if c.OIDCTokenID != "" && c.TenantID != "" {
+		// OIDC authentication - use credential
+		client, err = azblob.NewClient(serviceURL, cred, nil)
+		if err != nil {
+			return nil, fmt.Errorf("azure, failed to create client with OIDC, %w", err)
+		}
+	} else if c.ClientID != "" && c.ClientSecret != "" && c.TenantID != "" && c.OIDCTokenID == "" {
 		// Service Principal authentication - use credential
 		client, err = azblob.NewClient(serviceURL, cred, nil)
 		if err != nil {

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	stdlog "log"
 	"os"
 
@@ -720,11 +722,13 @@ func run(c *cli.Context) error {
 			UserRoleExternalID:    c.String("user-role-external-id"),
 		},
 		Azure: azure.Config{
-			// Service Principal Authentication
+			// OIDC Authentication (Priority 0)
+			OIDCTokenID: c.String("oidc-token-id"),
+			TenantID:    c.String("azure.tenant-id"),
+			// Service Principal Authentication (Priority 1)
 			ClientID:     c.String("azure.client-id"),
 			ClientSecret: c.String("azure.client-secret"),
-			TenantID:     c.String("azure.tenant-id"),
-			// Shared Key Authentication (fallback)
+			// Shared Key Authentication (Priority 2, fallback)
 			AccountName: c.String("azure.account-name"),
 			AccountKey:  c.String("azure.account-key"),
 			// Storage Configuration
@@ -773,6 +777,12 @@ func run(c *cli.Context) error {
 		SkipSymlinks:     c.Bool("skip-symlinks"),
 		PreserveMetadata: c.Bool("preserve-metadata"),
 	}
+
+	data, _ := json.MarshalIndent(plg.Metadata, "", "  ")
+	fmt.Printf("Here1: plugin metadata : %s\n", string(data))
+
+	data, _ = json.MarshalIndent(plg.Config, "", "  ")
+	fmt.Printf("Here2: plugin config : %s\n", string(data))
 
 	err := plg.Exec()
 	if err == nil {
