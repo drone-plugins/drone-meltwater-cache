@@ -14,6 +14,16 @@ type buildToolInfo struct {
 	preparer     RepoPreparer
 }
 
+// containsTool checks if a tool is already in the slice
+func containsTool(slice []string, tool string) bool {
+	for _, v := range slice {
+		if v == tool {
+			return true
+		}
+	}
+	return false
+}
+
 func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, error) {
 	var buildToolInfoMapping = []buildToolInfo{
 		{
@@ -31,15 +41,18 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			tool:         "gradle",
 			preparer:     newGradlePreparer(),
 		},
-		{
-			globToDetect: "WORKSPACE",
-			tool:         "bazel",
-			preparer:     newBazelPreparer(),
-		},
+		// MODULE.bazel is checked BEFORE WORKSPACE because:
+		// 1. In modern Bazel (6+), MODULE.bazel takes precedence
+		// 2. We only want ONE Bazel preparer to run, not both
 		{
 			globToDetect: "MODULE.bazel",
 			tool:         "bazel",
 			preparer:     newBzlmodPreparer(),
+		},
+		{
+			globToDetect: "WORKSPACE",
+			tool:         "bazel",
+			preparer:     newBazelPreparer(),
 		},
 		{
 			globToDetect: "package.json",
@@ -80,6 +93,13 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 	var hashes string
 
 	for _, supportedTool := range buildToolInfoMapping {
+		// Skip if this tool type was already detected
+		// This prevents running both bazelPreparer and bzlmodPreparer
+		// when a project has both WORKSPACE and MODULE.bazel
+		if containsTool(buildToolsDetected, supportedTool.tool) {
+			continue
+		}
+
 		hash, dir, err := hashIfFileExist(supportedTool.globToDetect)
 		if err != nil {
 			return nil, nil, "", err
@@ -142,10 +162,6 @@ func calculateMd5FromFiles(fileList []string) (string, string, error) {
 	}
 
 	defer file.Close()
-
-	if err != nil {
-		return "", "", err
-	}
 
 	hash := md5.New() // #nosec
 	_, err = io.Copy(hash, file)

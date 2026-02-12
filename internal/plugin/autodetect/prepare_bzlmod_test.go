@@ -19,13 +19,15 @@ func TestBzlmodPreparerPrepareRepo(t *testing.T) {
 	// Create a new bzlmodPreparer
 	preparer := &bzlmodPreparer{}
 
+	// Expected cache path
+	expectedCachePath := filepath.Join(tempDir, bazelCacheDirName)
+
 	// Test case 1: .bazelrc doesn't exist
 	pathToCache, err := preparer.PrepareRepo(tempDir)
 	test.Ok(t, err)
 
-	// Verify the path to cache is correct
-	expectedPath := filepath.Join(tempDir, ".bazel")
-	test.Equals(t, expectedPath, pathToCache)
+	// Verify the path to cache is the bazel cache directory relative to project
+	test.Equals(t, expectedCachePath, pathToCache)
 
 	// Verify .bazelrc was created
 	bazelrcPath := filepath.Join(tempDir, ".bazelrc")
@@ -36,15 +38,16 @@ func TestBzlmodPreparerPrepareRepo(t *testing.T) {
 	content, err := os.ReadFile(bazelrcPath)
 	test.Ok(t, err)
 
-	// Verify the content contains the expected cache paths
-	runtimeCache := filepath.Join(expectedPath, "run")
-	moduleCache := filepath.Join(expectedPath, "module")
-	registryCache := filepath.Join(expectedPath, "registry")
-
+	// Verify the content contains the expected repository_cache option
 	contentStr := string(content)
-	test.Assert(t, strings.Contains(contentStr, runtimeCache), "Content should contain runtime cache path")
-	test.Assert(t, strings.Contains(contentStr, moduleCache), "Content should contain module cache path")
-	test.Assert(t, strings.Contains(contentStr, registryCache), "Content should contain registry cache path")
+	expectedRepoCache := "common --repository_cache=" + expectedCachePath
+	test.Assert(t, strings.Contains(contentStr, expectedRepoCache), "Content should contain common --repository_cache")
+
+	// Verify .bazelignore was created with the cache directory
+	bazelignorePath := filepath.Join(tempDir, ".bazelignore")
+	ignoreContent, err := os.ReadFile(bazelignorePath)
+	test.Ok(t, err)
+	test.Assert(t, strings.Contains(string(ignoreContent), bazelCacheDirName), "bazelignore should contain cache dir")
 
 	// Test case 2: .bazelrc already exists
 	// Add some initial content to .bazelrc
@@ -57,18 +60,16 @@ func TestBzlmodPreparerPrepareRepo(t *testing.T) {
 	test.Ok(t, err)
 
 	// Verify the path to cache is still correct
-	test.Equals(t, expectedPath, pathToCache)
+	test.Equals(t, expectedCachePath, pathToCache)
 
 	// Read the updated content of .bazelrc
 	updatedContent, err := os.ReadFile(bazelrcPath)
 	test.Ok(t, err)
 
-	// Verify the content contains both the initial content and the appended cache paths
+	// Verify the content contains both the initial content and the appended cache config
 	updatedContentStr := string(updatedContent)
 	test.Assert(t, strings.Contains(updatedContentStr, initialContent), "Content should contain initial content")
-	test.Assert(t, strings.Contains(updatedContentStr, runtimeCache), "Content should contain runtime cache path")
-	test.Assert(t, strings.Contains(updatedContentStr, moduleCache), "Content should contain module cache path")
-	test.Assert(t, strings.Contains(updatedContentStr, registryCache), "Content should contain registry cache path")
+	test.Assert(t, strings.Contains(updatedContentStr, expectedRepoCache), "Content should contain common --repository_cache")
 }
 
 func TestBzlmodPreparerErrorHandling(t *testing.T) {
