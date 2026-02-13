@@ -409,3 +409,79 @@ func exampleFileTreeWithSymlinks(t *testing.T, name string) []string {
 
 	return []string{file, dir, symDir}
 }
+
+func TestConvertHarnessPath(t *testing.T) {
+	// Set HARNESS_WORKSPACE env var for testing
+	testWorkspace := "/test/workspace"
+	os.Setenv("HARNESS_WORKSPACE", testWorkspace)
+	t.Cleanup(func() { os.Unsetenv("HARNESS_WORKSPACE") })
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "harness workspace path with gradle",
+			input:    "/tmp/harness/LfGNAOSCRdKlBdvL42V4fQ/.gradle/caches",
+			expected: filepath.Join(testWorkspace, ".gradle/caches"),
+		},
+		{
+			name:     "harness workspace path with nested directories",
+			input:    "/tmp/harness/abc123def456/.m2/repository/com/example",
+			expected: filepath.Join(testWorkspace, ".m2/repository/com/example"),
+		},
+		{
+			name:     "harness workspace path with single file",
+			input:    "/tmp/harness/uuid123/build.gradle",
+			expected: filepath.Join(testWorkspace, "build.gradle"),
+		},
+		{
+			name:     "windows harness workspace path with gradle",
+			input:    "C:/tmp/harness/LfGNAOSCRdKlBdvL42V4fQ/.gradle/caches",
+			expected: filepath.Join(testWorkspace, ".gradle/caches"),
+		},
+		{
+			name:     "windows harness workspace path with nested directories",
+			input:    "C:/tmp/harness/abc123def456/.m2/repository/com/example",
+			expected: filepath.Join(testWorkspace, ".m2/repository/com/example"),
+		},
+		{
+			name:     "windows harness workspace path with single file",
+			input:    "C:/tmp/harness/uuid123/build.gradle",
+			expected: filepath.Join(testWorkspace, "build.gradle"),
+		},
+		{
+			name:     "non-harness absolute path",
+			input:    "/usr/local/bin/gradle",
+			expected: "",
+		},
+		{
+			name:     "relative path",
+			input:    ".gradle/caches",
+			expected: "",
+		},
+		{
+			name:     "harness path without trailing path",
+			input:    "/tmp/harness/uuid123",
+			expected: "",
+		},
+		{
+			name:     "windows harness path without trailing path",
+			input:    "C:/tmp/harness/uuid123",
+			expected: "",
+		},
+		{
+			name:     "empty path",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertHarnessPath(tt.input)
+			test.Equals(t, tt.expected, result)
+		})
+	}
+}
