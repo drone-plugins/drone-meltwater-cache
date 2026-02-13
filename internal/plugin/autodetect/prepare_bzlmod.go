@@ -2,7 +2,6 @@ package autodetect
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -17,51 +16,49 @@ func newBzlmodPreparer() *bzlmodPreparer {
 }
 
 func (*bzlmodPreparer) PrepareRepo(dir string) (string, error) {
-	fileName := filepath.Join(dir, ".bazelrc")
-	pathToCache := filepath.Join(dir, ".bazel")
+	// Use same cache directory as bazelPreparer
+	pathToCache := filepath.Join(dir, bazelCacheDirName)
 
-	runtimeCache := filepath.Join(pathToCache, "run")
-	moduleCache := filepath.Join(pathToCache, "module")
-	registryCache := filepath.Join(pathToCache, "registry")
-
-	cmdToOverrideRepo := fmt.Sprintf(`
-	build --test_tmpdir=%s
-	test --test_tmpdir=%s
-	build --module_cache=%s
-	build --registry_cache=%s
-	`,
-		runtimeCache,
-		runtimeCache,
-		moduleCache,
-		registryCache,
-	)
-
-	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
-		f, err := os.Create(fileName)
-		if err != nil {
-			return "", err
-		}
-		defer f.Close()
-		_, err = f.WriteString(cmdToOverrideRepo)
-
-		if err != nil {
-			return "", err
-		}
-
-		return pathToCache, nil
-	}
-
-	f, err := osOpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
-
-	if err != nil {
+	// Update .bazelrc with repository_cache and disk_cache options
+	if err := appendToBazelrcBzlmod(dir, pathToCache); err != nil {
 		return "", err
 	}
-	defer f.Close()
-	_, err = f.WriteString(cmdToOverrideRepo)
 
-	if err != nil {
+	// Update .bazelignore to exclude the cache directory from workspace
+	// This prevents "bazel build //..." from trying to parse the cache directory
+	if err := appendToBazelignore(dir, bazelCacheDirName); err != nil {
 		return "", err
 	}
 
 	return pathToCache, nil
+}
+
+// appendToBazelrcBzlmod adds the --repository_cache option to .bazelrc
+// This is a separate function to allow mocking in tests
+func appendToBazelrcBzlmod(dir, pathToCache string) error {
+	fileName := filepath.Join(dir, ".bazelrc")
+
+	// Use --repository_cache to cache downloaded external dependencies
+	// This is safe to cache/restore across builds (unlike output_user_root which includes install/)
+	// Note: We don't use --disk_cache because users may have remote build cache enabled,
+	// and disk_cache would be redundant (remote cache already stores compiled outputs)
+	cmdToOverrideRepo := "common --repository_cache=" + pathToCache + "\n"
+
+	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
+		f, err := os.Create(fileName)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = f.WriteString(cmdToOverrideRepo)
+		return err
+	}
+
+	f, err := osOpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(cmdToOverrideRepo)
+	return err
 }
