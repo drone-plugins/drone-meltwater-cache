@@ -12,7 +12,7 @@ require (
 	github.com/pkg/sftp v1.13.5
 	github.com/sirupsen/logrus v1.9.3
 	github.com/urfave/cli/v2 v2.25.0
-	golang.org/x/crypto v0.35.0
+	golang.org/x/crypto v0.43.0
 	golang.org/x/oauth2 v0.27.0
 	google.golang.org/api v0.114.0
 )
@@ -36,10 +36,10 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/net v0.30.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/net v0.45.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/text v0.30.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230320184635-7606e756e683 // indirect
