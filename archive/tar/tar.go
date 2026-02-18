@@ -241,7 +241,9 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 		var target string
 		if dst == h.Name || filepath.IsAbs(h.Name) {
-			target = convertHarnessPath(h.Name)
+			if os.Getenv("DRONE_STAGE_TYPE") == "DOCKER" {
+				target = convertHarnessPath(h.Name)
+			}
 			if target == "" {
 				target = h.Name
 			}
