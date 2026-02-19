@@ -182,6 +182,35 @@ func writeFileToArchive(tw io.Writer, path string) (n int64, err error) {
 	return written, nil
 }
 
+// convertHarnessPath converts absolute Harness workspace paths using HARNESS_WORKSPACE env var.
+// If the path matches /tmp/harness/<uuid>/... or C:/tmp/harness/<uuid>/... it returns HARNESS_WORKSPACE/<relative-path>.
+// Otherwise, it returns an empty string to indicate no conversion was done.
+func convertHarnessPath(absPath string) string {
+	normalizedPath := filepath.ToSlash(absPath)
+	var remainder string
+	const unixPrefix = "/tmp/harness/"
+	const windowsPrefix = "C:/tmp/harness/"
+
+	if strings.HasPrefix(normalizedPath, unixPrefix) {
+		remainder = strings.TrimPrefix(normalizedPath, unixPrefix)
+	} else if strings.HasPrefix(normalizedPath, windowsPrefix) {
+		remainder = strings.TrimPrefix(normalizedPath, windowsPrefix)
+	} else {
+		return ""
+	}
+	idx := strings.Index(remainder, "/")
+	if idx == -1 {
+		return ""
+	}
+
+	relativePath := remainder[idx+1:]
+	harnessWorkspace := os.Getenv("HARNESS_WORKSPACE")
+	if harnessWorkspace == "" {
+		return ""
+	}
+	return filepath.Join(harnessWorkspace, relativePath)
+}
+
 // Extract reads content from the given archive reader and restores it to the destination, returns written bytes.
 func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 	var (
@@ -212,7 +241,12 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 		var target string
 		if dst == h.Name || filepath.IsAbs(h.Name) {
-			target = h.Name
+			if os.Getenv("DRONE_STAGE_TYPE") == "DOCKER" {
+				target = convertHarnessPath(h.Name)
+			}
+			if target == "" {
+				target = h.Name
+			}
 		} else {
 			name, err := relative(dst, h.Name)
 			if err != nil {
