@@ -195,7 +195,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 		archive.FromFormat(p.logger, localRoot, cfg.ArchiveFormat,
 			archive.WithSkipSymlinks(cfg.SkipSymlinks),
 			archive.WithCompressionLevel(cfg.CompressionLevel),
-			archive.WithPreserveMetadata(cfg.PreserveMetadata && (cfg.Backend == backend.S3 || cfg.Backend == backend.GCS)),
+			archive.WithPreserveMetadata(cfg.PreserveMetadata && (cfg.Backend == backend.S3 || cfg.Backend == backend.GCS || cfg.Backend == backend.Azure)),
 		),
 		generator,
 		cfg.Backend,
