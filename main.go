@@ -4,6 +4,7 @@ import (
 	"errors"
 	stdlog "log"
 	"os"
+	"strings"
 
 	"github.com/meltwater/drone-cache/archive"
 	"github.com/meltwater/drone-cache/internal"
@@ -631,6 +632,23 @@ func main() {
 	}
 }
 
+func resolveAzureContainerName(explicitContainerName, cacheKeyTemplate string) string {
+	containerName := strings.ToLower(strings.TrimSpace(explicitContainerName))
+	if containerName != "" {
+		return containerName
+	}
+
+	// Backward compatibility: legacy Azure pipelines embed container in cache key.
+	for _, part := range strings.Split(cacheKeyTemplate, "/") {
+		candidate := strings.ToLower(strings.TrimSpace(part))
+		if candidate != "" {
+			return candidate
+		}
+	}
+
+	return ""
+}
+
 // nolint:funlen
 func run(c *cli.Context) error {
 	var logLevel = c.String("log.level")
@@ -640,6 +658,7 @@ func run(c *cli.Context) error {
 
 	logger := internal.NewLogger(logLevel, c.String("log.format"), "drone-cache-logger")
 	level.Debug(logger).Log("version", version, "commit", commit, "date", date)
+	azureContainerName := resolveAzureContainerName(c.String("azure.container-name"), c.String("cache-key"))
 
 	plg := plugin.New(log.With(logger, "component", "plugin"))
 	plg.Metadata = metadata.Metadata{
@@ -730,7 +749,7 @@ func run(c *cli.Context) error {
 			AccountName: c.String("azure.account-name"),
 			AccountKey:  c.String("azure.account-key"),
 			// Storage Configuration
-			ContainerName:    c.String("azure.container-name"),
+			ContainerName:    azureContainerName,
 			BlobStorageURL:   c.String("azure.blob-storage-url"),
 			MaxRetryRequests: c.Int("azure.blob-max-retry-requets"),
 			Azurite:          false,

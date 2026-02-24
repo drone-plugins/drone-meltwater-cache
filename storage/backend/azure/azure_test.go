@@ -55,6 +55,25 @@ func TestRoundTrip(t *testing.T) {
 	test.Equals(t, true, exists)
 }
 
+func TestNewContainerNameRequired(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(log.NewNopLogger(), Config{
+		AccountName:    accountName,
+		AccountKey:     accountKey,
+		ContainerName:  "",
+		BlobStorageURL: blobURL,
+		Azurite:        true,
+		Timeout:        30 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected error when container name is missing")
+	}
+	if !strings.Contains(err.Error(), "azure container name is required") {
+		t.Fatalf("expected missing container error, got %v", err)
+	}
+}
+
 // Helpers
 
 func setup(t *testing.T) (*Backend, func()) {
