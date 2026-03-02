@@ -16,10 +16,10 @@ import (
 	"time"
 
 	gcstorage "cloud.google.com/go/storage"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	awss3 "github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-kit/kit/log"
 	pkgsftp "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -424,15 +424,20 @@ func setupS3(t *testing.T, c *Config, name string) {
 		secretAccessKey = getEnv("TEST_S3_SECRET_KEY", defaultSecretAccessKey)
 		bucket          = sanitize(name)
 	)
-	client := awss3.New(session.Must(session.NewSessionWithOptions(session.Options{})), &aws.Config{
-		Region:           aws.String(defaultRegion),
-		Endpoint:         aws.String(endpoint),
-		DisableSSL:       aws.Bool(!strings.HasPrefix(endpoint, "https://")),
-		S3ForcePathStyle: aws.Bool(true),
-		Credentials:      credentials.NewStaticCredentials(accessKey, secretAccessKey, ""),
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(defaultRegion),
+		awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKey, secretAccessKey, ""),
+		),
+	)
+	test.Ok(t, err)
+
+	client := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
+		o.BaseEndpoint = aws.String(endpoint)
+		o.UsePathStyle = true
 	})
 
-	_, err := client.CreateBucketWithContext(context.Background(), &awss3.CreateBucketInput{
+	_, err = client.CreateBucket(context.Background(), &awss3.CreateBucketInput{
 		Bucket: aws.String(bucket),
 	})
 	test.Ok(t, err)
