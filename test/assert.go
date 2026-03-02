@@ -3,7 +3,6 @@ package test
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -151,12 +150,12 @@ func EqualDirs(tb testing.TB, dst string, src string, srcs []string) {
 			}
 		}
 
-		wContent, err := ioutil.ReadFile(src)
+		wContent, err := os.ReadFile(src)
 		if err != nil {
 			tb.Fatalf("%s:%d: unexpected error, src path <%s>: %s\n", filepath.Base(file), line, srcList[i], err.Error())
 		}
 
-		gContent, err := ioutil.ReadFile(dst)
+		gContent, err := os.ReadFile(dst)
 		if err != nil {
 			tb.Fatalf("%s:%d: unexpected error, dst path <%s>: %s\n",
 				filepath.Base(file), line, dstList[i], err.Error())

@@ -1,7 +1,6 @@
 package test
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 )
@@ -15,7 +14,7 @@ func CreateTempFile(t testing.TB, name string, content []byte, in ...string) (st
 		parent = in[0]
 	}
 
-	tmpfile, err := ioutil.TempFile(parent, name+"_*.testfile")
+	tmpfile, err := os.CreateTemp(parent, name+"_*.testfile")
 	if err != nil {
 		t.Fatalf("unexpectedly failed creating the temp file: %v", err)
 	}
@@ -40,13 +39,13 @@ func CreateTempFilesInDir(t testing.TB, name string, content []byte, in ...strin
 		parent = in[0]
 	}
 
-	tmpDir, err := ioutil.TempDir(parent, name+"-testdir-*")
+	tmpDir, err := os.MkdirTemp(parent, name+"-testdir-*")
 	if err != nil {
 		t.Fatalf("unexpectedly failed creating the temp dir: %v", err)
 	}
 
 	for i := 0; i < 3; i++ {
-		tmpfile, err := ioutil.TempFile(tmpDir, name+"_*.testfile")
+		tmpfile, err := os.CreateTemp(tmpDir, name+"_*.testfile")
 		if err != nil {
 			t.Fatalf("unexpectedly failed creating the temp file: %v", err)
 		}
@@ -72,7 +71,7 @@ func CreateTempDir(t testing.TB, name string, in ...string) (string, func()) {
 		parent = in[0]
 	}
 
-	tmpDir, err := ioutil.TempDir(parent, name+"-testdir-*")
+	tmpDir, err := os.MkdirTemp(parent, name+"-testdir-*")
 	if err != nil {
 		t.Fatalf("unexpectedly failed creating the temp dir: %v", err)
 	}

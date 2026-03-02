@@ -2,19 +2,19 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/go-kit/kit/log"
 	"github.com/sirupsen/logrus"
 
@@ -29,55 +29,95 @@ type Backend struct {
 	bucket     string
 	acl        string
 	encryption string
-	client     *s3.S3
+	client     *s3.Client
 }
 
 // New creates a new S3 backend with lazy-loaded credentials.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
-	conf := &aws.Config{
-		Region:           aws.String(c.Region),
-		Endpoint:         &c.Endpoint,
-		DisableSSL:       aws.Bool(strings.HasPrefix(c.Endpoint, "http://")),
-		S3ForcePathStyle: aws.Bool(c.PathStyle),
+	ctx := context.Background()
+
+	// Build config options
+	var optFns []func(*config.LoadOptions) error
+
+	optFns = append(optFns, config.WithRegion(c.Region))
+
+	// Handle custom endpoint (for S3-compatible services like MinIO)
+	if c.Endpoint != "" {
+		customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+			return aws.Endpoint{
+				URL:               c.Endpoint,
+				HostnameImmutable: true,
+				SigningRegion:     c.Region,
+			}, nil
+		})
+		optFns = append(optFns, config.WithEndpointResolverWithOptions(customResolver))
 	}
 
-	// Create the initial session
-	sess, err := session.NewSession(conf)
-	if err != nil {
-		logrus.WithError(err).Error("Could not instantiate AWS session")
-		return nil, fmt.Errorf("AWS session creation failed: %w", err)
-	}
-
-	// Handle primary credentials
+	// Handle static credentials
 	if c.Key != "" && c.Secret != "" {
 		logrus.Info("Using static credentials (Key/Secret provided)")
-		conf.Credentials = credentials.NewStaticCredentials(c.Key, c.Secret, "")
-	} else if c.AssumeRoleARN != "" {
+		optFns = append(optFns, config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(c.Key, c.Secret, ""),
+		))
+	}
+
+	// Load the base config
+	cfg, err := config.LoadDefaultConfig(ctx, optFns...)
+	if err != nil {
+		logrus.WithError(err).Error("Could not load AWS config")
+		return nil, fmt.Errorf("AWS config loading failed: %w", err)
+	}
+
+	// Handle role assumption
+	if c.AssumeRoleARN != "" {
 		if c.OIDCTokenID != "" {
 			logrus.Info("Attempting to assume role with OIDC")
-			creds, err := assumeRoleWithWebIdentity(c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
-			if err != nil {
-				logrus.WithError(err).Error("Failed to assume role with OIDC")
-				return nil, err
-			}
-			conf.Credentials = creds
-			logrus.Info("Successfully assumed role with OIDC")
+			stsClient := sts.NewFromConfig(cfg)
+			webIdentityProvider := stscreds.NewWebIdentityRoleProvider(
+				stsClient,
+				c.AssumeRoleARN,
+				stscreds.IdentityTokenFile(c.OIDCTokenID),
+				func(o *stscreds.WebIdentityRoleOptions) {
+					if c.AssumeRoleSessionName != "" {
+						o.RoleSessionName = c.AssumeRoleSessionName
+					}
+				},
+			)
+			cfg.Credentials = aws.NewCredentialsCache(webIdentityProvider)
+			logrus.Info("Successfully configured role assumption with OIDC")
 		} else {
-			conf.Credentials = assumeRole(c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID)
+			logrus.Info("Attempting to assume role")
+			stsClient := sts.NewFromConfig(cfg)
+			assumeRoleProvider := stscreds.NewAssumeRoleProvider(
+				stsClient,
+				c.AssumeRoleARN,
+				func(o *stscreds.AssumeRoleOptions) {
+					if c.AssumeRoleSessionName != "" {
+						o.RoleSessionName = c.AssumeRoleSessionName
+					}
+					if c.ExternalID != "" {
+						o.ExternalID = aws.String(c.ExternalID)
+					}
+				},
+			)
+			cfg.Credentials = aws.NewCredentialsCache(assumeRoleProvider)
+			logrus.Info("Successfully configured role assumption")
 		}
 	} else {
 		logrus.Warn("No AWS credentials provided or role assumed; using default machine credentials for AWS requests")
 	}
 
-	// Create session with configured credentials
-	sess, err = session.NewSession(conf)
-	if err != nil {
-		logrus.WithError(err).Error("Could not create AWS session with credentials")
-		return nil, fmt.Errorf("AWS session creation with credentials failed: %w", err)
+	// Create S3 client options
+	s3Opts := []func(*s3.Options){}
+
+	if c.PathStyle {
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.UsePathStyle = true
+		})
 	}
 
-	// Initialize client with the session
-	client := s3.New(sess)
+	// Initialize client
+	client := s3.NewFromConfig(cfg, s3Opts...)
 
 	// Handle secondary role assumption if UserRoleArn is provided
 	if len(c.UserRoleArn) > 0 {
@@ -86,21 +126,28 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 			"UserRoleExternalID": c.UserRoleExternalID,
 		}).Info("Setting up credentials with UserRoleArn")
 
-		creds := stscreds.NewCredentials(sess, c.UserRoleArn, func(provider *stscreds.AssumeRoleProvider) {
-			if c.UserRoleExternalID != "" {
-				logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up creds with UserRoleExternalID")
-				provider.ExternalID = aws.String(c.UserRoleExternalID)
-			}
-		})
+		stsClient := sts.NewFromConfig(cfg)
+		userRoleProvider := stscreds.NewAssumeRoleProvider(
+			stsClient,
+			c.UserRoleArn,
+			func(o *stscreds.AssumeRoleOptions) {
+				if c.UserRoleExternalID != "" {
+					logrus.WithField("ExternalID", c.UserRoleExternalID).Info("Setting up creds with UserRoleExternalID")
+					o.ExternalID = aws.String(c.UserRoleExternalID)
+				}
+			},
+		)
+		cfg.Credentials = aws.NewCredentialsCache(userRoleProvider)
 
-		// Create new client with same session but updated credentials
-		client = s3.New(sess, &aws.Config{Credentials: creds})
+		// Create new client with updated credentials
+		client = s3.NewFromConfig(cfg, s3Opts...)
 		logrus.Info("Created S3 client with assumed user role")
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"Client": client,
-	}).Info("New Client set here.")
+		"Bucket": c.Bucket,
+		"Region": c.Region,
+	}).Info("New S3 client configured")
 
 	backend := &Backend{
 		logger:     l,
@@ -128,7 +175,7 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 	go func() {
 		defer close(errCh)
 
-		out, err := b.client.GetObjectWithContext(ctx, in)
+		out, err := b.client.GetObject(ctx, in)
 		if err != nil {
 			errCh <- fmt.Errorf("get the object, %w", err)
 			return
@@ -152,21 +199,23 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 
 // Put uploads contents of the given reader.
 func (b *Backend) Put(ctx context.Context, p string, r io.Reader) error {
-	var (
-		uploader = s3manager.NewUploaderWithClient(b.client)
-		in       = &s3manager.UploadInput{
-			Bucket: aws.String(b.bucket),
-			Key:    aws.String(p),
-			ACL:    aws.String(b.acl),
-			Body:   r,
-		}
-	)
+	uploader := manager.NewUploader(b.client)
 
-	if b.encryption != "" {
-		in.ServerSideEncryption = aws.String(b.encryption)
+	in := &s3.PutObjectInput{
+		Bucket: aws.String(b.bucket),
+		Key:    aws.String(p),
+		Body:   r,
 	}
 
-	if _, err := uploader.UploadWithContext(ctx, in); err != nil {
+	if b.acl != "" {
+		in.ACL = types.ObjectCannedACL(b.acl)
+	}
+
+	if b.encryption != "" {
+		in.ServerSideEncryption = types.ServerSideEncryption(b.encryption)
+	}
+
+	if _, err := uploader.Upload(ctx, in); err != nil {
 		return fmt.Errorf("put the object, %w", err)
 	}
 
@@ -180,9 +229,11 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 		Key:    aws.String(p),
 	}
 
-	out, err := b.client.HeadObjectWithContext(ctx, in)
+	out, err := b.client.HeadObject(ctx, in)
 	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() == s3.ErrCodeNoSuchKey || awsErr.Code() == "NotFound" {
+		var notFound *types.NotFound
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &notFound) || errors.As(err, &noSuchKey) || strings.Contains(err.Error(), "NotFound") {
 			return false, nil
 		}
 
@@ -190,20 +241,26 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 	}
 
 	// Normally if file not exists it will be already detected by error above but in some cases
-	// Minio can return success status for without ETag, detect that here.
-	return *out.ETag != "", nil
+	// Minio can return success status without ETag, detect that here.
+	return out.ETag != nil && *out.ETag != "", nil
 }
 
 // List contents of the given directory by given key from remote storage.
 func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
-	in := &s3.ListObjectsInput{
+	in := &s3.ListObjectsV2Input{
 		Bucket: aws.String(b.bucket),
 		Prefix: aws.String(p),
 	}
 
 	var entries []common.FileEntry
 
-	err := b.client.ListObjectsPagesWithContext(ctx, in, func(page *s3.ListObjectsOutput, lastPage bool) bool {
+	paginator := s3.NewListObjectsV2Paginator(b.client, in)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list objects, %w", err)
+		}
+
 		for _, item := range page.Contents {
 			entries = append(entries, common.FileEntry{
 				Path:         *item.Key,
@@ -211,64 +268,7 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 				LastModified: *item.LastModified,
 			})
 		}
-		return !lastPage
-	})
-
-	return entries, err
-}
-
-// AssumeRole logic
-func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Credentials {
-
-	sess, err := session.NewSession()
-	if err != nil {
-		logrus.WithError(err).Error("Failed to create session for role assumption")
-		return nil
 	}
 
-	stsClient := sts.New(sess)
-	roleProvider := &stscreds.AssumeRoleProvider{
-		Client:          stsClient,
-		RoleARN:         roleArn,
-		RoleSessionName: roleSessionName,
-		Duration:        time.Hour, // 1-hour session
-	}
-
-	if externalID != "" {
-		roleProvider.ExternalID = aws.String(externalID)
-	}
-
-	creds := credentials.NewCredentials(roleProvider)
-
-	return creds
-}
-
-func assumeRoleWithWebIdentity(roleArn, roleSessionName, webIdentityToken string) (*credentials.Credentials, error) {
-	// Create a new session
-	sess, err := session.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create AWS session: %v", err)
-	}
-
-	// Create a new STS client
-	svc := sts.New(sess)
-
-	// Prepare the input parameters for the STS call
-	duration := int64(time.Hour / time.Second)
-	input := &sts.AssumeRoleWithWebIdentityInput{
-		RoleArn:          aws.String(roleArn),
-		RoleSessionName:  aws.String(roleSessionName),
-		WebIdentityToken: aws.String(webIdentityToken),
-		DurationSeconds:  aws.Int64(duration),
-	}
-
-	// Call the AssumeRoleWithWebIdentity function
-	result, err := svc.AssumeRoleWithWebIdentity(input)
-	if err != nil {
-		return nil, fmt.Errorf("failed to assume role with web identity: %v", err)
-	}
-
-	// Create credentials using the response from STS
-	newCreds := credentials.NewStaticCredentials(*result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken)
-	return newCreds, nil
+	return entries, nil
 }

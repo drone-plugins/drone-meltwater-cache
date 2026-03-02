@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -46,7 +46,7 @@ func TestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	test.Ok(t, backend.Get(context.Background(), "test.txt", &buf))
 
-	b, err := ioutil.ReadAll(&buf)
+	b, err := io.ReadAll(&buf)
 	test.Ok(t, err)
 
 	test.Equals(t, []byte(content), b)

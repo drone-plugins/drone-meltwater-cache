@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -186,7 +185,7 @@ func authMethod(c Config) ([]ssh.AuthMethod, error) {
 }
 
 func readPublicKeyFile(file string) (ssh.AuthMethod, error) {
-	buffer, err := ioutil.ReadFile(file)
+	buffer, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read file, %w", err)
 	}

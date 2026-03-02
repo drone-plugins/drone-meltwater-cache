@@ -1,9 +1,10 @@
 package filesystem
 
 import (
+	"io"
 	"bytes"
 	"context"
-	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ func TestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	test.Ok(t, backend.Get(context.TODO(), "test.t", &buf))
 
-	b, err := ioutil.ReadAll(&buf)
+	b, err := io.ReadAll(&buf)
 	test.Ok(t, err)
 
 	test.Equals(t, []byte(content), b)
