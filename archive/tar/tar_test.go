@@ -2,7 +2,6 @@ package tar
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +23,7 @@ func TestCreate(t *testing.T) {
 	test.Ok(t, os.MkdirAll(testRootMounted, 0755))
 	test.Ok(t, os.MkdirAll(testRootExtracted, 0755))
 
-	testAbs, err := ioutil.TempDir("", testAbsPattern)
+	testAbs, err := os.MkdirTemp("", testAbsPattern)
 	test.Ok(t, err)
 	test.Equals(t, filepath.IsAbs(testAbs), true)
 
@@ -140,7 +139,7 @@ func TestExtract(t *testing.T) {
 	test.Ok(t, os.MkdirAll(testRootMounted, 0755))
 	test.Ok(t, os.MkdirAll(testRootExtracted, 0755))
 
-	testAbs, err := ioutil.TempDir("", testAbsPattern)
+	testAbs, err := os.MkdirTemp("", testAbsPattern)
 	test.Ok(t, err)
 	test.Equals(t, filepath.IsAbs(testAbs), true)
 
@@ -180,7 +179,7 @@ func TestExtract(t *testing.T) {
 	test.Ok(t, err)
 
 	badArchivePath := filepath.Join(arcDir, "bad_test.tar")
-	test.Ok(t, ioutil.WriteFile(badArchivePath, []byte("hello\ndrone\n"), 0644))
+	test.Ok(t, os.WriteFile(badArchivePath, []byte("hello\ndrone\n"), 0644))
 
 	filesAbs := exampleFileTree(t, ".tar_extract_absolute", testAbs)
 	archiveAbsPath := filepath.Join(arcDir, "test_absolute.tar")
@@ -325,13 +324,13 @@ func create(a *Archive, srcs []string, dst string) (int64, error) {
 		*w = localWritten
 	}(&written)
 
-	content, err := ioutil.ReadAll(pr)
+	content, err := io.ReadAll(pr)
 	if err != nil {
 		pr.CloseWithError(err)
 		return 0, err
 	}
 
-	if err := ioutil.WriteFile(dst, content, 0644); err != nil {
+	if err := os.WriteFile(dst, content, 0644); err != nil {
 		return 0, err
 	}
 

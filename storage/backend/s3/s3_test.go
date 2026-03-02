@@ -6,16 +6,15 @@ package s3
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-kit/kit/log"
 	"github.com/sirupsen/logrus"
 
@@ -65,23 +64,6 @@ func TestRoundTripWithAssumeRoleAndExternalID(t *testing.T) {
 		"RoleARN": "arn:aws:iam::account-id:role/TestRole",
 	}).Info("Setting up AssumeRole test")
 
-	// Setting up the base session with static credentials
-	baseSess, err := session.NewSession(&aws.Config{
-		Region:      aws.String(defaultRegion),
-		Endpoint:    aws.String(endpoint),
-		DisableSSL:  aws.Bool(true),
-		Credentials: credentials.NewStaticCredentials(accessKey, secretAccessKey, ""), // Use static credentials for the base session
-	})
-	if err != nil {
-		t.Fatalf("failed to create base session: %v", err)
-	}
-
-	// Use stscreds.NewCredentials for assuming the role
-	creds := stscreds.NewCredentials(baseSess, "arn:aws:iam::account-id:role/TestRole", func(p *stscreds.AssumeRoleProvider) {
-		p.ExternalID = aws.String("example-external-id") // Optionally pass ExternalID
-		logrus.WithField("externalID", "example-external-id").Info("Using external ID for assume role")
-	})
-
 	// Setup backend using the assumed role credentials
 	backend, cleanUp := setup(t, Config{
 		ACL:                   acl,
@@ -96,7 +78,6 @@ func TestRoundTripWithAssumeRoleAndExternalID(t *testing.T) {
 		AssumeRoleSessionName: "drone-cache",
 		ExternalID:            "example-external-id",
 		UserRoleExternalID:    "example-external-id",
-		Credentials:           creds, // Pass the assumed role credentials here
 	})
 
 	// Cleanup after the test
@@ -116,7 +97,7 @@ func roundTrip(t *testing.T, backend *Backend) {
 	var buf bytes.Buffer
 	test.Ok(t, backend.Get(context.TODO(), "test.t", &buf))
 
-	b, err := ioutil.ReadAll(&buf)
+	b, err := io.ReadAll(&buf)
 	test.Ok(t, err)
 
 	test.Equals(t, []byte(content), b)
@@ -133,55 +114,66 @@ func roundTrip(t *testing.T, backend *Backend) {
 
 // Helpers
 
-func setup(t *testing.T, config Config) (*Backend, func()) {
-	client := newClient(config)
+func setup(t *testing.T, cfg Config) (*Backend, func()) {
+	client := newClient(cfg)
+	ctx := context.Background()
 
-	_, err := client.CreateBucketWithContext(context.Background(), &s3.CreateBucketInput{
-		Bucket: aws.String(config.Bucket),
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(cfg.Bucket),
 	})
 	test.Ok(t, err)
 
 	b, err := New(
 		log.NewNopLogger(),
-		config,
+		cfg,
 		false,
 	)
 	test.Ok(t, err)
 
 	return b, func() {
-		_, err = client.DeleteBucket(&s3.DeleteBucketInput{
-			Bucket: aws.String(config.Bucket),
+		_, _ = client.DeleteBucket(ctx, &s3.DeleteBucketInput{
+			Bucket: aws.String(cfg.Bucket),
 		})
 	}
 }
 
-func newClient(config Config) *s3.S3 {
-	var creds *credentials.Credentials
-	if config.Key != "" && config.Secret != "" {
-		creds = credentials.NewStaticCredentials(config.Key, config.Secret, "")
-	} else {
-		creds = credentials.NewEnvCredentials()
-		logrus.Info("Using environment-based credentials for S3 client")
+func newClient(cfg Config) *s3.Client {
+	ctx := context.Background()
+
+	var optFns []func(*config.LoadOptions) error
+	optFns = append(optFns, config.WithRegion(defaultRegion))
+
+	if cfg.Key != "" && cfg.Secret != "" {
+		optFns = append(optFns, config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(cfg.Key, cfg.Secret, ""),
+		))
 	}
 
-	conf := &aws.Config{
-		Region:                        aws.String(defaultRegion),
-		Endpoint:                      aws.String(endpoint),
-		DisableSSL:                    aws.Bool(strings.HasPrefix(endpoint, "http://")),
-		S3ForcePathStyle:              aws.Bool(true),
-		Credentials:                   creds,
-		CredentialsChainVerboseErrors: aws.Bool(true),
+	// Handle custom endpoint
+	if endpoint != "" {
+		customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+			return aws.Endpoint{
+				URL:               endpoint,
+				HostnameImmutable: true,
+				SigningRegion:     defaultRegion,
+			}, nil
+		})
+		optFns = append(optFns, config.WithEndpointResolverWithOptions(customResolver))
+	}
+
+	awsCfg, err := config.LoadDefaultConfig(ctx, optFns...)
+	if err != nil {
+		logrus.WithError(err).Fatal("Failed to load AWS config")
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"Region":    defaultRegion,
-		"Endpoint":  endpoint,
-		"AccessKey": config.Key,
+		"Region":   defaultRegion,
+		"Endpoint": endpoint,
 	}).Info("Creating new S3 client")
 
-	return s3.New(session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	})), conf)
+	return s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+	})
 }
 
 func getEnv(key, defaultVal string) string {

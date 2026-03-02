@@ -16,10 +16,10 @@ import (
 	"time"
 
 	gcstorage "cloud.google.com/go/storage"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	awss3 "github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-kit/kit/log"
 	pkgsftp "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -424,15 +424,40 @@ func setupS3(t *testing.T, c *Config, name string) {
 		secretAccessKey = getEnv("TEST_S3_SECRET_KEY", defaultSecretAccessKey)
 		bucket          = sanitize(name)
 	)
-	client := awss3.New(session.Must(session.NewSessionWithOptions(session.Options{})), &aws.Config{
-		Region:           aws.String(defaultRegion),
-		Endpoint:         aws.String(endpoint),
-		DisableSSL:       aws.Bool(!strings.HasPrefix(endpoint, "https://")),
-		S3ForcePathStyle: aws.Bool(true),
-		Credentials:      credentials.NewStaticCredentials(accessKey, secretAccessKey, ""),
+
+	// Normalize endpoint URL - ensure it has http:// prefix but not duplicated
+	endpointURL := endpoint
+	if !strings.HasPrefix(endpointURL, "http://") && !strings.HasPrefix(endpointURL, "https://") {
+		endpointURL = "http://" + endpointURL
+	}
+
+	ctx := context.Background()
+
+	// Build config options
+	var optFns []func(*config.LoadOptions) error
+	optFns = append(optFns, config.WithRegion(defaultRegion))
+	optFns = append(optFns, config.WithCredentialsProvider(
+		credentials.NewStaticCredentialsProvider(accessKey, secretAccessKey, ""),
+	))
+
+	// Handle custom endpoint
+	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			URL:               endpointURL,
+			HostnameImmutable: true,
+			SigningRegion:     defaultRegion,
+		}, nil
+	})
+	optFns = append(optFns, config.WithEndpointResolverWithOptions(customResolver))
+
+	cfg, err := config.LoadDefaultConfig(ctx, optFns...)
+	test.Ok(t, err)
+
+	client := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
+		o.UsePathStyle = true
 	})
 
-	_, err := client.CreateBucketWithContext(context.Background(), &awss3.CreateBucketInput{
+	_, err = client.CreateBucket(ctx, &awss3.CreateBucketInput{
 		Bucket: aws.String(bucket),
 	})
 	test.Ok(t, err)
@@ -441,7 +466,7 @@ func setupS3(t *testing.T, c *Config, name string) {
 	c.S3 = s3.Config{
 		ACL:       "private",
 		Bucket:    bucket,
-		Endpoint:  endpoint,
+		Endpoint:  endpointURL,
 		Key:       accessKey,
 		PathStyle: true, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,

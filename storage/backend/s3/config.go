@@ -1,8 +1,8 @@
 package s3
 
-import "github.com/aws/aws-sdk-go/aws/credentials"
+import "github.com/aws/aws-sdk-go-v2/aws"
 
-// Config is a structure to store S3  backend configuration.
+// Config is a structure to store S3 backend configuration.
 type Config struct {
 	// Indicates the files ACL, which should be one,
 	// of the following:
@@ -25,7 +25,7 @@ type Config struct {
 	ExternalID            string
 	UserRoleExternalID    string
 
-	Credentials *credentials.Credentials
+	Credentials aws.CredentialsProvider
 
 	// us-east-1
 	// us-west-1
