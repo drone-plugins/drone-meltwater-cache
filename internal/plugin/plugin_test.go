@@ -425,6 +425,12 @@ func setupS3(t *testing.T, c *Config, name string) {
 		bucket          = sanitize(name)
 	)
 
+	// Normalize endpoint URL - ensure it has http:// prefix but not duplicated
+	endpointURL := endpoint
+	if !strings.HasPrefix(endpointURL, "http://") && !strings.HasPrefix(endpointURL, "https://") {
+		endpointURL = "http://" + endpointURL
+	}
+
 	ctx := context.Background()
 
 	// Build config options
@@ -437,7 +443,7 @@ func setupS3(t *testing.T, c *Config, name string) {
 	// Handle custom endpoint
 	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 		return aws.Endpoint{
-			URL:               "http://" + endpoint,
+			URL:               endpointURL,
 			HostnameImmutable: true,
 			SigningRegion:     defaultRegion,
 		}, nil
@@ -460,7 +466,7 @@ func setupS3(t *testing.T, c *Config, name string) {
 	c.S3 = s3.Config{
 		ACL:       "private",
 		Bucket:    bucket,
-		Endpoint:  "http://" + endpoint,
+		Endpoint:  endpointURL,
 		Key:       accessKey,
 		PathStyle: true, // Should be true for minio and false for AWS.
 		Region:    defaultRegion,

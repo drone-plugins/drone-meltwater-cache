@@ -1,10 +1,9 @@
 package filesystem
 
 import (
-	"io"
 	"bytes"
 	"context"
-	"os"
+	"io"
 	"strings"
 	"testing"
 
