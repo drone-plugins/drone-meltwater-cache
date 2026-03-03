@@ -413,7 +413,7 @@ func setupGCS(t *testing.T, c *Config, name string) {
 
 func setupS3(t *testing.T, c *Config, name string) {
 	const (
-		defaultEndpoint        = "127.0.0.1:9000"
+		defaultEndpoint        = "http://127.0.0.1:9000"
 		defaultAccessKey       = "AKIAIOSFODNN7EXAMPLE"
 		defaultSecretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 		defaultRegion          = "eu-west-1"

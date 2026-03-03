@@ -38,6 +38,7 @@ type Backend struct {
 // New creates a new S3 backend with lazy-loaded credentials.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	ctx := context.Background()
+	endpoint := normalizeEndpoint(c.Endpoint)
 
 	optFns := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(c.Region),
@@ -76,13 +77,13 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	}
 
 	s3Opts := []func(*s3.Options){}
-	if c.Endpoint != "" {
+	if endpoint != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
-			o.BaseEndpoint = aws.String(c.Endpoint)
+			o.BaseEndpoint = aws.String(endpoint)
 			o.UsePathStyle = c.PathStyle
 			// SDK v2 default trailing checksums require TLS or a seekable body.
 			// Pipe-based uploads are unseekable, so disable automatic checksums for HTTP endpoints.
-			if strings.HasPrefix(c.Endpoint, "http://") {
+			if strings.HasPrefix(endpoint, "http://") {
 				o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 			}
 		})
@@ -130,6 +131,18 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	}
 
 	return backend, nil
+}
+
+func normalizeEndpoint(endpoint string) string {
+	if endpoint == "" {
+		return endpoint
+	}
+	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return endpoint
+	}
+	// Backward compatibility with pre-v2 behavior where host:port endpoints
+	// were accepted and treated as non-TLS.
+	return "http://" + endpoint
 }
 
 // Get writes downloaded content to the given writer.
