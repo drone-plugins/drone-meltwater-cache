@@ -18,7 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log"
 	"github.com/sirupsen/logrus"
 
 	"github.com/meltwater/drone-cache/test"

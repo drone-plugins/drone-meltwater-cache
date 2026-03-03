@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 )
 
 // CloseWithErrLogf is making sure we log every error, even those from best effort tiny closers.

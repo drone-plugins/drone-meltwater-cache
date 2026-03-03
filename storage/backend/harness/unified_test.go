@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log"
 	harnessClient "github.com/meltwater/drone-cache/harness"
 	"github.com/meltwater/drone-cache/storage/common"
 )

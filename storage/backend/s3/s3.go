@@ -15,7 +15,7 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
-	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log"
 	"github.com/sirupsen/logrus"
 
 	"github.com/meltwater/drone-cache/internal"

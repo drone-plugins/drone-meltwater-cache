@@ -8,8 +8,8 @@ import (
 	"github.com/meltwater/drone-cache/archive/tar"
 	"github.com/meltwater/drone-cache/archive/zstd"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 )
 
 const (
