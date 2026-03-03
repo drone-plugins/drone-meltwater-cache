@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -77,6 +78,11 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(c.Endpoint)
 			o.UsePathStyle = c.PathStyle
+			// SDK v2 default trailing checksums require TLS or a seekable body.
+			// Pipe-based uploads are unseekable, so disable automatic checksums for HTTP endpoints.
+			if strings.HasPrefix(c.Endpoint, "http://") {
+				o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+			}
 		})
 	} else if c.PathStyle {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
