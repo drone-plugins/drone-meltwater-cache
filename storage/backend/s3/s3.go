@@ -12,6 +12,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	s3manager "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -31,6 +32,7 @@ type Backend struct {
 	acl        string
 	encryption string
 	client     *s3.Client
+	uploader   *s3manager.Uploader
 }
 
 // New creates a new S3 backend with lazy-loaded credentials.
@@ -120,6 +122,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		bucket:     c.Bucket,
 		encryption: c.Encryption,
 		client:     client,
+		uploader:   s3manager.NewUploader(client),
 	}
 
 	if c.ACL != "" {
@@ -164,6 +167,9 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 }
 
 // Put uploads contents of the given reader.
+// Uses the S3 manager to handle non-seekable streams (e.g. pipe readers from
+// archive compression) by buffering them into parts, matching the v1
+// s3manager.Uploader behaviour.
 func (b *Backend) Put(ctx context.Context, p string, r io.Reader) error {
 	in := &s3.PutObjectInput{
 		Bucket: aws.String(b.bucket),
@@ -176,7 +182,7 @@ func (b *Backend) Put(ctx context.Context, p string, r io.Reader) error {
 		in.ServerSideEncryption = s3types.ServerSideEncryption(b.encryption)
 	}
 
-	if _, err := b.client.PutObject(ctx, in); err != nil {
+	if _, err := b.uploader.Upload(ctx, in); err != nil {
 		return fmt.Errorf("put the object, %w", err)
 	}
 
