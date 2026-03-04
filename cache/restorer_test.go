@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log"
 	"github.com/meltwater/drone-cache/key/generator"
 	"github.com/meltwater/drone-cache/storage/common"
 )

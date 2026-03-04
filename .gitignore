@@ -38,4 +38,10 @@ release/
 __*__
 __*__.json
 
+# Test-generated build system artifacts
+internal/plugin/autodetect/.mvn/
+internal/plugin/autodetect/.m2/
+internal/plugin/autodetect/.gradle/
+internal/plugin/autodetect/gradle.properties
+
 update_script.sh

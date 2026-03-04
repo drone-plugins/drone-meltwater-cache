@@ -13,8 +13,8 @@ import (
 	"github.com/meltwater/drone-cache/storage/common"
 
 	gcstorage "cloud.google.com/go/storage"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"

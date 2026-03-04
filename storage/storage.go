@@ -8,7 +8,7 @@ import (
 	"github.com/meltwater/drone-cache/storage/backend"
 	"github.com/meltwater/drone-cache/storage/common"
 
-	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log"
 )
 
 const DefaultOperationTimeout = 3 * time.Minute
