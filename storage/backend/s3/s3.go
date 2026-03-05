@@ -133,15 +133,10 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 }
 
 func normalizeEndpoint(endpoint string) string {
-	if endpoint == "" {
+	if endpoint == "" || strings.Contains(endpoint, "://") {
 		return endpoint
 	}
-	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
-		return endpoint
-	}
-	// Backward compatibility with pre-v2 behavior where host:port endpoints
-	// were accepted and treated as non-TLS.
-	return "http://" + endpoint
+	return "https://" + endpoint
 }
 
 // Get writes downloaded content to the given writer.
