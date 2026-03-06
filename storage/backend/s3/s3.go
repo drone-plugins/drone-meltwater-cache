@@ -55,7 +55,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	} else if c.AssumeRoleARN != "" {
 		if c.OIDCTokenID != "" {
 			logrus.Info("Attempting to assume role with OIDC")
-			creds, err := assumeRoleWithWebIdentity(ctx, c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID)
+			creds, err := assumeRoleWithWebIdentity(ctx, c.AssumeRoleARN, c.AssumeRoleSessionName, c.OIDCTokenID, c.Region)
 			if err != nil {
 				logrus.WithError(err).Error("Failed to assume role with OIDC")
 				return nil, err
@@ -63,7 +63,7 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 			optFns = append(optFns, awsconfig.WithCredentialsProvider(creds))
 			logrus.Info("Successfully assumed role with OIDC")
 		} else {
-			creds := assumeRole(ctx, c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID)
+			creds := assumeRole(ctx, c.AssumeRoleARN, c.AssumeRoleSessionName, c.ExternalID, c.Region)
 			optFns = append(optFns, awsconfig.WithCredentialsProvider(creds))
 		}
 	} else {
@@ -81,11 +81,10 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
 			o.UsePathStyle = c.PathStyle
-			// SDK v2 default trailing checksums require TLS or a seekable body.
-			// Pipe-based uploads are unseekable, so disable automatic checksums for HTTP endpoints.
-			if strings.HasPrefix(endpoint, "http://") {
-				o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
-			}
+			// S3-compatible services (MinIO, Spaces, B2, etc.) may not support the
+			// CRC32 checksums that SDK v2 sends by default. Pipe-based uploads are
+			// also unseekable and break trailing checksums over plain HTTP.
+			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		})
 	} else if c.PathStyle {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
@@ -134,15 +133,10 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 }
 
 func normalizeEndpoint(endpoint string) string {
-	if endpoint == "" {
+	if endpoint == "" || strings.Contains(endpoint, "://") {
 		return endpoint
 	}
-	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
-		return endpoint
-	}
-	// Backward compatibility with pre-v2 behavior where host:port endpoints
-	// were accepted and treated as non-TLS.
-	return "http://" + endpoint
+	return "https://" + endpoint
 }
 
 // Get writes downloaded content to the given writer.
@@ -255,11 +249,10 @@ func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error
 	return entries, nil
 }
 
-func assumeRole(ctx context.Context, roleArn, roleSessionName, externalID string) aws.CredentialsProvider {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx)
+func assumeRole(ctx context.Context, roleArn, roleSessionName, externalID, region string) aws.CredentialsProvider {
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
-		logrus.WithError(err).Error("Failed to load config for role assumption")
-		return nil
+		logrus.WithError(err).Fatal("Failed to load config for role assumption")
 	}
 
 	stsSvc := sts.NewFromConfig(cfg)
@@ -274,8 +267,8 @@ func assumeRole(ctx context.Context, roleArn, roleSessionName, externalID string
 	return aws.NewCredentialsCache(provider)
 }
 
-func assumeRoleWithWebIdentity(ctx context.Context, roleArn, roleSessionName, webIdentityToken string) (aws.CredentialsProvider, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx)
+func assumeRoleWithWebIdentity(ctx context.Context, roleArn, roleSessionName, webIdentityToken, region string) (aws.CredentialsProvider, error) {
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %v", err)
 	}
@@ -290,6 +283,9 @@ func assumeRoleWithWebIdentity(ctx context.Context, roleArn, roleSessionName, we
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to assume role with web identity: %v", err)
+	}
+	if result.Credentials == nil {
+		return nil, fmt.Errorf("STS AssumeRoleWithWebIdentity returned nil credentials")
 	}
 
 	return credentials.NewStaticCredentialsProvider(
