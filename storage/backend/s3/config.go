@@ -24,6 +24,7 @@ type Config struct {
 	OIDCTokenID           string
 	ExternalID            string
 	UserRoleExternalID    string
+	SessionToken          string
 
 	Credentials aws.CredentialsProvider
 

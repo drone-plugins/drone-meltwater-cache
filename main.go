@@ -400,6 +400,11 @@ func main() {
 			EnvVars: []string{"PLUGIN_SECRET_KEY", "AWS_SECRET_ACCESS_KEY", "CACHE_AWS_SECRET_ACCESS_KEY"},
 		},
 		&cli.StringFlag{
+			Name:    "session-token",
+			Usage:   "aws session token for temporary credentials (e.g., from EKS Pod Identity, IRSA, STS)",
+			EnvVars: []string{"PLUGIN_SESSION_TOKEN", "AWS_SESSION_TOKEN"},
+		},
+		&cli.StringFlag{
 			Name:    "region, reg",
 			Usage:   "AWS bucket region. (us-east-1, eu-west-1, ...)",
 			EnvVars: []string{"PLUGIN_REGION", "S3_REGION"},
@@ -737,6 +742,7 @@ func run(c *cli.Context) error {
 			OIDCTokenID:           c.String("oidc-token-id"),
 			ExternalID:            c.String("external-id"),
 			UserRoleExternalID:    c.String("user-role-external-id"),
+			SessionToken:          c.String("session-token"),
 		},
 		Azure: azure.Config{
 			// OIDC Authentication (Priority 0)

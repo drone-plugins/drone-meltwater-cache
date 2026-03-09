@@ -45,9 +45,13 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	}
 
 	if c.Key != "" && c.Secret != "" {
-		logrus.Info("Using static credentials (Key/Secret provided)")
+		if c.SessionToken != "" {
+			logrus.Info("Using static credentials with session token (temporary credentials)")
+		} else {
+			logrus.Info("Using static credentials (access key and secret key)")
+		}
 		optFns = append(optFns, awsconfig.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(c.Key, c.Secret, ""),
+			credentials.NewStaticCredentialsProvider(c.Key, c.Secret, c.SessionToken),
 		))
 	} else if c.Credentials != nil {
 		logrus.Info("Using provided credentials")
