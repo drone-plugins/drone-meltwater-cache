@@ -105,7 +105,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	}
 
 	if errs.Err() != nil {
-		return fmt.Errorf("rebuild failed, %w", errs)
+		level.Warn(r.logger).Log("msg", "ignore archival, ", errs.Err())
 	}
 
 	level.Info(r.logger).Log("msg", "cache built", "took", time.Since(now))
@@ -152,7 +152,7 @@ func (r rebuilder) rebuild(src, dst string) (err error) {
 	tr := io.TeeReader(pr, sw)
 
 	if err := r.s.Put(dst, tr); err != nil {
-		err = fmt.Errorf("upload file, pipe reader failed, %w", err)
+		err = fmt.Errorf("failed to upload file to cache storage, %w", err)
 		if err := pr.CloseWithError(err); err != nil {
 			level.Error(r.logger).Log("msg", "pr close", "err", err)
 		}
