@@ -61,7 +61,8 @@ func (r rebuilder) Rebuild(srcs []string) error {
 			if !r.gracefulDetect {
 				return fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err)
 			}
-			level.Warn(r.logger).Log("msg", fmt.Sprintf("source directory %s does not exist", src), "err", fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err))
+			level.Warn(r.logger).Log("msg", fmt.Sprintf("source directory %s does not exist, skipping", src), "err", fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err))
+			continue
 		}
 
 		dst := filepath.Join(namespace, key, src)

@@ -4,11 +4,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
-// bazelCacheDirName is the cache directory for Bazel
-// Using .bazel-cache relative to project directory
+// bazelCacheDirName is the cache directory for Bazel.
+// Kept inside the workspace (shared volume) so that save/restore cache steps
+// running in separate containers can access it.
+//
 // We use --repository_cache instead of --output_user_root because:
 // 1. output_user_root includes install/ directory (Bazel installation files)
 // 2. If install/ is cached and restored, Bazel fails with "corrupt installation"
@@ -27,13 +30,10 @@ func newBazelPreparer() *bazelPreparer {
 func (*bazelPreparer) PrepareRepo(dir string) (string, error) {
 	pathToCache := filepath.Join(dir, bazelCacheDirName)
 
-	// Update .bazelrc with repository_cache and disk_cache options
 	if err := appendToBazelrc(dir, pathToCache); err != nil {
 		return "", err
 	}
 
-	// Update .bazelignore to exclude the cache directory from workspace
-	// This prevents "bazel build //..." from trying to parse the cache directory
 	if err := appendToBazelignore(dir, bazelCacheDirName); err != nil {
 		return "", err
 	}
@@ -41,18 +41,44 @@ func (*bazelPreparer) PrepareRepo(dir string) (string, error) {
 	return pathToCache, nil
 }
 
-// appendToBazelrc adds the --repository_cache option to .bazelrc
+// isBazel9OrNewer checks both USE_BAZEL_VERSION env var (takes precedence with
+// bazelisk) and .bazelversion file. Returns true only when the major version is
+// confirmed to be >= 9. When the version cannot be determined the safe default
+// is false, which avoids adding --repo_contents_cache= that older versions
+// reject as "Unrecognized option".
+func isBazel9OrNewer(dir string) bool {
+	version := os.Getenv("USE_BAZEL_VERSION")
+
+	if version == "" {
+		data, err := os.ReadFile(filepath.Join(dir, ".bazelversion"))
+		if err != nil {
+			return false
+		}
+		version = string(data)
+	}
+
+	version = strings.TrimSpace(version)
+	parts := strings.SplitN(version, ".", 2)
+	if len(parts) == 0 {
+		return false
+	}
+	major, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return false
+	}
+	return major >= 9
+}
+
+// appendToBazelrc adds the --repository_cache option to .bazelrc.
+// For Bazel 9+ it also disables --repo_contents_cache which otherwise defaults
+// to <repository_cache>/contents and fails when that sits inside the workspace.
 func appendToBazelrc(dir, pathToCache string) error {
 	fileName := filepath.Join(dir, ".bazelrc")
 
-	// Use --repository_cache to cache downloaded external dependencies
-	// This is safe to cache/restore across builds (unlike output_user_root which includes install/)
-	// Note: We don't use --disk_cache because users may have remote build cache enabled,
-	// and disk_cache would be redundant (remote cache already stores compiled outputs)
-	// We disable --repo_contents_cache because in Bazel 9+ it defaults to inside repository_cache,
-	// and when that's inside the workspace, Bazel fails with "repo contents cache inside main repo" error
-	cmdToOverrideRepo := "common --repository_cache=" + pathToCache + "\n" +
-		"common --repo_contents_cache=\n"
+	cmdToOverrideRepo := "common --repository_cache=" + pathToCache + "\n"
+	if isBazel9OrNewer(dir) {
+		cmdToOverrideRepo += "common --repo_contents_cache=\n"
+	}
 
 	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
 		f, err := os.Create(fileName)
@@ -73,7 +99,8 @@ func appendToBazelrc(dir, pathToCache string) error {
 	return err
 }
 
-// appendToBazelignore adds cache directory to .bazelignore to exclude from workspace
+// appendToBazelignore adds cache directory to .bazelignore to exclude from workspace.
+// This prevents "bazel build //..." from trying to parse the cache directory.
 func appendToBazelignore(dir, cacheDir string) error {
 	fileName := filepath.Join(dir, ".bazelignore")
 	ignoreEntry := cacheDir + "\n"
@@ -88,13 +115,12 @@ func appendToBazelignore(dir, cacheDir string) error {
 		return err
 	}
 
-	// Check if cache dir is already in .bazelignore
 	content, err := os.ReadFile(fileName)
 	if err != nil {
 		return err
 	}
 	if strings.Contains(string(content), cacheDir) {
-		return nil // Already present
+		return nil
 	}
 
 	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
