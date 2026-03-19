@@ -28,11 +28,12 @@ import (
 type Backend struct {
 	logger log.Logger
 
-	bucket     string
-	acl        string
-	encryption string
-	client     *s3.Client
-	uploader   *s3manager.Uploader
+	bucket            string
+	acl               string
+	encryption        string
+	client            *s3.Client
+	uploader          *s3manager.Uploader
+	isDirectoryBucket bool
 }
 
 // New creates a new S3 backend with lazy-loaded credentials.
@@ -122,11 +123,21 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	}).Info("New Client set here.")
 
 	backend := &Backend{
-		logger:     l,
-		bucket:     c.Bucket,
-		encryption: c.Encryption,
-		client:     client,
-		uploader:   s3manager.NewUploader(client),
+		logger:            l,
+		bucket:            c.Bucket,
+		encryption:        c.Encryption,
+		client:            client,
+		uploader:          s3manager.NewUploader(client),
+		isDirectoryBucket: detectDirectoryBucket(ctx, client, c.Bucket),
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"bucket":            c.Bucket,
+		"isDirectoryBucket": backend.isDirectoryBucket,
+	}).Info("S3 bucket type detected")
+
+	if backend.isDirectoryBucket {
+		logrus.Info("Using S3 Express directory bucket - ACL and DSSE-KMS encryption will be skipped if configured")
 	}
 
 	if c.ACL != "" {
@@ -157,16 +168,24 @@ func (b *Backend) Get(ctx context.Context, p string, w io.Writer) error {
 
 		out, err := b.client.GetObject(ctx, in)
 		if err != nil {
+			logrus.WithError(err).WithField("key", p).Error("GetObject failed")
 			errCh <- fmt.Errorf("get the object, %w", err)
 			return
 		}
 
 		defer internal.CloseWithErrLogf(b.logger, out.Body, "response body, close defer")
 
-		_, err = io.Copy(w, out.Body)
+		bytesWritten, err := io.Copy(w, out.Body)
 		if err != nil {
+			logrus.WithError(err).WithField("key", p).Error("Failed to copy object")
 			errCh <- fmt.Errorf("copy the object, %w", err)
+			return
 		}
+
+		logrus.WithFields(logrus.Fields{
+			"key":          p,
+			"bytesWritten": bytesWritten,
+		}).Debug("Downloaded object successfully")
 	}()
 
 	select {
@@ -185,17 +204,45 @@ func (b *Backend) Put(ctx context.Context, p string, r io.Reader) error {
 	in := &s3.PutObjectInput{
 		Bucket: aws.String(b.bucket),
 		Key:    aws.String(p),
-		ACL:    s3types.ObjectCannedACL(b.acl),
 		Body:   r,
 	}
 
-	if b.encryption != "" {
-		in.ServerSideEncryption = s3types.ServerSideEncryption(b.encryption)
+	// S3 Express directory buckets do not support ACL. Skip and warn instead of
+	// letting the upload fail with an opaque AWS API error.
+	if b.acl != "" {
+		if b.isDirectoryBucket {
+			logrus.WithFields(logrus.Fields{
+				"bucket": b.bucket,
+				"acl":    b.acl,
+			}).Warn("ACL is not supported for S3 Express directory buckets; ignoring ACL setting")
+		} else {
+			in.ACL = s3types.ObjectCannedACL(b.acl)
+		}
 	}
 
-	if _, err := b.uploader.Upload(ctx, in); err != nil {
+	// S3 Express directory buckets do not support DSSE-KMS encryption. AES256
+	// and aws:kms are supported and applied normally.
+	if b.encryption != "" {
+		if b.isDirectoryBucket && strings.EqualFold(b.encryption, "aws:dsse-kms") {
+			logrus.WithFields(logrus.Fields{
+				"bucket":     b.bucket,
+				"encryption": b.encryption,
+			}).Warn("DSSE-KMS encryption is not supported for S3 Express directory buckets; ignoring encryption setting")
+		} else {
+			in.ServerSideEncryption = s3types.ServerSideEncryption(b.encryption)
+		}
+	}
+
+	result, err := b.uploader.Upload(ctx, in)
+	if err != nil {
+		logrus.WithError(err).WithField("key", p).Error("Upload failed")
 		return fmt.Errorf("put the object, %w", err)
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"key":  p,
+		"etag": result.ETag,
+	}).Debug("Upload succeeded")
 
 	return nil
 }
@@ -269,6 +316,43 @@ func assumeRole(ctx context.Context, roleArn, roleSessionName, externalID, regio
 	})
 
 	return aws.NewCredentialsCache(provider)
+}
+
+// detectDirectoryBucket calls the HeadBucket API and inspects the response to
+// determine whether the bucket is an S3 Express directory bucket. It returns
+// false on any error so that MinIO and non-AWS endpoints fall back gracefully
+// to the existing general-purpose bucket code path.
+func detectDirectoryBucket(ctx context.Context, client *s3.Client, bucket string) bool {
+	out, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		logrus.WithError(err).WithField("bucket", bucket).
+			Debug("HeadBucket failed; treating bucket as general-purpose")
+		return false
+	}
+
+	// Primary signal: BucketLocationType is only populated for directory buckets.
+	// Valid values: AvailabilityZone, LocalZone. Empty for general-purpose buckets.
+	isDirectoryByType := out.BucketLocationType == s3types.LocationTypeAvailabilityZone ||
+		out.BucketLocationType == s3types.LocationTypeLocalZone
+
+	// Secondary signal: directory bucket ARNs contain "s3express" in the service segment.
+	// e.g. arn:aws:s3express:region:account-id:bucket/name
+	isDirectoryByArn := out.BucketArn != nil && strings.Contains(*out.BucketArn, "s3express")
+
+	// The two signals should always agree.
+	if isDirectoryByType != isDirectoryByArn {
+		logrus.WithFields(logrus.Fields{
+			"bucket":       bucket,
+			"byType":       isDirectoryByType,
+			"byArn":        isDirectoryByArn,
+			"locationType": out.BucketLocationType,
+			"arn":          aws.ToString(out.BucketArn),
+		}).Warn("Directory bucket detection mismatch between BucketLocationType and BucketArn")
+	}
+
+	return isDirectoryByType
 }
 
 func assumeRoleWithWebIdentity(ctx context.Context, roleArn, roleSessionName, webIdentityToken, region string) (aws.CredentialsProvider, error) {
