@@ -318,11 +318,17 @@ func assumeRole(ctx context.Context, roleArn, roleSessionName, externalID, regio
 	return aws.NewCredentialsCache(provider)
 }
 
-// detectDirectoryBucket calls the HeadBucket API and inspects the response to
-// determine whether the bucket is an S3 Express directory bucket. It returns
-// false on any error so that MinIO and non-AWS endpoints fall back gracefully
-// to the existing general-purpose bucket code path.
+// detectDirectoryBucket determines whether the bucket is an S3 Express directory
+// bucket. It uses the AWS-enforced "--x-s3" suffix as a zero-cost fast path
+// Only when the suffix matches does it make a HeadBucket call to
+// validate via bucket metadata, ensuring non-AWS providers (MinIO, R2, etc.)
+// that happen to use the same suffix are never misidentified.
 func detectDirectoryBucket(ctx context.Context, client *s3.Client, bucket string) bool {
+	// Fast path: skip the API call entirely for regular buckets.
+	if !strings.HasSuffix(bucket, "--x-s3") {
+		return false
+	}
+
 	out, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
 		Bucket: aws.String(bucket),
 	})
@@ -332,27 +338,8 @@ func detectDirectoryBucket(ctx context.Context, client *s3.Client, bucket string
 		return false
 	}
 
-	// Primary signal: BucketLocationType is only populated for directory buckets.
-	// Valid values: AvailabilityZone, LocalZone. Empty for general-purpose buckets.
-	isDirectoryByType := out.BucketLocationType == s3types.LocationTypeAvailabilityZone ||
+	return out.BucketLocationType == s3types.LocationTypeAvailabilityZone ||
 		out.BucketLocationType == s3types.LocationTypeLocalZone
-
-	// Secondary signal: directory bucket ARNs contain "s3express" in the service segment.
-	// e.g. arn:aws:s3express:region:account-id:bucket/name
-	isDirectoryByArn := out.BucketArn != nil && strings.Contains(*out.BucketArn, "s3express")
-
-	// The two signals should always agree.
-	if isDirectoryByType != isDirectoryByArn {
-		logrus.WithFields(logrus.Fields{
-			"bucket":       bucket,
-			"byType":       isDirectoryByType,
-			"byArn":        isDirectoryByArn,
-			"locationType": out.BucketLocationType,
-			"arn":          aws.ToString(out.BucketArn),
-		}).Warn("Directory bucket detection mismatch between BucketLocationType and BucketArn")
-	}
-
-	return isDirectoryByType
 }
 
 func assumeRoleWithWebIdentity(ctx context.Context, roleArn, roleSessionName, webIdentityToken, region string) (aws.CredentialsProvider, error) {
