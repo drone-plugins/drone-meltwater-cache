@@ -318,12 +318,17 @@ func assumeRole(ctx context.Context, roleArn, roleSessionName, externalID, regio
 	return aws.NewCredentialsCache(provider)
 }
 
+// s3HeadBucketAPI defines the minimal interface needed for bucket type detection.
+type s3HeadBucketAPI interface {
+	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+}
+
 // detectDirectoryBucket determines whether the bucket is an S3 Express directory
 // bucket. It uses the AWS-enforced "--x-s3" suffix as a zero-cost fast path
 // Only when the suffix matches does it make a HeadBucket call to
 // validate via bucket metadata, ensuring non-AWS providers (MinIO, R2, etc.)
 // that happen to use the same suffix are never misidentified.
-func detectDirectoryBucket(ctx context.Context, client *s3.Client, bucket string) bool {
+func detectDirectoryBucket(ctx context.Context, client s3HeadBucketAPI, bucket string) bool {
 	// Fast path: skip the API call entirely for regular buckets.
 	if !strings.HasSuffix(bucket, "--x-s3") {
 		return false
