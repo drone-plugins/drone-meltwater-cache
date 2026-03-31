@@ -23,7 +23,7 @@ services:
     image: mcr.microsoft.com/azure-storage/azurite
     ports:
     - "10000:10000"
-    command: azurite-blob --blobHost 0.0.0.0
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
   configure-buckets:
     image: minio/mc:RELEASE.2020-10-03T02-54-56Z
     entrypoint: sh

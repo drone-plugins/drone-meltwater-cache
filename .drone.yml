@@ -223,7 +223,7 @@ services:
   - name: azurite
     image: mcr.microsoft.com/azure-storage/azurite
     commands:
-      - azurite-blob --blobHost 0.0.0.0
+      - azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
     ports:
       - 10000
 
