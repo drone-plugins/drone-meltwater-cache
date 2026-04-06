@@ -243,7 +243,7 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 		if originalPath, exists := sourcePaths[dst]; exists {
 			src = originalPath
 		} else {
-			src = filepath.Join(namespace, key, dst)
+			src = filepath.Join(namespace, key, normalizeDockerPath(dst))
 		}
 
 		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
