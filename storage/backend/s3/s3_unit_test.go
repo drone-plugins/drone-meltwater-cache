@@ -402,6 +402,20 @@ func TestList_PrefixHandling_DirectoryBucket(t *testing.T) {
 			isDirectory:    false,
 			description:    "should keep prefix unchanged for regular buckets",
 		},
+		{
+			name:           "directory bucket - root prefix (/)",
+			inputPrefix:    "/",
+			expectedPrefix: "/",
+			isDirectory:    true,
+			description:    "should not double-append / when prefix is already root /",
+		},
+		{
+			name:           "regular bucket - root prefix (/)",
+			inputPrefix:    "/",
+			expectedPrefix: "/",
+			isDirectory:    false,
+			description:    "should not modify root / prefix for regular buckets",
+		},
 	}
 
 	for _, tc := range testCases {
