@@ -37,6 +37,37 @@ func NewRebuilder(logger log.Logger, s storage.Storage, a archive.Archive, g key
 	return rebuilder{logger, a, s, g, fg, namespace, override, gracefulDetect}
 }
 
+// normalizeDockerPath converts Docker infrastructure paths to a fixed format.
+// When DRONE_STAGE_TYPE=DOCKER, paths like /tmp/harness/<uuid>/...
+// are converted to docker/... for consistent remote storage keys.
+func normalizeDockerPath(src string) string {
+	if os.Getenv("DRONE_STAGE_TYPE") != "DOCKER" {
+		return src
+	}
+
+	normalizedPath := filepath.ToSlash(src)
+	const unixPrefix = "/tmp/harness/"
+	const windowsPrefix = "C:/tmp/harness/"
+
+	var remainder string
+	if strings.HasPrefix(normalizedPath, unixPrefix) {
+		remainder = strings.TrimPrefix(normalizedPath, unixPrefix)
+	} else if strings.HasPrefix(normalizedPath, windowsPrefix) {
+		remainder = strings.TrimPrefix(normalizedPath, windowsPrefix)
+	} else {
+		return src
+	}
+
+	// Find the UUID segment and skip it
+	idx := strings.Index(remainder, "/")
+	if idx == -1 {
+		return src
+	}
+
+	// Return fixed prefix + relative path
+	return filepath.Join("docker", remainder[idx+1:])
+}
+
 // Rebuild rebuilds cache from the files provided with given paths.
 func (r rebuilder) Rebuild(srcs []string) error {
 	level.Info(r.logger).Log("msg", "rebuilding cache")
@@ -65,7 +96,8 @@ func (r rebuilder) Rebuild(srcs []string) error {
 			continue
 		}
 
-		dst := filepath.Join(namespace, key, src)
+		normalizedSrc := normalizeDockerPath(src)
+		dst := filepath.Join(namespace, key, normalizedSrc)
 
 		// If no override is set and object already exists in storage, skip it.
 		if !r.override {
