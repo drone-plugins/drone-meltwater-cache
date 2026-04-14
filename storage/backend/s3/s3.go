@@ -275,9 +275,17 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 
 // List contents of the given directory by given key from remote storage.
 func (b *Backend) List(ctx context.Context, p string) ([]common.FileEntry, error) {
+	prefix := p
+	
+	// S3 Express directory buckets require prefixes to end with a delimiter (/).
+	// Ensure the prefix ends with "/" for directory buckets when non-empty.
+	if b.isDirectoryBucket && prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
+
 	in := &s3.ListObjectsV2Input{
 		Bucket: aws.String(b.bucket),
-		Prefix: aws.String(p),
+		Prefix: aws.String(prefix),
 	}
 
 	var entries []common.FileEntry

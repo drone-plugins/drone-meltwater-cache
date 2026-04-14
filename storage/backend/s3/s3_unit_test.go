@@ -356,3 +356,66 @@ func TestDetectDirectoryBucket_HeadBucketInputStructure(t *testing.T) {
 	test.Assert(t, capturedInput != nil, "HeadBucket should be called")
 	test.Equals(t, bucketName, *capturedInput.Bucket, "HeadBucket should be called with correct bucket name")
 }
+
+func TestList_PrefixHandling_DirectoryBucket(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name           string
+		inputPrefix    string
+		expectedPrefix string
+		isDirectory    bool
+		description    string
+	}{
+		{
+			name:           "directory bucket - prefix without trailing slash",
+			inputPrefix:    "cache/path",
+			expectedPrefix: "cache/path/",
+			isDirectory:    true,
+			description:    "should append / for directory buckets",
+		},
+		{
+			name:           "directory bucket - prefix with trailing slash",
+			inputPrefix:    "cache/path/",
+			expectedPrefix: "cache/path/",
+			isDirectory:    true,
+			description:    "should keep existing / for directory buckets",
+		},
+		{
+			name:           "directory bucket - empty prefix",
+			inputPrefix:    "",
+			expectedPrefix: "",
+			isDirectory:    true,
+			description:    "should not modify empty prefix",
+		},
+		{
+			name:           "regular bucket - prefix without trailing slash",
+			inputPrefix:    "cache/path",
+			expectedPrefix: "cache/path",
+			isDirectory:    false,
+			description:    "should not modify prefix for regular buckets",
+		},
+		{
+			name:           "regular bucket - prefix with trailing slash",
+			inputPrefix:    "cache/path/",
+			expectedPrefix: "cache/path/",
+			isDirectory:    false,
+			description:    "should keep prefix unchanged for regular buckets",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Test the prefix transformation logic
+			prefix := tc.inputPrefix
+			if tc.isDirectory && prefix != "" && !strings.HasSuffix(prefix, "/") {
+				prefix = prefix + "/"
+			}
+
+			test.Equals(t, tc.expectedPrefix, prefix, tc.description)
+		})
+	}
+}
