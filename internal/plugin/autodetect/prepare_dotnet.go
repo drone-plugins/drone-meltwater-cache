@@ -30,6 +30,17 @@ func newDotnetPreparer() *dotnetPreparer {
 }
 
 func (*dotnetPreparer) PrepareRepo(dir string) (string, error) {
+	// NUGET_PACKAGES env var takes precedence over nuget.config's globalPackagesFolder.
+	// When set (e.g., by a Docker image or CI stage variable), NuGet ignores
+	// globalPackagesFolder entirely, so we cache the env var path instead.
+	if nugetPkgs := os.Getenv("NUGET_PACKAGES"); nugetPkgs != "" {
+		absPath, err := filepath.Abs(nugetPkgs)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve NUGET_PACKAGES path %q: %w", nugetPkgs, err)
+		}
+		return filepath.Clean(absPath), nil
+	}
+
 	pathToCache := filepath.Join(dir, ".nuget", "packages")
 	configPath := filepath.Join(dir, "nuget.config")
 	updateConfig := false

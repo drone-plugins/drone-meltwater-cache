@@ -117,6 +117,54 @@ func TestDetectDirectoriesToCacheGradleKts(t *testing.T) {
 	test.Equals(t, hashes, "baab6c16d9143523b7865d46896e4596")
 }
 
+func TestDetectDirectoriesToCacheDotnet(t *testing.T) {
+	origEnv := os.Getenv("NUGET_PACKAGES")
+	os.Unsetenv("NUGET_PACKAGES")
+	defer os.Setenv("NUGET_PACKAGES", origEnv)
+
+	csprojFile := "test.csproj"
+	f, err := os.Create(csprojFile)
+	test.Ok(t, err)
+	defer f.Close()
+	_, err = f.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll(csprojFile))
+	test.Ok(t, os.RemoveAll("nuget.config"))
+
+	path, _ := filepath.Abs(".nuget/packages")
+	expectedCacheDir := []string{path}
+	expectedDetectedTool := []string{"dotnet"}
+
+	test.Equals(t, directoriesToCache, expectedCacheDir)
+	test.Equals(t, buildToolsDetected, expectedDetectedTool)
+}
+
+func TestDetectDirectoriesToCacheDotnetWithEnvVar(t *testing.T) {
+	origEnv := os.Getenv("NUGET_PACKAGES")
+	os.Setenv("NUGET_PACKAGES", "/custom/dotnet/cache")
+	defer os.Setenv("NUGET_PACKAGES", origEnv)
+
+	csprojFile := "test.csproj"
+	f, err := os.Create(csprojFile)
+	test.Ok(t, err)
+	defer f.Close()
+	_, err = f.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll(csprojFile))
+
+	expectedCacheDir := []string{"/custom/dotnet/cache"}
+	expectedDetectedTool := []string{"dotnet"}
+
+	test.Equals(t, directoriesToCache, expectedCacheDir)
+	test.Equals(t, buildToolsDetected, expectedDetectedTool)
+}
+
 func TestDetectDirectoriesToCacheCombined(t *testing.T) {
 	f, err := os.Create(bazelBuildFile)
 	test.Ok(t, err)
