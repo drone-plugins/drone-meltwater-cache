@@ -1,0 +1,14 @@
+FROM golang:1.25.7-alpine3.23 AS builder
+RUN apk add --update --no-cache ca-certificates tzdata && update-ca-certificates
+RUN addgroup -g 65532 -S nonroot && adduser -u 65532 -S nonroot -G nonroot
+
+FROM scratch as runner
+
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+
+ADD release/linux/amd64/drone-cache /bin/
+USER nonroot:nonroot
+ENTRYPOINT ["/bin/drone-cache"]

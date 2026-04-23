@@ -7,6 +7,17 @@ tags:
 {{/if}}
 manifests:
   -
+    image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-{{/if}}linux-amd64-rootless
+    platform:
+      architecture: amd64
+      os: linux
+  -
+    image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-{{/if}}linux-arm64-rootless
+    platform:
+      architecture: arm64
+      os: linux
+      variant: v8
+  -
     image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-{{/if}}windows-1809-amd64-rootless
     platform:
       architecture: amd64
