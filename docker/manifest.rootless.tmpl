@@ -1,0 +1,31 @@
+image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-rootless{{else}}rootless{{/if}}
+{{#if build.tags}}
+tags:
+{{#each build.tags}}
+  - {{this}}-rootless
+{{/each}}
+{{/if}}
+manifests:
+  -
+    image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-{{/if}}linux-amd64-rootless
+    platform:
+      architecture: amd64
+      os: linux
+  -
+    image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-{{/if}}linux-arm64-rootless
+    platform:
+      architecture: arm64
+      os: linux
+      variant: v8
+  -
+    image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-{{/if}}windows-1809-amd64-rootless
+    platform:
+      architecture: amd64
+      os: windows
+      version: 1809
+  -
+    image: plugins/cache:{{#if build.tag}}{{trimPrefix "v" build.tag}}-{{/if}}windows-ltsc2022-amd64-rootless
+    platform:
+      architecture: amd64
+      os: windows
+      version: ltsc2022
