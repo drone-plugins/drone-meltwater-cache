@@ -165,6 +165,67 @@ func TestDetectDirectoriesToCacheDotnetWithEnvVar(t *testing.T) {
 	test.Equals(t, buildToolsDetected, expectedDetectedTool)
 }
 
+func TestDetectDirectoriesToCacheDotnetMultiProject(t *testing.T) {
+	origEnv := os.Getenv("NUGET_PACKAGES")
+	os.Unsetenv("NUGET_PACKAGES")
+	defer os.Setenv("NUGET_PACKAGES", origEnv)
+
+	// Root project
+	rootProj := "App.csproj"
+	f1, err := os.Create(rootProj)
+	test.Ok(t, err)
+	defer f1.Close()
+	_, err = f1.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	// Second project in a nested src/Lib directory
+	nested := filepath.Join("src", "Lib")
+	test.Ok(t, os.MkdirAll(nested, 0755))
+	libProj := filepath.Join(nested, "Lib.csproj")
+	f2, err := os.Create(libProj)
+	test.Ok(t, err)
+	defer f2.Close()
+	_, err = f2.WriteString(testFileContent2)
+	test.Ok(t, err)
+
+	// Third project (F#) deeper down to confirm recursive walk
+	deep := filepath.Join("src", "F", "Sharp")
+	test.Ok(t, os.MkdirAll(deep, 0755))
+	fsProj := filepath.Join(deep, "Fs.fsproj")
+	f3, err := os.Create(fsProj)
+	test.Ok(t, err)
+	defer f3.Close()
+	_, err = f3.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	// A .csproj inside bin/ must be ignored
+	test.Ok(t, os.MkdirAll("bin", 0755))
+	ignored := filepath.Join("bin", "Artifact.csproj")
+	f4, err := os.Create(ignored)
+	test.Ok(t, err)
+	defer f4.Close()
+	_, err = f4.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, hashes, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	// cleanup
+	test.Ok(t, os.RemoveAll(rootProj))
+	test.Ok(t, os.RemoveAll("src"))
+	test.Ok(t, os.RemoveAll("bin"))
+	test.Ok(t, os.RemoveAll("nuget.config"))
+
+	path, _ := filepath.Abs(".nuget/packages")
+	test.Equals(t, []string{path}, directoriesToCache)
+	test.Equals(t, []string{"dotnet"}, buildToolsDetected)
+
+	// Hash must differ from the single-file hash of the root project, proving
+	// all project files contribute to the cache key.
+	test.Assert(t, hashes != "" && hashes != "baab6c16d9143523b7865d46896e4596",
+		"hash should aggregate all project files, got %q", hashes)
+}
+
 func TestDetectDirectoriesToCacheCombined(t *testing.T) {
 	f, err := os.Create(bazelBuildFile)
 	test.Ok(t, err)
