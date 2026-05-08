@@ -1,0 +1,103 @@
+go.mod
+  c8b75c00-7763-452a-8959-8d92c411fb30 84
+docker/Dockerfile.linux.amd64
+  c8b75c00-7763-452a-8959-8d92c411fb30 1
+docker/Dockerfile.linux.arm64
+  c8b75c00-7763-452a-8959-8d92c411fb30 1
+docker/Dockerfile.rootless.linux.arm64
+  c8b75c00-7763-452a-8959-8d92c411fb30 1
+docker/Dockerfile.rootless.linux.amd64
+  c8b75c00-7763-452a-8959-8d92c411fb30 1
+---
+{
+  "attestations": [
+    {
+      "entries": [
+        {
+          "accepted_lines": 1,
+          "added_lines": 1,
+          "deleted_lines": 1,
+          "hash": "c8b75c00-7763-452a-8959-8d92c411fb30",
+          "lines": "84",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "go.mod"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 1,
+          "added_lines": 1,
+          "deleted_lines": 1,
+          "hash": "c8b75c00-7763-452a-8959-8d92c411fb30",
+          "lines": "1",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "docker/Dockerfile.linux.amd64"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 1,
+          "added_lines": 1,
+          "deleted_lines": 1,
+          "hash": "c8b75c00-7763-452a-8959-8d92c411fb30",
+          "lines": "1",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "docker/Dockerfile.linux.arm64"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 1,
+          "added_lines": 1,
+          "deleted_lines": 1,
+          "hash": "c8b75c00-7763-452a-8959-8d92c411fb30",
+          "lines": "1",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "docker/Dockerfile.rootless.linux.arm64"
+    },
+    {
+      "entries": [
+        {
+          "accepted_lines": 1,
+          "added_lines": 1,
+          "deleted_lines": 1,
+          "hash": "c8b75c00-7763-452a-8959-8d92c411fb30",
+          "lines": "1",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "docker/Dockerfile.rootless.linux.amd64"
+    }
+  ],
+  "base_commit_sha": "0ac75d9e427fe6f09885afa61db0aa8ab8dd7cd5",
+  "branch": "CI-22506-bump-go-1.25.9",
+  "commit_sha": "42ba9684b6763726a9d238be0cedec664df3d2d3",
+  "commit_time": "2026-05-08T15:47:35+05:30",
+  "commit_type": "direct_commit",
+  "git_ai_version": "1.4.2",
+  "prompts": {
+    "c8b75c00-7763-452a-8959-8d92c411fb30": {
+      "accepted_lines": 5,
+      "agent_id": {
+        "id": "c8b75c00-7763-452a-8959-8d92c411fb30",
+        "model": "claude-opus-4-6",
+        "tool": "claude"
+      },
+      "human_author": "Abhijeet Gupta <abhijeet.gupta@harness.io>",
+      "messages": [],
+      "overriden_lines": 0,
+      "total_additions": 5,
+      "total_deletions": 5
+    }
+  },
+  "repo": "https://github.com/drone-plugins/drone-meltwater-cache.git",
+  "schema_version": "authorship/3.0.0"
+}
