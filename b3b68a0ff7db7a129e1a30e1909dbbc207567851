@@ -1,0 +1,43 @@
+internal/plugin/plugin.go
+  fbdd0141-8b99-4d0c-a45d-23299395ca00 198
+---
+{
+  "attestations": [
+    {
+      "entries": [
+        {
+          "accepted_lines": 1,
+          "added_lines": 1,
+          "deleted_lines": 1,
+          "hash": "fbdd0141-8b99-4d0c-a45d-23299395ca00",
+          "lines": "198",
+          "overridden_lines": 0
+        }
+      ],
+      "file": "internal/plugin/plugin.go"
+    }
+  ],
+  "base_commit_sha": "0ac75d9e427fe6f09885afa61db0aa8ab8dd7cd5",
+  "branch": "preserve_metadata-for-harness-backend",
+  "commit_sha": "b3b68a0ff7db7a129e1a30e1909dbbc207567851",
+  "commit_time": "2026-05-08T14:58:20+05:30",
+  "commit_type": "direct_commit",
+  "git_ai_version": "1.4.2",
+  "prompts": {
+    "fbdd0141-8b99-4d0c-a45d-23299395ca00": {
+      "accepted_lines": 1,
+      "agent_id": {
+        "id": "fbdd0141-8b99-4d0c-a45d-23299395ca00",
+        "model": "claude-4.6-sonnet-medium-thinking",
+        "tool": "cursor"
+      },
+      "human_author": "Gargithakur01 <gargi@harness.io>",
+      "messages": [],
+      "overriden_lines": 0,
+      "total_additions": 1,
+      "total_deletions": 1
+    }
+  },
+  "repo": "https://Gargithakur01@github.com/drone-plugins/drone-meltwater-cache.git",
+  "schema_version": "authorship/3.0.0"
+}
