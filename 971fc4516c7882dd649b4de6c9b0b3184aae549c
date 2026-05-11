@@ -1,0 +1,38 @@
+.drone.yml
+  human 35,44,251,259,306,314,360,407,483
+---
+{
+  "attestations": [
+    {
+      "entries": [
+        {
+          "accepted_lines": 9,
+          "added_lines": 9,
+          "deleted_lines": 0,
+          "hash": "human",
+          "lines": "35,44,251,259,306,314,360,407,483",
+          "overridden_lines": 0
+        }
+      ],
+      "file": ".drone.yml"
+    }
+  ],
+  "base_commit_sha": "42ba9684b6763726a9d238be0cedec664df3d2d3",
+  "branch": "CI-22506-bump-go-1.25.9",
+  "commit_sha": "971fc4516c7882dd649b4de6c9b0b3184aae549c",
+  "commit_time": "2026-05-11T14:14:45+05:30",
+  "commit_type": "direct_commit",
+  "git_ai_version": "1.4.3",
+  "prompts": {
+    "human": {
+      "accepted_lines": 9,
+      "agent_id": null,
+      "human_author": "Abhijeet Gupta <abhijeet.gupta@harness.io>",
+      "overriden_lines": 0,
+      "total_additions": 9,
+      "total_deletions": 0
+    }
+  },
+  "repo": "https://github.com/drone-plugins/drone-meltwater-cache.git",
+  "schema_version": "authorship/3.0.0"
+}
