@@ -371,7 +371,7 @@ path-style
 : use path style for bucket paths. (true for `minio`, false for `aws`)
 
 acl
-: upload files with acl (`private`, `public-read`, ...) (default: `private`)
+: upload files with acl (`private`, `public-read`, ...) (default: `private`). Set to `none`, `disabled`, or `off` to omit the `x-amz-acl` header entirely — required for S3 buckets with Object Ownership set to `BucketOwnerEnforced` (ACLs disabled), which reject any canned ACL other than `bucket-owner-full-control`.
 
 encryption
 : server-side encryption algorithm, defaults to `none`. (`AES256`, `aws:kms`)

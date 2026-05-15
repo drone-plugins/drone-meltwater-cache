@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+- backend/s3: Allow `PLUGIN_ACL=none` (or `disabled`, `off`) to disable the `x-amz-acl` header so caches can be uploaded to S3 buckets with Object Ownership = `BucketOwnerEnforced` (ACLs disabled). Fixes [CI-22408](https://harness.atlassian.net/browse/CI-22408).
 - [#72](https://github.com/drone-plugins/drone-meltwater-cache/pull/72) Fixed inputs for Azure
 - [#133](https://github.com/meltwater/drone-cache/pull/133) bacnkend/s3: Fixed Anonymous Credentials Error on public buckets. 
   - Fixes [#132](https://github.com/meltwater/drone-cache/issues/132)
