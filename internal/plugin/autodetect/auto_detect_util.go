@@ -6,12 +6,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 type buildToolInfo struct {
 	globToDetect string
 	tool         string
 	preparer     RepoPreparer
+	// extsToDetect lets a tool detect multiple file extensions in a single pass
+	// with a recursive walk rather than Go's non-recursive filepath.Glob. When
+	// set, globToDetect is used only as a label and the walk in
+	// findFilesByExtensions takes precedence.
+	extsToDetect []string
 }
 
 // containsTool checks if a tool is already in the slice
@@ -73,16 +80,7 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			globToDetect: "*.csproj",
 			tool:         "dotnet",
 			preparer:     newDotnetPreparer(),
-		},
-		{
-			globToDetect: "*.vbproj",
-			tool:         "dotnet",
-			preparer:     newDotnetPreparer(),
-		},
-		{
-			globToDetect: "*.fsproj",
-			tool:         "dotnet",
-			preparer:     newDotnetPreparer(),
+			extsToDetect: []string{".csproj", ".vbproj", ".fsproj"},
 		},
 	}
 
@@ -100,14 +98,17 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			continue
 		}
 
-		hash, dir, err := hashIfFileExist(supportedTool.globToDetect)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		if hash == "" {
-			hash, dir, err = hashIfFileExist(filepath.Join("**", supportedTool.globToDetect))
-			if err != nil {
-				return nil, nil, "", err
+		var (
+			hash string
+			dir  string
+			err  error
+		)
+		if len(supportedTool.extsToDetect) > 0 {
+			hash, dir, err = hashAllFilesByExtensions(".", supportedTool.extsToDetect)
+		} else {
+			hash, dir, err = hashIfFileExist(supportedTool.globToDetect)
+			if err == nil && hash == "" {
+				hash, dir, err = hashIfFileExist(filepath.Join("**", supportedTool.globToDetect))
 			}
 		}
 		if err != nil {
@@ -171,6 +172,88 @@ func calculateMd5FromFiles(fileList []string) (string, string, error) {
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), dir, nil
+}
+
+// hashAllFilesByExtensions walks root recursively and hashes every file whose
+// extension matches one of exts, producing a single stable digest so the cache
+// key reflects every project file in a multi-project repo (e.g. a .NET
+// solution with several .csproj files).
+//
+// Returns (hex digest, common parent dir, error). The returned dir is root's
+// absolute path so a single nuget.config / .nuget/packages location covers
+// all detected projects.
+func hashAllFilesByExtensions(root string, exts []string) (string, string, error) {
+	matches, err := findFilesByExtensions(root, exts)
+	if err != nil {
+		return "", "", err
+	}
+	if len(matches) == 0 {
+		return "", "", nil
+	}
+
+	// Sort so the digest is independent of walk order across filesystems.
+	sort.Strings(matches)
+
+	hash := md5.New() // #nosec
+	for _, m := range matches {
+		f, err := os.Open(m)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := io.Copy(hash, f); err != nil {
+			f.Close()
+			return "", "", err
+		}
+		f.Close()
+	}
+
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), absRoot, nil
+}
+
+// findFilesByExtensions walks root and returns every regular file whose
+// extension matches one of exts. Well-known build-output, VCS and dependency
+// directories are skipped so vendored/generated project files do not leak into
+// the cache key.
+func findFilesByExtensions(root string, exts []string) ([]string, error) {
+	skipDirs := map[string]bool{
+		".git":         true,
+		".hg":          true,
+		".svn":         true,
+		"node_modules": true,
+		"bin":          true,
+		"obj":          true,
+		".vs":          true,
+		".nuget":       true,
+	}
+	extSet := make(map[string]bool, len(exts))
+	for _, e := range exts {
+		extSet[strings.ToLower(e)] = true
+	}
+
+	var matches []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if path != root && skipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if extSet[strings.ToLower(filepath.Ext(info.Name()))] {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
 }
 
 func shortestPath(input []string) (shortest string) {
