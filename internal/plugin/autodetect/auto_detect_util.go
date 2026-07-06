@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 type buildToolInfo struct {
-	globToDetect string
-	tool         string
-	preparer     RepoPreparer
+	globToDetect  string
+	tool          string
+	preparer      RepoPreparer
+	usePerProject bool
 }
 
 // containsTool checks if a tool is already in the slice
@@ -70,19 +72,22 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newGoPreparer(),
 		},
 		{
-			globToDetect: "*.csproj",
-			tool:         "dotnet",
-			preparer:     newDotnetPreparer(),
+			globToDetect:  "*.csproj",
+			tool:          "dotnet",
+			preparer:      newDotnetPreparer(),
+			usePerProject: true,
 		},
 		{
-			globToDetect: "*.vbproj",
-			tool:         "dotnet",
-			preparer:     newDotnetPreparer(),
+			globToDetect:  "*.vbproj",
+			tool:          "dotnet",
+			preparer:      newDotnetPreparer(),
+			usePerProject: true,
 		},
 		{
-			globToDetect: "*.fsproj",
-			tool:         "dotnet",
-			preparer:     newDotnetPreparer(),
+			globToDetect:  "*.fsproj",
+			tool:          "dotnet",
+			preparer:      newDotnetPreparer(),
+			usePerProject: true,
 		},
 	}
 
@@ -100,28 +105,49 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			continue
 		}
 
-		hash, dir, err := hashIfFileExist(supportedTool.globToDetect)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		if hash == "" {
-			hash, dir, err = hashIfFileExist(filepath.Join("**", supportedTool.globToDetect))
+		if supportedTool.usePerProject {
+			hash, dirs, err := hashAllFilesPerProjectIfExist(supportedTool.globToDetect)
 			if err != nil {
 				return nil, nil, "", err
 			}
-		}
-		if err != nil {
-			return nil, nil, "", err
-		}
-		if hash != "" && !skipPrepare {
-			dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
+			if hash == "" {
+				hash, dirs, err = hashAllFilesPerProjectIfExist(filepath.Join("**", supportedTool.globToDetect))
+				if err != nil {
+					return nil, nil, "", err
+				}
+			}
+			if hash != "" && !skipPrepare {
+				for _, dir := range dirs {
+					dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
+					if err != nil {
+						return nil, nil, "", err
+					}
+					directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+				}
+				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
+				hashes += hash
+			}
+		} else {
+			hash, dir, err := hashIfFileExist(supportedTool.globToDetect)
 			if err != nil {
 				return nil, nil, "", err
 			}
+			if hash == "" {
+				hash, dir, err = hashIfFileExist(filepath.Join("**", supportedTool.globToDetect))
+				if err != nil {
+					return nil, nil, "", err
+				}
+			}
+			if hash != "" && !skipPrepare {
+				dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
+				if err != nil {
+					return nil, nil, "", err
+				}
 
-			directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
-			buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
-			hashes += hash
+				directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
+				hashes += hash
+			}
 		}
 	}
 
@@ -145,6 +171,16 @@ func hashIfFileExist(glob string) (string, string, error) {
 	}
 
 	return calculateMd5FromFiles(matches)
+}
+
+func hashAllFilesPerProjectIfExist(glob string) (string, []string, error) {
+	matches, _ := filepath.Glob(glob)
+
+	if len(matches) == 0 {
+		return "", nil, nil
+	}
+
+	return calculateMd5FromAllFilesPerProject(matches)
 }
 
 func calculateMd5FromFiles(fileList []string) (string, string, error) {
@@ -171,6 +207,47 @@ func calculateMd5FromFiles(fileList []string) (string, string, error) {
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), dir, nil
+}
+
+// calculateMd5FromAllFilesPerProject hashes all files in the list and returns
+// a deduplicated slice of their absolute parent directories. Used for .NET
+// projects so each project directory gets its own nuget.config and cache entry.
+//
+// Files are sorted before hashing to ensure a stable cache key regardless
+// of the order returned by filepath.Glob (which is filesystem-dependent).
+func calculateMd5FromAllFilesPerProject(fileList []string) (string, []string, error) {
+	if len(fileList) == 0 {
+		return "", nil, nil
+	}
+
+	// Work on a sorted copy so hash is independent of input/Glob order.
+	sorted := make([]string, len(fileList))
+	copy(sorted, fileList)
+	sort.Strings(sorted)
+
+	hash := md5.New() // #nosec
+	var dirs []string
+	for _, filePath := range sorted {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return "", nil, err
+		}
+		_, err = io.Copy(hash, file)
+		file.Close()
+		if err != nil {
+			return "", nil, err
+		}
+		absDir, err := filepath.Abs(filepath.Dir(filePath))
+		if err != nil {
+			return "", nil, err
+		}
+		dirs = appendIfMissing(dirs, absDir)
+	}
+
+	// Return directories in sorted order for stable, predictable output.
+	sort.Strings(dirs)
+
+	return hex.EncodeToString(hash.Sum(nil)), dirs, nil
 }
 
 func shortestPath(input []string) (shortest string) {
