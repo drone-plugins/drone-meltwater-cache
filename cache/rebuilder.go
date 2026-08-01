@@ -1,8 +1,10 @@
 package cache
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,14 +29,34 @@ type rebuilder struct {
 	g  key.Generator
 	fg key.Generator
 
-	namespace      string
-	override       bool
-	gracefulDetect bool
+	namespace         string
+	override          bool
+	missingPathPolicy MissingPathPolicy
+}
+
+type rebuildSummary struct {
+	Requested     int
+	Missing       int
+	AlreadyExists int
+	Scheduled     int
+	Uploaded      int
+	Failed        int
+}
+
+type uploadResult struct {
+	Source string
+	Target string
+	Err    error
+}
+
+type scheduledUpload struct {
+	src string
+	dst string
 }
 
 // NewRebuilder creates a new cache.Rebuilder.
-func NewRebuilder(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, override bool, gracefulDetect bool) Rebuilder { // nolint:lll
-	return rebuilder{logger, a, s, g, fg, namespace, override, gracefulDetect}
+func NewRebuilder(logger log.Logger, s storage.Storage, a archive.Archive, g key.Generator, fg key.Generator, namespace string, override bool, missingPathPolicy MissingPathPolicy) Rebuilder { // nolint:lll
+	return rebuilder{logger, a, s, g, fg, namespace, override, missingPathPolicy}
 }
 
 // normalizeDockerPath converts Docker infrastructure paths to a fixed format.
@@ -73,27 +95,32 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	level.Info(r.logger).Log("msg", "rebuilding cache")
 
 	now := time.Now()
+	summary := rebuildSummary{Requested: len(srcs)}
+
+	if len(srcs) == 0 {
+		if r.missingPathPolicy == MissingPathSkipRequirePresent {
+			level.Error(r.logger).Log("msg", "cache save failed: no source paths configured", "requested", 0)
+			return errors.New("cache save failed: no source paths configured")
+		}
+		level.Info(r.logger).Log("msg", "cache built", "took", time.Since(now))
+		return nil
+	}
 
 	key, err := r.generateKey()
 	if err != nil {
 		return fmt.Errorf("generate key, %w", err)
 	}
 
-	var (
-		wg               sync.WaitGroup
-		errs             = &internal.MultiError{}
-		namespace        = filepath.ToSlash(filepath.Clean(r.namespace))
-		successCount     int
-		totalDirectories int
-	)
+	namespace := filepath.ToSlash(filepath.Clean(r.namespace))
+	scheduled := make([]scheduledUpload, 0, len(srcs))
 
 	for _, src := range srcs {
 		if _, err := os.Lstat(src); err != nil {
-			if !r.gracefulDetect {
-				return fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err)
+			if skip, fatalErr := r.handleMissingPath(src, err, &summary); fatalErr != nil {
+				return fatalErr
+			} else if skip {
+				continue
 			}
-			level.Warn(r.logger).Log("msg", fmt.Sprintf("source directory %s does not exist, skipping", src), "err", fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err))
-			continue
 		}
 
 		normalizedSrc := normalizeDockerPath(src)
@@ -107,43 +134,107 @@ func (r rebuilder) Rebuild(srcs []string) error {
 			}
 
 			if exists {
+				summary.AlreadyExists++
 				continue
 			}
 		}
 
-		level.Info(r.logger).Log("msg", "rebuilding cache for directory", "local", src)
-		level.Debug(r.logger).Log("msg", "rebuilding cache for directory", "remote", dst)
+		level.Info(r.logger).Log("msg", "rebuilding cache for source path", "local", src)
+		level.Debug(r.logger).Log("msg", "rebuilding cache for source path", "remote", dst)
 
-		wg.Add(1)
-
-		go func(dst, src string) {
-			defer wg.Done()
-
-			if err := r.rebuild(src, dst); err != nil {
-				errs.Add(fmt.Errorf("upload from <%s> to <%s>, %w", src, dst, err))
-			} else {
-				successCount++
-			}
-		}(dst, src)
+		summary.Scheduled++
+		scheduled = append(scheduled, scheduledUpload{src: src, dst: dst})
 	}
 
-	wg.Wait()
+	if summary.Scheduled == 0 {
+		if r.missingPathPolicy == MissingPathSkipRequirePresent && summary.Missing == summary.Requested {
+			level.Error(r.logger).Log("msg", "cache save failed: all configured source paths are missing",
+				"requested", summary.Requested, "missing", summary.Missing)
+			return errors.New("cache save failed: all configured source paths are missing")
+		}
 
-	totalDirectories = len(srcs)
-
-	if successCount > 0 {
-		level.Info(r.logger).Log("msg", "cache built", "took", time.Since(now),
-			"status", fmt.Sprintf("%d/%d directories cached", successCount, totalDirectories))
+		r.logRebuildComplete(summary, now)
 		return nil
 	}
 
-	if errs.Err() != nil {
+	results := make(chan uploadResult, len(scheduled))
+	var wg sync.WaitGroup
+
+	for _, item := range scheduled {
+		wg.Add(1)
+		go func(dst, src string) {
+			defer wg.Done()
+			results <- uploadResult{
+				Source: src,
+				Target: dst,
+				Err:    r.rebuild(src, dst),
+			}
+		}(item.dst, item.src)
+	}
+
+	wg.Wait()
+	close(results)
+
+	errs := &internal.MultiError{}
+	for result := range results {
+		if result.Err != nil {
+			summary.Failed++
+			errs.Add(fmt.Errorf("upload from <%s> to <%s>, %w", result.Source, result.Target, result.Err))
+			continue
+		}
+		summary.Uploaded++
+	}
+
+	if summary.Failed > 0 {
+		level.Error(r.logger).Log("msg", "cache save failed",
+			"requested", summary.Requested,
+			"uploaded", summary.Uploaded,
+			"existing", summary.AlreadyExists,
+			"missing", summary.Missing,
+			"failed", summary.Failed,
+			"took", time.Since(now),
+		)
 		return fmt.Errorf("rebuild failed, %w", errs)
 	}
 
-	level.Info(r.logger).Log("msg", "cache built", "took", time.Since(now))
-
+	r.logRebuildComplete(summary, now)
 	return nil
+}
+
+// handleMissingPath applies the missing-path policy for an Lstat failure.
+// Returns (skip=true) when the path should be skipped, or a fatal error.
+func (r rebuilder) handleMissingPath(src string, err error, summary *rebuildSummary) (bool, error) {
+	switch r.missingPathPolicy {
+	case MissingPathSkipRequirePresent:
+		// Only genuine not-found errors may be skipped.
+		if errors.Is(err, fs.ErrNotExist) {
+			summary.Missing++
+			level.Warn(r.logger).Log("msg", "cache source path does not exist; skipping", "path", src)
+			return true, nil
+		}
+		return false, fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err)
+
+	case MissingPathSkipAllowEmpty:
+		// Preserve automatic-detection behavior: skip any Lstat failure.
+		summary.Missing++
+		level.Warn(r.logger).Log("msg", fmt.Sprintf("source directory %s does not exist, skipping", src),
+			"err", fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err))
+		return true, nil
+
+	default: // MissingPathStrict
+		return false, fmt.Errorf("source <%s>, make sure file or directory exists and readable, %w", src, err)
+	}
+}
+
+func (r rebuilder) logRebuildComplete(summary rebuildSummary, started time.Time) {
+	level.Info(r.logger).Log("msg", "cache save complete",
+		"requested", summary.Requested,
+		"uploaded", summary.Uploaded,
+		"existing", summary.AlreadyExists,
+		"missing", summary.Missing,
+		"failed", summary.Failed,
+		"took", time.Since(started),
+	)
 }
 
 // rebuild pushes the archived file to the cache.

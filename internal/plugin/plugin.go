@@ -167,6 +167,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 
 	options = append(options, cache.WithOverride(p.Config.Override),
 		cache.WithFailRestoreIfKeyNotPresent(p.Config.FailRestoreIfKeyNotPresent),
+		cache.WithIgnoreMissingPaths(p.Config.IgnoreMissingPaths),
 		cache.WithEnableCacheKeySeparator(p.Config.EnableCacheKeySeparator),
 		cache.WithStrictKeyMatching(p.Config.StrictKeyMatching))
 
