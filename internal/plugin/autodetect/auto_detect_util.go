@@ -57,7 +57,10 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newBazelPreparer(),
 		},
 		{
-			globToDetect: "package.json",
+			// Keyed off package-lock.json (not package.json) so the cache key
+			// reflects the resolved dependency tree, not just declared ranges.
+			// A repo without a committed lockfile won't get node_modules cached.
+			globToDetect: "package-lock.json",
 			tool:         "node",
 			preparer:     newNodePreparer(),
 		},
