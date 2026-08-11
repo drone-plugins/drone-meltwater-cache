@@ -606,6 +606,26 @@ func main() {
 			Usage:   "cache service base url",
 			EnvVars: []string{"PLUGIN_CACHE_SERVICE_BASE_URL"},
 		},
+		&cli.StringFlag{
+			Name:    "org-id",
+			Usage:   "Harness organization identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_ORG_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "project-id",
+			Usage:   "Harness project identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_PROJECT_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "pipeline-id",
+			Usage:   "Harness pipeline identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_PIPELINE_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "stage-id",
+			Usage:   "Harness stage identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_STAGE_ID"},
+		},
 
 		&cli.Int64Flag{
 			Name:    "multipart.chunk.size",
@@ -790,6 +810,10 @@ func run(c *cli.Context) error {
 			AccountID:              c.String("account-id"),
 			Token:                  c.String("cache-service-token"),
 			ServerBaseURL:          c.String("cache-service-baseurl"),
+			OrgID:                  c.String("org-id"),
+			ProjectID:              c.String("project-id"),
+			PipelineID:             c.String("pipeline-id"),
+			StageID:                c.String("stage-id"),
 			CacheType:              c.String("cache-type"),
 			MultipartChunkSize:     c.Int("multipart.chunk.size"),
 			MultipartMaxUploadSize: c.Int("multipart.max.size"),
