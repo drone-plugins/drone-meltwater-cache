@@ -37,6 +37,28 @@ func (*gradlePreparer) PrepareRepo(dir string) (string, error) {
 		return pathToCache, nil
 	}
 
+	// If the file is non-empty and does not end with a newline, prepend one so
+	// appended properties are not concatenated onto the last customer line (CI-24154).
+	info, err := os.Stat(fileName)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > 0 {
+		f, err := os.Open(fileName)
+		if err != nil {
+			return "", err
+		}
+		buf := make([]byte, 1)
+		_, err = f.ReadAt(buf, info.Size()-1)
+		f.Close()
+		if err != nil {
+			return "", err
+		}
+		if buf[0] != '\n' {
+			cmdToOverrideRepo = "\n" + cmdToOverrideRepo
+		}
+	}
+
 	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
 
 	if err != nil {
