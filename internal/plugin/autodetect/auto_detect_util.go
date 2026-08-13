@@ -57,12 +57,12 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newBazelPreparer(),
 		},
 		{
-			// Keyed off package-lock.json (not package.json) so the cache key
-			// reflects the resolved dependency tree, not just declared ranges.
-			// A repo without a committed lockfile won't get node_modules cached.
-			globToDetect: "package-lock.json",
-			tool:         "node",
-			preparer:     newNodePreparer(),
+			// package-lock.json tracks resolved dependencies. Per-project paths
+			// support sibling apps, while a root lockfile covers npm workspaces.
+			globToDetect:  "package-lock.json",
+			tool:          "node",
+			preparer:      newNodePreparer(),
+			usePerProject: true,
 		},
 		{
 			globToDetect: "yarn.lock",
@@ -121,11 +121,11 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			}
 			if hash != "" && !skipPrepare {
 				for _, dir := range dirs {
-					dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
+					var err error
+					directoriesToCache, err = appendPreparedDirs(directoriesToCache, supportedTool.preparer, dir)
 					if err != nil {
 						return nil, nil, "", err
 					}
-					directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
 				}
 				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
 				hashes += hash
@@ -142,12 +142,11 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 				}
 			}
 			if hash != "" && !skipPrepare {
-				dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
+				directoriesToCache, err = appendPreparedDirs(directoriesToCache, supportedTool.preparer, dir)
 				if err != nil {
 					return nil, nil, "", err
 				}
 
-				directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
 				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
 				hashes += hash
 			}
@@ -155,6 +154,33 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 	}
 
 	return directoriesToCache, buildToolsDetected, hashes, nil
+}
+
+// multiPathPreparer supports tools with multiple cache directories.
+type multiPathPreparer interface {
+	PrepareRepoDirs(dir string) ([]string, error)
+}
+
+func cacheDirsFromPreparer(preparer RepoPreparer, dir string) ([]string, error) {
+	if mp, ok := preparer.(multiPathPreparer); ok {
+		return mp.PrepareRepoDirs(dir)
+	}
+	path, err := preparer.PrepareRepo(dir)
+	if err != nil {
+		return nil, err
+	}
+	return []string{path}, nil
+}
+
+func appendPreparedDirs(directoriesToCache []string, preparer RepoPreparer, dir string) ([]string, error) {
+	dirs, err := cacheDirsFromPreparer(preparer, dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range dirs {
+		directoriesToCache = appendIfMissing(directoriesToCache, d)
+	}
+	return directoriesToCache, nil
 }
 
 func appendIfMissing(slice []string, elem string) []string {
