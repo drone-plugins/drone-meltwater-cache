@@ -93,10 +93,11 @@ func (p *Plugin) Exec() error { // nolint:funlen
 		{
 			var toolDetected, keyOverriden bool = false, false
 			pathOverridden := len(p.Config.Mount) > 0
-			dirs, buildTools, cacheKey, err := autodetect.DetectDirectoriesToCache(pathOverridden)
+			dirs, buildTools, detectedHashes, err := autodetect.DetectDirectoriesToCache(pathOverridden)
 			if err != nil {
 				return fmt.Errorf("autodetect enabled but failed to detect, falling back to default, %w", err)
 			}
+			cacheKey := detectedHashes
 			if len(buildTools) > 0 {
 				toolDetected = true
 				p.logger.Log("msg", "build tools detected: "+strings.Join(buildTools, ", ")) //nolint: errcheck
@@ -114,8 +115,28 @@ func (p *Plugin) Exec() error { // nolint:funlen
 			if cfg.CacheKeyTemplate != "" {
 				keyOverriden = true
 				cacheKey = cfg.CacheKeyTemplate
-			} else if cacheKey == "" {
-				cacheKey = "default"
+			} else {
+				// Save prefers the Restore sidecar under .git. If it is gone,
+				// autodetection hashes git-tracked npm files so a generated
+				// lockfile does not change the key. Custom key or skipPrepare
+				// (path override) leave the sidecar alone.
+				if cfg.Rebuild && !pathOverridden {
+					sidecar, ok, err := autodetect.ReadAutoKeySidecar()
+					if err != nil {
+						return fmt.Errorf("read autodetection sidecar, %w", err)
+					}
+					if ok {
+						cacheKey = sidecar
+					}
+				}
+				if cacheKey == "" {
+					cacheKey = "default"
+				}
+			}
+			if cfg.Restore && toolDetected && !keyOverriden && !pathOverridden && detectedHashes != "" {
+				if err := autodetect.WriteAutoKeySidecar(detectedHashes); err != nil {
+					return fmt.Errorf("write autodetection sidecar, %w", err)
+				}
 			}
 
 			/*

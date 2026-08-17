@@ -14,6 +14,8 @@ type buildToolInfo struct {
 	tool          string
 	preparer      RepoPreparer
 	usePerProject bool
+	// detect, if set, replaces glob matching (used by npm: lockfile or package.json).
+	detect func() (string, []string, error)
 }
 
 // containsTool checks if a tool is already in the slice
@@ -57,12 +59,12 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newBazelPreparer(),
 		},
 		{
-			// package-lock.json tracks resolved dependencies. Per-project paths
-			// support sibling apps, while a root lockfile covers npm workspaces.
-			globToDetect:  "package-lock.json",
+			// npm: per-dir lockfile if present, else package.json. Same glob depth
+			// as before (cwd, then one level). Not a second "node" mapping row.
 			tool:          "node",
 			preparer:      newNodePreparer(),
 			usePerProject: true,
+			detect:        detectNpmProjects,
 		},
 		{
 			globToDetect: "yarn.lock",
@@ -108,7 +110,23 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			continue
 		}
 
-		if supportedTool.usePerProject {
+		if supportedTool.detect != nil {
+			hash, dirs, err := supportedTool.detect()
+			if err != nil {
+				return nil, nil, "", err
+			}
+			if hash != "" && !skipPrepare {
+				for _, dir := range dirs {
+					var err error
+					directoriesToCache, err = appendPreparedDirs(directoriesToCache, supportedTool.preparer, dir)
+					if err != nil {
+						return nil, nil, "", err
+					}
+				}
+				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
+				hashes += hash
+			}
+		} else if supportedTool.usePerProject {
 			hash, dirs, err := hashAllFilesPerProjectIfExist(supportedTool.globToDetect)
 			if err != nil {
 				return nil, nil, "", err
