@@ -52,6 +52,10 @@ type Backend struct {
 // New creates an Harness backend.
 func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	cacheClient := harness.NewWithLogger(c.ServerBaseURL, c.AccountID, c.Token, false, l)
+	cacheClient.OrgID = c.OrgID
+	cacheClient.ProjectID = c.ProjectID
+	cacheClient.PipelineID = c.PipelineID
+	cacheClient.StageID = c.StageID
 	backend := &Backend{
 		logger: l,
 		token:  c.Token,
