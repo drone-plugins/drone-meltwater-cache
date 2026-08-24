@@ -9,74 +9,77 @@ import (
 )
 
 const (
-	npmCacheDirName = ".npm"
-	npmrcFileName   = ".npmrc"
+	npmrcFileName = ".npmrc"
+
+	// harnessNpmCacheDefault is a temporary Linux/Kubernetes contract. It must
+	// match the Harness Run-step npm_config_cache injection and can be replaced
+	// once the engine supplies an explicit cache path contract.
+	harnessNpmCacheDefault = "/harness/.npm"
 )
 
-type nodePreparer struct{}
-
-func newNodePreparer() *nodePreparer {
-	return &nodePreparer{}
-}
-
-func (p *nodePreparer) PrepareRepo(dir string) (string, error) {
-	dirs, err := p.PrepareRepoDirs(dir)
-	if err != nil {
-		return "", err
-	}
-	if len(dirs) == 0 {
-		return "", fmt.Errorf("node preparer returned no cache directories")
-	}
-	return dirs[0], nil
-}
-
-// PrepareRepoDirs caches node_modules and npm's tarball cache, which npm ci can
-// reuse after deleting node_modules. Cache precedence is environment, project
-// .npmrc, then <dir>/.npm; the default is written to .npmrc for later npm runs.
-func (*nodePreparer) PrepareRepoDirs(dir string) ([]string, error) {
-	nodeModules := filepath.Join(dir, "node_modules")
+func npmCacheDirs(dir string, keyedFromLockfile bool) ([]string, error) {
 	npmCache, err := resolveNpmTarballCache(dir)
 	if err != nil {
 		return nil, err
 	}
-	return []string{nodeModules, npmCache}, nil
+
+	var dirs []string
+	if keyedFromLockfile {
+		dirs = append(dirs, filepath.Join(dir, nodeModulesDirName))
+	}
+	if npmCache != "" {
+		dirs = append(dirs, npmCache)
+	}
+	return dirs, nil
 }
 
-func npmCacheFromEnv() string {
-	if v := os.Getenv("npm_config_cache"); v != "" {
-		return v
-	}
-	return os.Getenv("NPM_CONFIG_CACHE")
+type npmCacheSource struct {
+	name              string
+	value             func(string) (string, error)
+	relativeToProject bool
+}
+
+var npmCacheSources = []npmCacheSource{
+	{
+		name:  "npm_config_cache",
+		value: func(string) (string, error) { return os.Getenv("npm_config_cache"), nil },
+	},
+	{
+		name:  "npm_config_cache",
+		value: func(string) (string, error) { return os.Getenv("NPM_CONFIG_CACHE"), nil },
+	},
+	{
+		name: ".npmrc cache",
+		value: func(dir string) (string, error) {
+			return npmrcCacheValue(filepath.Join(dir, npmrcFileName))
+		},
+		relativeToProject: true,
+	},
+	{
+		name:  "Harness npm cache",
+		value: func(string) (string, error) { return harnessNpmCacheDefault, nil },
+	},
 }
 
 func resolveNpmTarballCache(dir string) (string, error) {
-	if env := npmCacheFromEnv(); env != "" {
-		absPath, err := filepath.Abs(env)
+	for _, source := range npmCacheSources {
+		path, err := source.value(dir)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve npm_config_cache path %q: %w", env, err)
+			return "", err
+		}
+		if path == "" {
+			continue
+		}
+		if source.relativeToProject && !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve %s path %q: %w", source.name, path, err)
 		}
 		return filepath.Clean(absPath), nil
 	}
-
-	npmrcPath := filepath.Join(dir, npmrcFileName)
-	if existing, err := npmrcCacheValue(npmrcPath); err != nil {
-		return "", err
-	} else if existing != "" {
-		if !filepath.IsAbs(existing) {
-			existing = filepath.Join(dir, existing)
-		}
-		absPath, err := filepath.Abs(existing)
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve .npmrc cache path %q: %w", existing, err)
-		}
-		return filepath.Clean(absPath), nil
-	}
-
-	pathToCache := filepath.Join(dir, npmCacheDirName)
-	if err := writeNpmrcCache(npmrcPath, pathToCache); err != nil {
-		return "", err
-	}
-	return pathToCache, nil
+	return "", nil
 }
 
 func npmrcCacheValue(path string) (string, error) {
@@ -109,15 +112,4 @@ func npmrcCacheValue(path string) (string, error) {
 		return "", err
 	}
 	return found, nil
-}
-
-func writeNpmrcCache(npmrcPath, cacheDir string) error {
-	line := fmt.Sprintf("\ncache=%s\n", cacheDir)
-	f, err := os.OpenFile(npmrcPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line)
-	return err
 }

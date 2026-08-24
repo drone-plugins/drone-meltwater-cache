@@ -2,8 +2,8 @@ package plugin
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -18,188 +18,238 @@ import (
 	"github.com/meltwater/drone-cache/test"
 )
 
-func TestExecRestoreWritesSidecarAndSaveReusesIt(t *testing.T) {
+func TestAutoCacheKey(t *testing.T) {
+	test.Equals(t, "acct/manifest-hash", autoCacheKey("acct", "manifest-hash"))
+}
+
+// A project with no committed lockfile is the case the recorded plan exists for.
+// The restore step keys off package.json; npm install then writes a lockfile, so
+// a save step running detection itself would pick a different key and a
+// different path set, and the remote object name embeds both. This walks two
+// consecutive builds and asserts the second one actually hits.
+func TestExecSaveReplaysRestorePlanAcrossBuilds(t *testing.T) {
 	npmCache := t.TempDir()
 	t.Setenv("npm_config_cache", npmCache)
 	t.Setenv("NPM_CONFIG_CACHE", "")
+	setPluginPlanScope(t, "execution-1", "build", "0")
+	t.Setenv("HARNESS_WORKSPACE", t.TempDir())
 	t.Chdir(t.TempDir())
-	test.Ok(t, os.Mkdir(".git", 0755))
 
 	pkg := `{"name":"app","version":"1.0.0"}`
 	test.Ok(t, os.WriteFile("package.json", []byte(pkg), 0644))
+
 	cacheRoot := t.TempDir()
 
-	p := autoDetectPlugin(t, cacheRoot, true, false, "")
-	_ = p.Exec() // cold restore may miss; sidecar is written before fetch
+	// Build 1, restore: cold cache, so the fetch misses. The plan is still
+	// recorded, which is the part that matters here.
+	_ = autoDetectPlugin(t, cacheRoot, true, false, "").Exec()
 
-	sidecar, ok, err := autodetect.ReadAutoKeySidecar()
+	plan, found, err := autodetect.ReadAutoDetectPlan()
 	test.Ok(t, err)
-	test.Assert(t, ok, "restore should write sidecar")
-	_, err = os.Stat(filepath.Join(".git", "cache-intelligence-auto-key"))
-	test.Ok(t, err)
+	test.Assert(t, found, "the restore step should record a plan")
+	test.Assert(t, len(plan.Sources) == 1, "package.json-only restore should record one source identity")
 
+	// npm install: resolves the tree, writes a lockfile, fills the tarball cache.
 	test.Ok(t, os.WriteFile("package-lock.json", []byte("generated-lock"), 0644))
-	test.Ok(t, os.MkdirAll(filepath.Join("node_modules", "pkg"), 0755))
-	test.Ok(t, os.WriteFile(filepath.Join("node_modules", "pkg", "index.js"), []byte("ok"), 0644))
+	test.Ok(t, os.MkdirAll(filepath.Join(npmCache, "_cacache"), 0755))
+	test.Ok(t, os.WriteFile(filepath.Join(npmCache, "_cacache", "index"), []byte("tarballs"), 0644))
 
-	save := autoDetectPlugin(t, cacheRoot, false, true, "")
-	test.Ok(t, save.Exec())
+	// Build 1, save.
+	test.Ok(t, autoDetectPlugin(t, cacheRoot, false, true, "").Exec())
 
-	after, ok, err := autodetect.ReadAutoKeySidecar()
+	objects := cacheObjects(t, cacheRoot)
+	test.Assert(t, len(objects) > 0, "the save step should write cache objects")
+	for _, obj := range objects {
+		test.Assert(t, strings.Contains(obj, plan.Key),
+			"object %s should be stored under the key the restore step resolved (%s)", obj, plan.Key)
+		test.Assert(t, !strings.Contains(obj, "node_modules"),
+			"node_modules must not be cached without a lockfile, got %s", obj)
+	}
+	_, found, err = autodetect.ReadAutoDetectPlan()
 	test.Ok(t, err)
-	test.Assert(t, ok, "sidecar should remain for save")
-	test.Equals(t, sidecar, after)
+	test.Assert(t, !found, "a successful save must consume its plan")
 
-	var found int
-	_ = filepath.Walk(cacheRoot, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
-			found++
-		}
-		return nil
-	})
-	test.Assert(t, found > 0, "save should write cache objects")
+	// Build 2: a fresh checkout has package.json but not the generated lockfile,
+	// a fresh temp path, and an empty tarball cache.
+	test.Ok(t, os.Remove("package-lock.json"))
+	test.Ok(t, os.RemoveAll(npmCache))
+	test.Ok(t, os.MkdirAll(npmCache, 0755))
+	setPluginPlanScope(t, "execution-2", "build", "0")
+	t.Setenv("HARNESS_WORKSPACE", t.TempDir())
+
+	test.Ok(t, autoDetectPlugin(t, cacheRoot, true, false, "").Exec())
+
+	restored, err := os.ReadFile(filepath.Join(npmCache, "_cacache", "index"))
+	test.Ok(t, err)
+	test.Equals(t, "tarballs", string(restored))
 }
 
-func TestExecSaveWithoutSidecarIgnoresUntrackedLockfile(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
+func TestExecMissingPlanSkipsSave(t *testing.T) {
 	npmCache := t.TempDir()
 	t.Setenv("npm_config_cache", npmCache)
 	t.Setenv("NPM_CONFIG_CACHE", "")
+	setPluginPlanScope(t, "execution-1", "build", "0")
+	t.Setenv("HARNESS_WORKSPACE", t.TempDir())
 	t.Chdir(t.TempDir())
 
-	cmd := exec.Command("git", "init")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
-	}
-
-	pkg := `{"name":"app","version":"1.0.0"}`
-	test.Ok(t, os.WriteFile("package.json", []byte(pkg), 0644))
-	add := exec.Command("git", "add", "package.json")
-	out, err = add.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git add: %v: %s", err, out)
-	}
-	commit := exec.Command("git", "-c", "user.name=test", "-c", "user.email=test@test.local", "-c", "commit.gpgsign=false", "commit", "-m", "init")
-	out, err = commit.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git commit: %v: %s", err, out)
-	}
-
-	cacheRoot := t.TempDir()
-	restore := autoDetectPlugin(t, cacheRoot, true, false, "")
-	_ = restore.Exec()
-
-	sidecar, ok, err := autodetect.ReadAutoKeySidecar()
-	test.Ok(t, err)
-	test.Assert(t, ok, "restore should write sidecar")
-	test.Ok(t, os.Remove(filepath.Join(".git", "cache-intelligence-auto-key")))
-
-	test.Ok(t, os.WriteFile("package-lock.json", []byte("generated-lock"), 0644))
-	test.Ok(t, os.MkdirAll(filepath.Join("node_modules", "pkg"), 0755))
-	test.Ok(t, os.WriteFile(filepath.Join("node_modules", "pkg", "index.js"), []byte("ok"), 0644))
-
-	save := autoDetectPlugin(t, cacheRoot, false, true, "")
-	test.Ok(t, save.Exec())
-
-	test.Ok(t, os.RemoveAll("node_modules"))
-	restore2 := autoDetectPlugin(t, cacheRoot, true, false, "")
-	test.Ok(t, restore2.Exec())
-
-	data, err := os.ReadFile(filepath.Join("node_modules", "pkg", "index.js"))
-	test.Ok(t, err)
-	test.Equals(t, "ok", string(data))
-	test.Equals(t, sidecar, mustReadSidecar(t))
-}
-
-func TestExecRestoreSidecarLeavesGitStatusClean(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	npmCache := t.TempDir()
-	t.Setenv("npm_config_cache", npmCache)
-	t.Setenv("NPM_CONFIG_CACHE", "")
-	t.Chdir(t.TempDir())
-
-	cmd := exec.Command("git", "init")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
-	}
 	test.Ok(t, os.WriteFile("package.json", []byte(`{"name":"app"}`), 0644))
-	add := exec.Command("git", "add", "package.json")
-	out, err = add.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git add: %v: %s", err, out)
-	}
-	commit := exec.Command("git", "-c", "user.name=test", "-c", "user.email=test@test.local", "-c", "commit.gpgsign=false", "commit", "-m", "init")
-	out, err = commit.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git commit: %v: %s", err, out)
-	}
+	test.Ok(t, os.WriteFile("package-lock.json", []byte("committed-lock"), 0644))
+	test.Ok(t, os.MkdirAll("node_modules", 0755))
+	test.Ok(t, os.WriteFile(filepath.Join("node_modules", "index.js"), []byte("ok"), 0644))
+	test.Ok(t, os.MkdirAll(filepath.Join(npmCache, "_cacache"), 0755))
+	test.Ok(t, os.WriteFile(filepath.Join(npmCache, "_cacache", "index"), []byte("tarballs"), 0644))
+
+	cacheRoot := t.TempDir()
+	test.Ok(t, autoDetectPlugin(t, cacheRoot, false, true, "").Exec())
+
+	test.Equals(t, 0, len(cacheObjects(t, cacheRoot)))
+}
+
+func TestExecPackageJSONOnlyWithEmptyTarballCacheCompletes(t *testing.T) {
+	t.Setenv("npm_config_cache", t.TempDir())
+	t.Setenv("NPM_CONFIG_CACHE", "")
+	setPluginPlanScope(t, "execution-1", "build", "0")
+	t.Setenv("HARNESS_WORKSPACE", t.TempDir())
+	t.Chdir(t.TempDir())
+	test.Ok(t, os.WriteFile("package.json", []byte(`{"name":"app"}`), 0644))
+
+	cacheRoot := t.TempDir()
+	_ = autoDetectPlugin(t, cacheRoot, true, false, "").Exec() // cold cache miss
+	test.Ok(t, autoDetectPlugin(t, cacheRoot, false, true, "").Exec())
+	test.Equals(t, 1, len(cacheObjects(t, cacheRoot)))
+
+	_, found, err := autodetect.ReadAutoDetectPlan()
+	test.Ok(t, err)
+	test.Assert(t, !found, "a successful save must consume the restore plan")
+	_, statErr := os.Stat(".npmrc")
+	test.Assert(t, os.IsNotExist(statErr), ".npmrc must not be created")
+}
+
+func TestExecCorruptPlanSkipsSaveAndCleansPlan(t *testing.T) {
+	npmCache := t.TempDir()
+	t.Setenv("npm_config_cache", npmCache)
+	t.Setenv("NPM_CONFIG_CACHE", "")
+	setPluginPlanScope(t, "execution-1", "build", "0")
+	workspace := t.TempDir()
+	t.Setenv("HARNESS_WORKSPACE", workspace)
+	t.Chdir(t.TempDir())
+	test.Ok(t, os.WriteFile("package.json", []byte(`{"name":"app"}`), 0644))
+
+	cacheRoot := t.TempDir()
+	_ = autoDetectPlugin(t, cacheRoot, true, false, "").Exec()
+	plans, err := filepath.Glob(filepath.Join(workspace, ".cache-intelligence", "*.json"))
+	test.Ok(t, err)
+	test.Equals(t, 1, len(plans))
+	test.Ok(t, os.WriteFile(plans[0], []byte(`{"key":`), 0600))
+
+	test.Ok(t, autoDetectPlugin(t, cacheRoot, false, true, "").Exec())
+	test.Equals(t, 0, len(cacheObjects(t, cacheRoot)))
+	_, err = os.Stat(plans[0])
+	test.Assert(t, os.IsNotExist(err), "corrupt plan should be removed safely")
+}
+
+func TestExecFailedSaveRetainsPlanForRetry(t *testing.T) {
+	t.Setenv("npm_config_cache", t.TempDir())
+	t.Setenv("NPM_CONFIG_CACHE", "")
+	setPluginPlanScope(t, "execution-1", "build", "0")
+	t.Setenv("HARNESS_WORKSPACE", t.TempDir())
+	t.Chdir(t.TempDir())
+	test.Ok(t, os.WriteFile("package-lock.json", []byte("lock"), 0644))
+	test.Ok(t, os.MkdirAll("node_modules", 0755))
+	test.Ok(t, os.WriteFile(filepath.Join("node_modules", "index.js"), []byte("ok"), 0644))
+
+	_ = autoDetectPlugin(t, t.TempDir(), true, false, "").Exec()
+	badCacheRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	test.Ok(t, os.WriteFile(badCacheRoot, []byte("x"), 0600))
+	err := autoDetectPlugin(t, badCacheRoot, false, true, "").Exec()
+	test.NotOk(t, err)
+
+	_, found, readErr := autodetect.ReadAutoDetectPlan()
+	test.Ok(t, readErr)
+	test.Assert(t, found, "failed save must retain the plan for an in-execution retry")
+}
+
+func TestExecCustomCacheKeyDoesNotRecordPlan(t *testing.T) {
+	t.Setenv("npm_config_cache", t.TempDir())
+	t.Setenv("NPM_CONFIG_CACHE", "")
+	setPluginPlanScope(t, "execution-1", "build", "0")
+	t.Setenv("HARNESS_WORKSPACE", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	test.Ok(t, os.WriteFile("package.json", []byte(`{"name":"app"}`), 0644))
+
+	_ = autoDetectPlugin(t, t.TempDir(), true, false, "user-key").Exec()
+
+	_, found, err := autodetect.ReadAutoDetectPlan()
+	test.Ok(t, err)
+	test.Assert(t, !found, "a custom cache key must not record an autodetection plan")
+}
+
+func TestExecCustomMountPathDoesNotRecordPlan(t *testing.T) {
+	t.Setenv("npm_config_cache", t.TempDir())
+	t.Setenv("NPM_CONFIG_CACHE", "")
+	setPluginPlanScope(t, "execution-1", "build", "0")
+	t.Setenv("HARNESS_WORKSPACE", t.TempDir())
+	t.Chdir(t.TempDir())
+
+	test.Ok(t, os.WriteFile("package.json", []byte(`{"name":"app"}`), 0644))
+
+	mounted := t.TempDir()
+	test.Ok(t, os.WriteFile(filepath.Join(mounted, "keep"), []byte("x"), 0644))
 
 	p := autoDetectPlugin(t, t.TempDir(), true, false, "")
+	p.Config.Mount = []string{mounted}
 	_ = p.Exec()
 
-	_, err = os.Stat(filepath.Join(".git", "cache-intelligence-auto-key"))
+	_, found, err := autodetect.ReadAutoDetectPlan()
 	test.Ok(t, err)
-	status := exec.Command("git", "status", "--porcelain")
-	out, err = status.Output()
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	test.Equals(t, "", strings.TrimSpace(string(out)))
+	test.Assert(t, !found, "a custom mount path must not record an autodetection plan")
+	test.Equals(t, 0, len(cacheObjects(t, p.Config.FileSystem.CacheRoot)))
 }
 
-func TestExecCustomCacheKeyDoesNotUseSidecar(t *testing.T) {
-	t.Setenv("npm_config_cache", "")
-	t.Setenv("NPM_CONFIG_CACHE", "")
-	t.Chdir(t.TempDir())
-	test.Ok(t, os.Mkdir(".git", 0755))
-	test.Ok(t, os.WriteFile("package.json", []byte(`{"name":"app"}`), 0644))
-	test.Ok(t, autodetect.WriteAutoKeySidecar("sidecar-hash"))
-
-	cacheRoot := t.TempDir()
-	save := autoDetectPlugin(t, cacheRoot, false, true, "user-key")
-	test.Ok(t, save.Exec())
-
-	sidecar, ok, err := autodetect.ReadAutoKeySidecar()
-	test.Ok(t, err)
-	test.Assert(t, ok, "custom key must not consume/remove sidecar")
-	test.Equals(t, "sidecar-hash", sidecar)
-}
-
-func TestExecSkipPrepareDoesNotWriteSidecar(t *testing.T) {
-	t.Setenv("npm_config_cache", "")
-	t.Setenv("NPM_CONFIG_CACHE", "")
-	t.Chdir(t.TempDir())
-	test.Ok(t, os.Mkdir(".git", 0755))
-	test.Ok(t, os.WriteFile("package.json", []byte(`{"name":"app"}`), 0644))
-	empty := t.TempDir()
-	test.Ok(t, os.WriteFile(filepath.Join(empty, "keep"), []byte("x"), 0644))
-
-	cacheRoot := t.TempDir()
-	p := autoDetectPlugin(t, cacheRoot, true, false, "")
-	p.Config.Mount = []string{empty}
-	_ = p.Exec()
-
-	_, ok, err := autodetect.ReadAutoKeySidecar()
-	test.Ok(t, err)
-	test.Assert(t, !ok, "skipPrepare restore must not write sidecar")
-}
-
-func mustReadSidecar(t *testing.T) string {
+func setPluginPlanScope(t *testing.T, execution, stage, matrix string) {
 	t.Helper()
-	sidecar, ok, err := autodetect.ReadAutoKeySidecar()
-	test.Ok(t, err)
-	test.Assert(t, ok, "expected sidecar")
-	return sidecar
+	t.Setenv("HARNESS_TMP_PATH", "")
+	t.Setenv("HARNESS_SCRATCH_DIR", "")
+	t.Setenv("HARNESS_EXECUTION_ID", execution)
+	t.Setenv("HARNESS_STAGE_ID", stage)
+	t.Setenv("HARNESS_PIPELINE_ID", "pipeline")
+	t.Setenv("DRONE_REPO", "org/repo")
+	t.Setenv("HARNESS_STAGE_INDEX", matrix)
+}
+
+func cacheObjects(t *testing.T, root string) []string {
+	t.Helper()
+
+	var out []string
+
+	test.Ok(t, filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+
+		out = append(out, filepath.ToSlash(rel))
+
+		return nil
+	}))
+
+	sort.Strings(out)
+
+	return out
 }
 
 func autoDetectPlugin(t *testing.T, cacheRoot string, restore, rebuild bool, key string) *Plugin {
 	t.Helper()
+
 	return &Plugin{
 		logger: log.NewNopLogger(),
 		Metadata: metadata.Metadata{

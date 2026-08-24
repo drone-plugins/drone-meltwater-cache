@@ -3,7 +3,9 @@ package autodetect
 import (
 	"crypto/md5" // #nosec
 	"encoding/hex"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -384,6 +386,10 @@ func relCacheDirs(t *testing.T, wd string, dirs []string) []string {
 	}
 	rel := make([]string, 0, len(dirs))
 	for _, d := range dirs {
+		if d == harnessNpmCacheDefault {
+			rel = append(rel, d)
+			continue
+		}
 		r, err := filepath.Rel(wd, d)
 		test.Ok(t, err)
 		rel = append(rel, r)
@@ -424,17 +430,17 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 		wantNoDetect bool
 	}{
 		{
-			name:      "root package-lock.json caches node_modules and .npm",
+			name:      "root package-lock.json caches node_modules",
 			files:     map[string]string{packageLockFile: lockA},
 			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
+			wantDirs:  []string{"node_modules", harnessNpmCacheDefault},
 			wantHash:  md5Hex(lockA),
 		},
 		{
-			name:      "package.json alone hashes package.json and still mounts npm dirs",
+			name:      "package.json alone caches the shared tarball directory",
 			files:     map[string]string{packageJSONFile: pkgA},
 			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
+			wantDirs:  []string{harnessNpmCacheDefault},
 			wantHash:  md5Hex(pkgA),
 		},
 		{
@@ -444,7 +450,7 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 				packageLockFile: lockA,
 			},
 			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
+			wantDirs:  []string{"node_modules", harnessNpmCacheDefault},
 			wantHash:  md5Hex(lockA),
 		},
 		{
@@ -453,7 +459,7 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 				packageLockFile: "",
 			},
 			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
+			wantDirs:  []string{"node_modules", harnessNpmCacheDefault},
 			wantHash:  md5Hex(""),
 		},
 		{
@@ -473,7 +479,7 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 				yarnLockFile:    lockB,
 			},
 			wantTools: []string{toolNode, toolYarn},
-			wantDirs:  []string{"node_modules", ".npm", ".yarn"},
+			wantDirs:  []string{"node_modules", harnessNpmCacheDefault, ".yarn"},
 			wantHash:  md5Hex(lockA) + md5Hex(lockB),
 		},
 		{
@@ -483,7 +489,7 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 				packageLockFile: lockB,
 			},
 			wantTools: []string{toolMaven, toolNode},
-			wantDirs:  []string{toolMavenDir, "node_modules", ".npm"},
+			wantDirs:  []string{toolMavenDir, "node_modules", harnessNpmCacheDefault},
 			wantHash:  md5Hex(lockA) + md5Hex(lockB),
 		},
 		{
@@ -493,7 +499,7 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 				filepath.Join("packages", packageLockFile): lockB,
 			},
 			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
+			wantDirs:  []string{"node_modules", harnessNpmCacheDefault},
 			wantHash:  md5Hex(lockA),
 		},
 		{
@@ -503,22 +509,21 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 				filepath.Join("packages", "app", packageLockFile): lockB,
 			},
 			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
+			wantDirs:  []string{"node_modules", harnessNpmCacheDefault},
 			wantHash:  md5Hex(lockA),
 		},
 		{
-			name: "nested package.json without a lockfile is detected at one level",
+			name: "nested package.json uses shared tarball cache",
 			files: map[string]string{
 				filepath.Join("nested-app", packageJSONFile): pkgA,
 			},
 			wantTools: []string{toolNode},
-			wantDirs: []string{
-				filepath.Join("nested-app", "node_modules"),
-				filepath.Join("nested-app", ".npm"),
-			},
-			wantHash: md5Hex(pkgA),
+			wantDirs:  []string{harnessNpmCacheDefault},
+			wantHash:  md5Hex(pkgA),
 		},
 		{
+			// node_modules is decided per project while the Harness tarball
+			// cache is shared and deduplicated across siblings.
 			name: "mixed siblings: lockfile dir plus json-only dir",
 			files: map[string]string{
 				filepath.Join("backend", packageLockFile):  lockA,
@@ -527,9 +532,7 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 			wantTools: []string{toolNode},
 			wantDirs: []string{
 				filepath.Join("backend", "node_modules"),
-				filepath.Join("backend", ".npm"),
-				filepath.Join("frontend", "node_modules"),
-				filepath.Join("frontend", ".npm"),
+				harnessNpmCacheDefault,
 			},
 			wantHash: md5Concat(lockA, pkgA),
 		},
@@ -558,12 +561,12 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 			wantTools: []string{toolNode},
 			wantDirs: []string{
 				filepath.Join("nested-app", "node_modules"),
-				filepath.Join("nested-app", ".npm"),
+				harnessNpmCacheDefault,
 			},
 			wantHash: md5Hex(lockA),
 		},
 		{
-			name: "sibling apps without a root lockfile each get node_modules and .npm",
+			name: "one-level sibling lockfiles each get node_modules",
 			files: map[string]string{
 				filepath.Join("backend", packageLockFile):  lockA,
 				filepath.Join("frontend", packageLockFile): lockB,
@@ -571,9 +574,8 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 			wantTools: []string{toolNode},
 			wantDirs: []string{
 				filepath.Join("backend", "node_modules"),
-				filepath.Join("backend", ".npm"),
+				harnessNpmCacheDefault,
 				filepath.Join("frontend", "node_modules"),
-				filepath.Join("frontend", ".npm"),
 			},
 			wantHash: md5Concat(lockA, lockB),
 		},
@@ -587,16 +589,14 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 			wantTools: []string{toolNode},
 			wantDirs: []string{
 				filepath.Join("a", "node_modules"),
-				filepath.Join("a", ".npm"),
+				harnessNpmCacheDefault,
 				filepath.Join("b", "node_modules"),
-				filepath.Join("b", ".npm"),
 				filepath.Join("c", "node_modules"),
-				filepath.Join("c", ".npm"),
 			},
 			wantHash: md5Concat(lockA, lockB, pkgA),
 		},
 		{
-			name: "existing .npmrc cache= is honored instead of default .npm",
+			name: "existing .npmrc cache is honored",
 			files: map[string]string{
 				packageLockFile: lockA,
 				npmrcFileName:   "registry=https://example.invalid\ncache=custom-npm\n",
@@ -621,25 +621,6 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 			wantNoDetect: true,
 		},
 		{
-			name: "npm-shrinkwrap.json is hashed when package-lock.json is absent",
-			files: map[string]string{
-				"npm-shrinkwrap.json": lockA,
-			},
-			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
-			wantHash:  md5Hex(lockA),
-		},
-		{
-			name: "package-lock.json wins over npm-shrinkwrap.json",
-			files: map[string]string{
-				packageLockFile:       lockA,
-				"npm-shrinkwrap.json": lockB,
-			},
-			wantTools: []string{toolNode},
-			wantDirs:  []string{"node_modules", ".npm"},
-			wantHash:  md5Hex(lockA),
-		},
-		{
 			name: "bun.lock with package.json is not npm",
 			files: map[string]string{
 				packageJSONFile: pkgA,
@@ -651,6 +632,13 @@ func TestDetectDirectoriesToCacheNode(t *testing.T) {
 			name: "bun.lockb is not detected",
 			files: map[string]string{
 				"bun.lockb": lockA,
+			},
+			wantNoDetect: true,
+		},
+		{
+			name: "node_modules alone is not an npm project",
+			files: map[string]string{
+				filepath.Join(nodeModulesDirName, "index.js"): lockA,
 			},
 			wantNoDetect: true,
 		},
@@ -707,6 +695,40 @@ func TestDetectDirectoriesToCacheNodeLockfileHashIgnoresPackageJSON(t *testing.T
 
 	test.Equals(t, hash1, hash2)
 	test.Equals(t, md5Hex("stable-lock"), hash1)
+}
+
+func TestDetectDirectoriesToCacheNodeLockfileHashIgnoresNodeModules(t *testing.T) {
+	clearNpmCacheEnv(t)
+	t.Chdir(t.TempDir())
+	writeRepoFiles(t, map[string]string{
+		packageLockFile: "stable-lock",
+		filepath.Join(nodeModulesDirName, "index.js"): "version-one",
+	})
+
+	_, _, hash1, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.WriteFile(filepath.Join(nodeModulesDirName, "index.js"), []byte("version-two"), 0644))
+	_, _, hash2, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, md5Hex("stable-lock"), hash1)
+	test.Equals(t, hash1, hash2)
+}
+
+func TestDetectDirectoriesToCacheNodePackageJSONDoesNotCacheNodeModules(t *testing.T) {
+	clearNpmCacheEnv(t)
+	t.Chdir(t.TempDir())
+	writeRepoFiles(t, map[string]string{
+		packageJSONFile: `{"name":"app"}`,
+		filepath.Join(nodeModulesDirName, "index.js"): "installed",
+	})
+
+	dirs, tools, hash, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{harnessNpmCacheDefault}, dirs)
+	test.Equals(t, []string{toolNode}, tools)
+	test.Equals(t, md5Hex(`{"name":"app"}`), hash)
 }
 
 func TestDetectDirectoriesToCacheNodeLockfileChangeInvalidatesHash(t *testing.T) {
@@ -805,7 +827,8 @@ func TestDetectDirectoriesToCacheNodeSkipPrepareDoesNotWriteNpmrc(t *testing.T) 
 }
 
 func TestDetectDirectoriesToCacheNodePackageJSONChangeInvalidatesHash(t *testing.T) {
-	clearNpmCacheEnv(t)
+	t.Setenv("npm_config_cache", t.TempDir())
+	t.Setenv("NPM_CONFIG_CACHE", "")
 	t.Chdir(t.TempDir())
 	writeRepoFiles(t, map[string]string{
 		packageJSONFile: `{"name":"app","version":"1.0.0"}`,
@@ -823,119 +846,109 @@ func TestDetectDirectoriesToCacheNodePackageJSONChangeInvalidatesHash(t *testing
 	test.Equals(t, md5Hex(`{"name":"app","version":"1.0.0"}`), hash1)
 }
 
-func TestDetectDirectoriesToCacheNodeSaveReusesRestoreSidecarAfterLockfile(t *testing.T) {
+func TestDetectDirectoriesToCacheNodeBecomesCacheableAfterLockfileAppears(t *testing.T) {
 	clearNpmCacheEnv(t)
 	t.Chdir(t.TempDir())
-	test.Ok(t, os.Mkdir(".git", 0755))
-	writeRepoFiles(t, map[string]string{
-		packageJSONFile: `{"name":"app","version":"1.0.0"}`,
-	})
-
-	dirs, tools, restoreHash, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-	test.Equals(t, []string{toolNode}, tools)
-	test.Equals(t, md5Hex(`{"name":"app","version":"1.0.0"}`), restoreHash)
-	test.Ok(t, WriteAutoKeySidecar(restoreHash))
-
-	// npm install wrote a lockfile; Save must still use Restore's key.
-	test.Ok(t, os.WriteFile(packageLockFile, []byte("generated-lock"), 0644))
-
-	saveDirs, saveTools, saveHash, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-	test.Equals(t, []string{toolNode}, saveTools)
-	test.Equals(t, md5Hex("generated-lock"), saveHash)
-	test.Assert(t, restoreHash != saveHash, "redetect after lockfile must differ")
-
-	sidecar, ok, err := ReadAutoKeySidecar()
-	test.Ok(t, err)
-	test.Assert(t, ok, "expected restore sidecar")
-	test.Equals(t, restoreHash, sidecar)
-	_, err = os.Stat(filepath.Join(".git", autoKeyFile))
-	test.Ok(t, err)
-
-	test.Equals(t, relCacheDirs(t, mustWd(t), dirs), relCacheDirs(t, mustWd(t), saveDirs))
-}
-
-func TestDetectDirectoriesToCacheNodeTrackedOnlyIgnoresUntrackedLockfile(t *testing.T) {
-	requireGit(t)
-	clearNpmCacheEnv(t)
-	t.Chdir(t.TempDir())
-	gitInit(t)
 
 	pkg := `{"name":"app","version":"1.0.0"}`
 	writeRepoFiles(t, map[string]string{packageJSONFile: pkg})
-	gitAdd(t, packageJSONFile)
 
-	_, _, restoreHash, err := DetectDirectoriesToCache(false)
+	restoreDirs, tools, restoreHash, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
+	test.Equals(t, []string{harnessNpmCacheDefault}, relCacheDirs(t, mustWd(t), restoreDirs))
+	test.Equals(t, []string{toolNode}, tools)
 	test.Equals(t, md5Hex(pkg), restoreHash)
 
+	// npm install resolves the tree and writes a lockfile.
 	test.Ok(t, os.WriteFile(packageLockFile, []byte("generated-lock"), 0644))
 
-	_, _, saveHash, err := DetectDirectoriesToCache(false)
+	saveDirs, _, saveHash, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
-	test.Equals(t, restoreHash, saveHash)
-	test.Equals(t, md5Hex(pkg), saveHash)
+
+	test.Equals(t, md5Hex("generated-lock"), saveHash)
+	test.Equals(t, []string{"node_modules", harnessNpmCacheDefault}, relCacheDirs(t, mustWd(t), saveDirs))
 }
 
-func TestDetectDirectoriesToCacheNodeTrackedLockfileWins(t *testing.T) {
-	requireGit(t)
-	clearNpmCacheEnv(t)
-	t.Chdir(t.TempDir())
-	gitInit(t)
+func TestAutoDetectPlanRoundTrip(t *testing.T) {
+	t.Setenv(harnessWorkspaceEnv, t.TempDir())
+	setPlanScope(t, "execution-7", "build", "0")
 
-	pkg := `{"name":"app","version":"1.0.0"}`
-	writeRepoFiles(t, map[string]string{
-		packageJSONFile: pkg,
-		packageLockFile: "committed-lock",
-	})
-	gitAdd(t, packageJSONFile, packageLockFile)
+	want := AutoDetectPlan{
+		Key:     "abc123",
+		Sources: []string{strings.Repeat("a", 64)},
+	}
+	test.Ok(t, WriteAutoDetectPlan(want))
 
-	_, tools, hash, err := DetectDirectoriesToCache(false)
+	got, found, err := ReadAutoDetectPlan()
 	test.Ok(t, err)
-	test.Equals(t, []string{toolNode}, tools)
-	test.Equals(t, md5Hex("committed-lock"), hash)
+	test.Assert(t, found, "expected the recorded plan to be found")
+	test.Equals(t, want.Key, got.Key)
+	test.Equals(t, want.Sources, got.Sources)
+	test.Assert(t, got.Scope != "", "scope must be recorded")
 }
 
-func TestDetectDirectoriesToCacheNodeTrackedJSONOnly(t *testing.T) {
-	requireGit(t)
-	clearNpmCacheEnv(t)
-	t.Chdir(t.TempDir())
-	gitInit(t)
+func TestAutoDetectPlanMissingFileIsNotAnError(t *testing.T) {
+	t.Setenv(harnessWorkspaceEnv, t.TempDir())
+	setPlanScope(t, "execution-7", "build", "0")
 
-	pkg := `{"name":"app","version":"1.0.0"}`
-	writeRepoFiles(t, map[string]string{packageJSONFile: pkg})
-	gitAdd(t, packageJSONFile)
-
-	_, tools, hash, err := DetectDirectoriesToCache(false)
+	_, found, err := ReadAutoDetectPlan()
 	test.Ok(t, err)
-	test.Equals(t, []string{toolNode}, tools)
-	test.Equals(t, md5Hex(pkg), hash)
+	test.Assert(t, !found, "expected no plan when nothing was recorded")
 }
 
-func TestDetectDirectoriesToCacheNodeTrackedMixedSiblings(t *testing.T) {
-	requireGit(t)
-	clearNpmCacheEnv(t)
-	t.Chdir(t.TempDir())
-	gitInit(t)
+func TestAutoDetectPlanIncompleteScopeReportsError(t *testing.T) {
+	t.Setenv(harnessWorkspaceEnv, t.TempDir())
+	err := WriteAutoDetectPlan(AutoDetectPlan{Key: "abc123"})
+	test.Assert(t, errors.Is(err, ErrInvalidPlanScope), "expected invalid scope on write, got %v", err)
 
-	pkg := `{"name":"front","version":"1.0.0"}`
-	writeRepoFiles(t, map[string]string{
-		filepath.Join("backend", packageLockFile):  "lock-content-a",
-		filepath.Join("frontend", packageJSONFile): pkg,
-	})
-	gitAdd(t, filepath.Join("backend", packageLockFile), filepath.Join("frontend", packageJSONFile))
+	_, found, err := ReadAutoDetectPlan()
+	test.Assert(t, errors.Is(err, ErrInvalidPlanScope), "expected invalid scope on read, got %v", err)
+	test.Assert(t, !found, "expected no plan with an incomplete scope")
+}
 
-	dirs, tools, hash, err := DetectDirectoriesToCache(false)
+func TestAutoDetectPlanEmptyKeyIsNotRecorded(t *testing.T) {
+	t.Setenv(harnessWorkspaceEnv, t.TempDir())
+	setPlanScope(t, "execution-7", "build", "0")
+
+	err := WriteAutoDetectPlan(AutoDetectPlan{})
+	test.Assert(t, errors.Is(err, ErrInvalidPlan), "an empty key must be rejected, got %v", err)
+}
+
+func TestAutoDetectPlanIsScopedPerExecutionStageAndMatrix(t *testing.T) {
+	t.Setenv(harnessWorkspaceEnv, t.TempDir())
+	setPlanScope(t, "execution-41", "build", "0")
+	test.Ok(t, WriteAutoDetectPlan(AutoDetectPlan{Key: "from-build-41"}))
+
+	setPlanScope(t, "execution-42", "build", "0")
+	_, found, err := ReadAutoDetectPlan()
 	test.Ok(t, err)
-	test.Equals(t, []string{toolNode}, tools)
-	test.Equals(t, []string{
-		filepath.Join("backend", "node_modules"),
-		filepath.Join("backend", ".npm"),
-		filepath.Join("frontend", "node_modules"),
-		filepath.Join("frontend", ".npm"),
-	}, relCacheDirs(t, mustWd(t), dirs))
-	test.Equals(t, md5Concat("lock-content-a", pkg), hash)
+	test.Assert(t, !found, "a later build must not read the previous build's plan")
+
+	setPlanScope(t, "execution-41", "other-stage", "0")
+	_, found, err = ReadAutoDetectPlan()
+	test.Ok(t, err)
+	test.Assert(t, !found, "another stage must not read this stage's plan")
+
+	setPlanScope(t, "execution-41", "build", "1")
+	_, found, err = ReadAutoDetectPlan()
+	test.Ok(t, err)
+	test.Assert(t, !found, "another matrix leg must not read this plan")
+
+	setPlanScope(t, "execution-41", "build", "0")
+	plan, found, err := ReadAutoDetectPlan()
+	test.Ok(t, err)
+	test.Assert(t, found, "the same build and stage must read its own plan")
+	test.Equals(t, "from-build-41", plan.Key)
+}
+
+func setPlanScope(t *testing.T, execution, stage, matrix string) {
+	t.Helper()
+	t.Setenv(harnessScratchDirEnv, "")
+	t.Setenv("HARNESS_EXECUTION_ID", execution)
+	t.Setenv("HARNESS_STAGE_ID", stage)
+	t.Setenv("HARNESS_PIPELINE_ID", "pipeline")
+	t.Setenv("DRONE_REPO", "org/repo")
+	t.Setenv("HARNESS_STAGE_INDEX", matrix)
 }
 
 func TestDetectDirectoriesToCacheNodeSkipPrepareIgnoresPackageJSON(t *testing.T) {
@@ -957,18 +970,41 @@ func mustWd(t *testing.T) string {
 	return wd
 }
 
-func TestDetectDirectoriesToCacheNodeWritesNpmrcForDefaultTarballCache(t *testing.T) {
+func TestDetectDirectoriesToCacheNodeDoesNotWriteNpmrc(t *testing.T) {
 	clearNpmCacheEnv(t)
 	t.Chdir(t.TempDir())
 	writeRepoFiles(t, map[string]string{packageLockFile: "lock"})
 
-	_, _, _, err := DetectDirectoriesToCache(false)
+	dirs, tools, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Equals(t, []string{toolNode}, tools)
+	test.Equals(t, []string{"node_modules", harnessNpmCacheDefault}, relCacheDirs(t, mustWd(t), dirs))
+
+	_, statErr := os.Stat(npmrcFileName)
+	test.Assert(t, os.IsNotExist(statErr), ".npmrc must not be created")
+}
+
+func TestDetectDirectoriesToCacheNodeDoesNotDirtyGitStatus(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	clearNpmCacheEnv(t)
+	project := t.TempDir()
+	t.Chdir(project)
+	writeRepoFiles(t, map[string]string{packageLockFile: "lock"})
+
+	test.Ok(t, exec.Command("git", "init", project).Run())
+	gitStatus := func() ([]byte, error) {
+		status := exec.Command("git", "status", "--porcelain")
+		status.Dir = project
+		return status.Output()
+	}
+	before, err := gitStatus()
 	test.Ok(t, err)
 
-	data, err := os.ReadFile(npmrcFileName)
+	_, _, _, err = DetectDirectoriesToCache(false)
 	test.Ok(t, err)
-	wantCache, err := filepath.Abs(".npm")
+	after, err := gitStatus()
 	test.Ok(t, err)
-	test.Assert(t, strings.Contains(string(data), "cache="+wantCache),
-		"expected .npmrc to pin cache=%s, got %q", wantCache, data)
+	test.Equals(t, string(before), string(after))
 }

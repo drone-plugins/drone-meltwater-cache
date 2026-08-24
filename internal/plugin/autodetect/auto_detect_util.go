@@ -3,10 +3,18 @@ package autodetect
 import (
 	"crypto/md5" // #nosec
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+)
+
+const (
+	maxDetectedPaths   = 256
+	maxPathLength      = 4096
+	nodeModulesDirName = "node_modules"
 )
 
 type buildToolInfo struct {
@@ -14,8 +22,8 @@ type buildToolInfo struct {
 	tool          string
 	preparer      RepoPreparer
 	usePerProject bool
-	// detect, if set, replaces glob matching (used by npm: lockfile or package.json).
-	detect func() (string, []string, error)
+	// detect bypasses globToDetect for tools with custom detection.
+	detect func(skipPrepare bool) (string, []string, error)
 }
 
 // containsTool checks if a tool is already in the slice
@@ -59,12 +67,9 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newBazelPreparer(),
 		},
 		{
-			// npm: per-dir lockfile if present, else package.json. Same glob depth
-			// as before (cwd, then one level). Not a second "node" mapping row.
-			tool:          "node",
-			preparer:      newNodePreparer(),
-			usePerProject: true,
-			detect:        detectNpmProjects,
+			globToDetect: nodeModulesDirName,
+			tool:         "node",
+			detect:       detectNpmProjects,
 		},
 		{
 			globToDetect: "yarn.lock",
@@ -97,9 +102,7 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 	}
 
 	var directoriesToCache []string
-
 	var buildToolsDetected []string
-
 	var hashes string
 
 	for _, supportedTool := range buildToolInfoMapping {
@@ -111,17 +114,13 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 		}
 
 		if supportedTool.detect != nil {
-			hash, dirs, err := supportedTool.detect()
+			hash, dirs, err := supportedTool.detect(skipPrepare)
 			if err != nil {
 				return nil, nil, "", err
 			}
-			if hash != "" && !skipPrepare {
+			if hash != "" {
 				for _, dir := range dirs {
-					var err error
-					directoriesToCache, err = appendPreparedDirs(directoriesToCache, supportedTool.preparer, dir)
-					if err != nil {
-						return nil, nil, "", err
-					}
+					directoriesToCache = appendIfMissing(directoriesToCache, dir)
 				}
 				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
 				hashes += hash
@@ -174,31 +173,84 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 	return directoriesToCache, buildToolsDetected, hashes, nil
 }
 
-// multiPathPreparer supports tools with multiple cache directories.
-type multiPathPreparer interface {
-	PrepareRepoDirs(dir string) ([]string, error)
+// ValidateDetectedPaths bounds and normalizes the fresh detector output before
+// passing it to the archiver.
+func ValidateDetectedPaths(paths []string) error {
+	if len(paths) > maxDetectedPaths {
+		return fmt.Errorf("autodetect returned too many cache paths: %d", len(paths))
+	}
+	for _, path := range paths {
+		if path == "" || len(path) > maxPathLength || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return fmt.Errorf("autodetect returned invalid cache path %q", path)
+		}
+		if err := rejectSymlinkPath(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func cacheDirsFromPreparer(preparer RepoPreparer, dir string) ([]string, error) {
-	if mp, ok := preparer.(multiPathPreparer); ok {
-		return mp.PrepareRepoDirs(dir)
+func rejectSymlinkPath(path string) error {
+	current, rest := trustedPathRoot(path)
+	if rest == "" {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("inspect autodetected cache path %q: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("autodetected cache path %q is a symlink", path)
+		}
+		return nil
 	}
+	for _, part := range strings.Split(rest, string(os.PathSeparator)) {
+		if part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("inspect autodetected cache path %q: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("autodetected cache path %q traverses symlink %q", path, current)
+		}
+	}
+	return nil
+}
+
+func trustedPathRoot(path string) (string, string) {
+	roots := []string{firstEnv(harnessWorkspaceEnv)}
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots, wd)
+	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		rel, err := filepath.Rel(filepath.Clean(root), path)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			if rel == "." {
+				return path, ""
+			}
+			return filepath.Clean(root), rel
+		}
+	}
+	return path, ""
+}
+
+func appendPreparedDirs(directoriesToCache []string, preparer RepoPreparer, dir string) ([]string, error) {
 	path, err := preparer.PrepareRepo(dir)
 	if err != nil {
 		return nil, err
 	}
-	return []string{path}, nil
-}
 
-func appendPreparedDirs(directoriesToCache []string, preparer RepoPreparer, dir string) ([]string, error) {
-	dirs, err := cacheDirsFromPreparer(preparer, dir)
-	if err != nil {
-		return nil, err
-	}
-	for _, d := range dirs {
-		directoriesToCache = appendIfMissing(directoriesToCache, d)
-	}
-	return directoriesToCache, nil
+	return appendIfMissing(directoriesToCache, path), nil
 }
 
 func appendIfMissing(slice []string, elem string) []string {

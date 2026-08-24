@@ -44,6 +44,10 @@ func New(logger log.Logger) *Plugin {
 	return &Plugin{logger: logger}
 }
 
+func autoCacheKey(accountID, manifestHash string) string {
+	return fmt.Sprintf("%s/%s", accountID, manifestHash)
+}
+
 // Exec entry point of Plugin, where the magic happens.
 func (p *Plugin) Exec() error { // nolint:funlen
 	cfg := p.Config
@@ -93,11 +97,13 @@ func (p *Plugin) Exec() error { // nolint:funlen
 		{
 			var toolDetected, keyOverriden bool = false, false
 			pathOverridden := len(p.Config.Mount) > 0
-			dirs, buildTools, detectedHashes, err := autodetect.DetectDirectoriesToCache(pathOverridden)
+			dirs, buildTools, cacheKey, err := autodetect.DetectDirectoriesToCache(pathOverridden)
 			if err != nil {
 				return fmt.Errorf("autodetect enabled but failed to detect, falling back to default, %w", err)
 			}
-			cacheKey := detectedHashes
+			if err := autodetect.ValidateDetectedPaths(dirs); err != nil {
+				return err
+			}
 			if len(buildTools) > 0 {
 				toolDetected = true
 				p.logger.Log("msg", "build tools detected: "+strings.Join(buildTools, ", ")) //nolint: errcheck
@@ -106,37 +112,59 @@ func (p *Plugin) Exec() error { // nolint:funlen
 			} else {
 				p.logger.Log("msg", "no supported build tool detected") //nolint: errcheck
 			}
+			if cfg.CacheKeyTemplate != "" {
+				keyOverriden = true
+				cacheKey = cfg.CacheKeyTemplate
+			}
+
+			// Detection reads the workspace, and the build changes the workspace
+			// between restore and save: `npm install` writes a package-lock.json
+			// that restore never saw, which changes the hashed manifest and the
+			// cacheable paths. The remote object name embeds both, so save
+			// replays the plan restore recorded instead of re-deriving it.
+			//
+			// A custom key or a custom path means autodetection is not deciding
+			// anything, so there is nothing to hand over.
+			if !keyOverriden && !pathOverridden {
+				if cfg.Restore && toolDetected {
+					sources, err := autodetect.DetectNpmPackageJSONSources()
+					if err != nil {
+						return fmt.Errorf("identify autodetected cache sources: %w", err)
+					}
+					plan := autodetect.AutoDetectPlan{Key: cacheKey, Sources: sources}
+					if err := autodetect.WriteAutoDetectPlan(plan); err != nil {
+						level.Warn(p.logger).Log("msg",
+							"could not record the autodetected cache plan; the save step will skip safely",
+							"err", err)
+					}
+				}
+
+				if cfg.Rebuild {
+					plan, found, err := autodetect.ReadAutoDetectPlan()
+					switch {
+					case err != nil:
+						level.Warn(p.logger).Log("msg",
+							"could not read the cache plan recorded by the restore step; skipping cache save",
+							"err", err)
+						_ = autodetect.RemoveAutoDetectPlan()
+						return nil
+					case found:
+						cacheKey = plan.Key
+						dirs = autodetect.FilterPathsForPlan(dirs, plan.Sources)
+						toolDetected = true
+					default:
+						level.Warn(p.logger).Log("msg",
+							"no cache plan recorded by the restore step; skipping cache save")
+						return nil
+					}
+				}
+			}
+
 			if !pathOverridden {
 				p.Config.Mount = dirs
 				options = append(options, cache.WithGracefulDetect(true))
 			} else {
 				options = append(options, cache.WithGracefulDetect(false))
-			}
-			if cfg.CacheKeyTemplate != "" {
-				keyOverriden = true
-				cacheKey = cfg.CacheKeyTemplate
-			} else {
-				// Save prefers the Restore sidecar under .git. If it is gone,
-				// autodetection hashes git-tracked npm files so a generated
-				// lockfile does not change the key. Custom key or skipPrepare
-				// (path override) leave the sidecar alone.
-				if cfg.Rebuild && !pathOverridden {
-					sidecar, ok, err := autodetect.ReadAutoKeySidecar()
-					if err != nil {
-						return fmt.Errorf("read autodetection sidecar, %w", err)
-					}
-					if ok {
-						cacheKey = sidecar
-					}
-				}
-				if cacheKey == "" {
-					cacheKey = "default"
-				}
-			}
-			if cfg.Restore && toolDetected && !keyOverriden && !pathOverridden && detectedHashes != "" {
-				if err := autodetect.WriteAutoKeySidecar(detectedHashes); err != nil {
-					return fmt.Errorf("write autodetection sidecar, %w", err)
-				}
 			}
 
 			/*
@@ -151,21 +179,23 @@ func (p *Plugin) Exec() error { // nolint:funlen
 				No               No              Yes              do nothing    do nothing
 				No               No              No               do nothing    do nothing
 			*/
-			if cfg.AutoDetectEarlyExit {
-				if pathOverridden && !keyOverriden {
-					p.logger.Log("msg", "A key must be provided if any custom paths are used. Skipping cache")
-				}
+			if pathOverridden && !keyOverriden {
+				p.logger.Log("msg", "A key must be provided if any custom paths are used. Skipping cache")
+				return nil
 			}
 
 			if !toolDetected {
 				if !keyOverriden && !pathOverridden {
-					// log message and end step
-					p.logger.Log("msg", "no build tool detected. Please provide custom key and path to use cache")
+					p.logger.Log("msg", "no safe automatic cache directories detected")
 					return nil
 				}
 			}
 
-			generator = keygen.NewMetadata(p.logger, cfg.AccountID+"/"+cacheKey, p.Metadata)
+			if cacheKey == "" {
+				cacheKey = "default"
+			}
+
+			generator = keygen.NewMetadata(p.logger, autoCacheKey(cfg.AccountID, cacheKey), p.Metadata)
 			if err := generator.Check(); err != nil {
 				return fmt.Errorf("parse failed, falling back to default, %w", err)
 			}
@@ -232,6 +262,11 @@ func (p *Plugin) Exec() error { // nolint:funlen
 		if err := c.Rebuild(p.Config.Mount); err != nil {
 			level.Debug(p.logger).Log("err", fmt.Sprintf("%+v\n", err))
 			return Error(fmt.Sprintf("[IMPORTANT] build cache, %+v\n", err))
+		}
+		if cfg.AutoDetect && cfg.CacheKeyTemplate == "" && len(cfg.Mount) == 0 {
+			if err := autodetect.RemoveAutoDetectPlan(); err != nil {
+				level.Warn(p.logger).Log("msg", "could not remove consumed cache plan", "err", err)
+			}
 		}
 	}
 
