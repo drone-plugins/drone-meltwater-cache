@@ -10,10 +10,15 @@ import (
 )
 
 type buildToolInfo struct {
-	globToDetect  string
-	tool          string
-	preparer      RepoPreparer
-	usePerProject bool
+	globToDetect string
+	tool         string
+	preparer     RepoPreparer
+	// A second directory to cache, resolved from where the detected file lives.
+	// Has to stay inside the workspace, the only shared volume.
+	additionalCacheDir func(dir string) (string, error)
+	// A second file to fold into the cache key. Hashed before globToDetect.
+	additionalHashGlob string
+	usePerProject      bool
 }
 
 // containsTool checks if a tool is already in the slice
@@ -57,14 +62,22 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:     newBazelPreparer(),
 		},
 		{
-			globToDetect: "package.json",
-			tool:         "node",
-			preparer:     newNodePreparer(),
+			// The lockfile, not package.json: a dependency bump often lands in
+			// the lockfile alone, and that has to invalidate the cache.
+			globToDetect:       "package-lock.json",
+			tool:               "node",
+			preparer:           newNodePreparer(),
+			additionalCacheDir: npmCacheDir,
 		},
 		{
-			globToDetect: "yarn.lock",
-			tool:         "yarn",
-			preparer:     newYarnPreparer(),
+			// Yarn repos matched the old package.json glob too, which is what
+			// cached node_modules and put package.json in the key. Both kept
+			// here so yarn behaviour is unchanged.
+			globToDetect:       "yarn.lock",
+			tool:               "yarn",
+			preparer:           newYarnPreparer(),
+			additionalCacheDir: nodeModulesDir,
+			additionalHashGlob: "package.json",
 		},
 		{
 			globToDetect: "go.mod",
@@ -128,15 +141,9 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 				hashes += hash
 			}
 		} else {
-			hash, dir, err := hashIfFileExist(supportedTool.globToDetect)
+			hash, dir, err := hashFileOrNested(supportedTool.globToDetect)
 			if err != nil {
 				return nil, nil, "", err
-			}
-			if hash == "" {
-				hash, dir, err = hashIfFileExist(filepath.Join("**", supportedTool.globToDetect))
-				if err != nil {
-					return nil, nil, "", err
-				}
 			}
 			if hash != "" && !skipPrepare {
 				dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
@@ -145,7 +152,28 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 				}
 
 				directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+				if supportedTool.additionalCacheDir != nil {
+					dirToCache, err = supportedTool.additionalCacheDir(dir)
+					if err != nil {
+						return nil, nil, "", err
+					}
+					// Empty when there is no second directory worth caching,
+					// e.g. npm's cache was never relocated.
+					if dirToCache != "" {
+						directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+					}
+				}
 				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
+
+				if supportedTool.additionalHashGlob != "" {
+					additionalHash, _, err := hashFileOrNested(supportedTool.additionalHashGlob)
+					if err != nil {
+						return nil, nil, "", err
+					}
+
+					hashes += additionalHash
+				}
+
 				hashes += hash
 			}
 		}
@@ -161,6 +189,21 @@ func appendIfMissing(slice []string, elem string) []string {
 		}
 	}
 	return append(slice, elem)
+}
+
+// hashFileOrNested hashes the root-most match, falling back to one level down.
+// filepath.Glob does not treat ** as recursive, so it goes no deeper than that.
+func hashFileOrNested(glob string) (string, string, error) {
+	hash, dir, err := hashIfFileExist(glob)
+	if err != nil {
+		return "", "", err
+	}
+
+	if hash != "" {
+		return hash, dir, nil
+	}
+
+	return hashIfFileExist(filepath.Join("**", glob))
 }
 
 func hashIfFileExist(glob string) (string, string, error) {
