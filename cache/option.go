@@ -8,6 +8,7 @@ type options struct {
 	override                   bool
 	failRestoreIfKeyNotPresent bool
 	gracefulDetect             bool
+	ignoreMissingPaths         bool
 	enableCacheKeySeparator    bool
 	strictKeyMatching          bool
 	cacheType                  string
@@ -45,10 +46,19 @@ func WithOverride(override bool) Option {
 	})
 }
 
-// WithGracefulDetect sets option to fail sve if directory does not exist.
+// WithGracefulDetect sets option used by automatic cache detection to skip
+// missing directories without failing the rebuild when nothing was uploaded.
 func WithGracefulDetect(gracefulDetect bool) Option {
 	return optionFunc(func(o *options) {
 		o.gracefulDetect = gracefulDetect
+	})
+}
+
+// WithIgnoreMissingPaths skips missing source paths during Save Cache while
+// still requiring at least one existing path to be cached.
+func WithIgnoreMissingPaths(ignoreMissingPaths bool) Option {
+	return optionFunc(func(o *options) {
+		o.ignoreMissingPaths = ignoreMissingPaths
 	})
 }
 

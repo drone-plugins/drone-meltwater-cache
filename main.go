@@ -338,6 +338,12 @@ func main() {
 			EnvVars: []string{"PLUGIN_FAIL_RESTORE_IF_KEY_NOT_PRESENT"},
 		},
 		&cli.BoolFlag{
+			Name:    "ignore-missing-paths",
+			Usage:   "skip missing source paths while saving available paths",
+			Value:   false,
+			EnvVars: []string{"PLUGIN_IGNORE_MISSING_PATHS"},
+		},
+		&cli.BoolFlag{
 			Name:    "enable-cache-key-separator",
 			Usage:   "Enable adding of / as the cache key suffix. (defaults to false)",
 			Value:   false,
@@ -739,6 +745,7 @@ func run(c *cli.Context) error {
 		LocalRoot:                  c.String("local-root"),
 		Override:                   c.Bool("override"),
 		FailRestoreIfKeyNotPresent: c.Bool("fail-restore-if-key-not-present"),
+		IgnoreMissingPaths:         c.Bool("ignore-missing-paths"),
 		EnableCacheKeySeparator:    c.Bool("enable-cache-key-separator"),
 		StrictKeyMatching:          c.Bool("strict-key-matching"),
 
