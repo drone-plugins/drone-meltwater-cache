@@ -3,6 +3,7 @@ package autodetect
 import (
 	"crypto/md5" // #nosec
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,13 +13,128 @@ import (
 type buildToolInfo struct {
 	globToDetect string
 	tool         string
-	preparer     RepoPreparer
+	preparer     interface{}
 	// additionalCacheDirs resolves extra directories to cache for this tool.
 	// Can be removed in the future by updating RepoPreparer.PrepareRepo to return []string.
 	additionalCacheDirs func(dir string) ([]string, error)
 	additionalHashGlob  string
 	usePerProject       bool
-	excludeIfExist      []string
+	// excludeIfExist skips a match when any of these files sits alongside it.
+	// Used to keep the package.json fallback from firing when a lock file (yarn,
+	// pnpm, bun) already pins the node project to a more specific tool.
+	excludeIfExist []string
+	// alsoDetect lists additional patterns to try when globToDetect finds
+	// nothing, in order. Needed because Go's filepath.Glob treats "**" as a
+	// single path element rather than a recursive wildcard, so tools that bury
+	// their manifest at a fixed but deeper location (Xcode's Package.resolved)
+	// are invisible to the root + one-level probe.
+	alsoDetect []string
+	// requires, if non-empty, gates detection on at least one of these globs
+	// also being present *in the same directory as the detected manifest*. Used
+	// to scope Gemfile detection to iOS repos only (CI-23961 is iOS/Fastlane
+	// specific, not general Ruby support) without affecting tools that have no
+	// such restriction.
+	requires []string
+}
+
+// probePatterns returns the glob patterns to try for a tool, in precedence
+// order. Every pattern is also probed one directory deep, preserving the
+// long-standing "fall back to **/<glob>" behaviour.
+func probePatterns(info buildToolInfo) []string {
+	globs := make([]string, 0, 1+len(info.alsoDetect))
+	globs = append(globs, info.globToDetect)
+	globs = append(globs, info.alsoDetect...)
+
+	patterns := make([]string, 0, len(globs)*2)
+	for _, glob := range globs {
+		patterns = append(patterns, glob, filepath.Join("**", glob))
+	}
+
+	return patterns
+}
+
+// dirSatisfiesRequires reports whether a detected manifest sits alongside at
+// least one of the required marker files.
+//
+// The check is deliberately scoped to the manifest's own directory rather than
+// the whole repository: a repo-wide check lets an ios/Podfile switch on Fastlane
+// detection for an unrelated backend Gemfile in a monorepo, and then rewrite
+// that project's Bundler config.
+func dirSatisfiesRequires(manifest string, requires []string) bool {
+	if len(requires) == 0 {
+		return true
+	}
+
+	base := filepath.Dir(manifest)
+
+	for _, glob := range requires {
+		if matches, _ := filepath.Glob(filepath.Join(base, glob)); len(matches) > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func matchesSatisfying(pattern string, requires []string) []string {
+	matches, _ := filepath.Glob(pattern)
+
+	if len(requires) == 0 {
+		return matches
+	}
+
+	kept := make([]string, 0, len(matches))
+
+	for _, match := range matches {
+		if dirSatisfiesRequires(match, requires) {
+			kept = append(kept, match)
+		}
+	}
+
+	return kept
+}
+
+// hashFirstMatch tries each pattern in order and hashes the first one that
+// yields matches satisfying requires.
+func hashFirstMatch(patterns, requires []string) (string, string, error) {
+	for _, pattern := range patterns {
+		if matches := matchesSatisfying(pattern, requires); len(matches) > 0 {
+			return calculateMd5FromFiles(matches)
+		}
+	}
+
+	return "", "", nil
+}
+
+func hashFirstMatchPerProject(patterns, requires []string) (string, []string, error) {
+	for _, pattern := range patterns {
+		if matches := matchesSatisfying(pattern, requires); len(matches) > 0 {
+			return calculateMd5FromAllFilesPerProject(matches)
+		}
+	}
+
+	return "", nil, nil
+}
+
+// prepareRepo runs preparer against dir and returns every path it wants cached.
+// Supports both single-path (RepoPreparer) and multi-path (MultiRepoPreparer)
+// preparers so existing tools stay untouched while e.g. CocoaPods can report
+// more than one directory.
+func prepareRepo(preparer interface{}, dir string) ([]string, error) {
+	if mp, ok := preparer.(MultiRepoPreparer); ok {
+		return mp.PrepareRepoMulti(dir)
+	}
+
+	if p, ok := preparer.(RepoPreparer); ok {
+		dirToCache, err := p.PrepareRepo(dir)
+		if err != nil {
+			return nil, err
+		}
+
+		return []string{dirToCache}, nil
+	}
+
+	return nil, fmt.Errorf("preparer %T implements neither RepoPreparer nor MultiRepoPreparer", preparer)
 }
 
 // containsTool checks if a tool is already in the slice
@@ -57,6 +173,9 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			tool:         "gradle",
 			preparer:     newGradlePreparer(),
 		},
+		// MODULE.bazel is checked BEFORE WORKSPACE because:
+		// 1. In modern Bazel (6+), MODULE.bazel takes precedence
+		// 2. We only want ONE Bazel preparer to run, not both
 		{
 			globToDetect: "MODULE.bazel",
 			tool:         "bazel",
@@ -109,6 +228,57 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:      newDotnetPreparer(),
 			usePerProject: true,
 		},
+		// Podfile.lock is checked BEFORE Podfile for the same reason as above:
+		// prefer keying off the lock file when both exist.
+		{
+			globToDetect: "Podfile.lock",
+			tool:         "cocoapods",
+			preparer:     newCocoapodsPreparer(),
+		},
+		{
+			globToDetect: "Podfile",
+			tool:         "cocoapods",
+			preparer:     newCocoapodsPreparer(),
+		},
+		// Package.resolved is checked BEFORE Package.swift so that, when both
+		// exist, the cache key is derived from the lock file rather than the
+		// manifest. Mirrors the MODULE.bazel-before-WORKSPACE precedence above.
+		//
+		// A pure SwiftPM package keeps Package.resolved at the root, but an Xcode
+		// app integrating SPM through the UI keeps it inside the project or
+		// workspace bundle instead -- and such a project usually has no
+		// Package.swift at all, so without these patterns SPM goes completely
+		// undetected for the most common iOS layout.
+		{
+			globToDetect: "Package.resolved",
+			alsoDetect: []string{
+				filepath.Join("*.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
+				filepath.Join("*.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
+			},
+			tool:     "spm",
+			preparer: newSPMPreparer(),
+		},
+		{
+			globToDetect: "Package.swift",
+			tool:         "spm",
+			preparer:     newSPMPreparer(),
+		},
+		// Gemfile detection is scoped to iOS repos only (CI-23961 is
+		// iOS/Fastlane-specific, not general Ruby/Bundler support), gated on the
+		// presence of one of the common iOS project markers. Gemfile.lock is
+		// checked before Gemfile for the same lock-file-first reason as above.
+		{
+			globToDetect: "Gemfile.lock",
+			tool:         "fastlane",
+			preparer:     newFastlanePreparer(),
+			requires:     []string{"Podfile", "Package.swift", "*.xcodeproj", "*.xcworkspace"},
+		},
+		{
+			globToDetect: "Gemfile",
+			tool:         "fastlane",
+			preparer:     newFastlanePreparer(),
+			requires:     []string{"Podfile", "Package.swift", "*.xcodeproj", "*.xcworkspace"},
+		},
 	}
 
 	var directoriesToCache []string
@@ -125,24 +295,23 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			continue
 		}
 
+		patterns := probePatterns(supportedTool)
+		requires := supportedTool.requires
+
 		if supportedTool.usePerProject {
-			hash, dirs, err := hashAllFilesPerProjectIfExist(supportedTool.globToDetect)
+			hash, dirs, err := hashFirstMatchPerProject(patterns, requires)
 			if err != nil {
 				return nil, nil, "", err
 			}
-			if hash == "" {
-				hash, dirs, err = hashAllFilesPerProjectIfExist(filepath.Join("**", supportedTool.globToDetect))
-				if err != nil {
-					return nil, nil, "", err
-				}
-			}
 			if hash != "" && !skipPrepare {
 				for _, dir := range dirs {
-					dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
+					dirsToCache, err := prepareRepo(supportedTool.preparer, dir)
 					if err != nil {
 						return nil, nil, "", err
 					}
-					directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+					for _, dirToCache := range dirsToCache {
+						directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+					}
 				}
 				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
 				hashes += hash
@@ -157,19 +326,22 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			if len(supportedTool.excludeIfExist) > 0 {
 				hash, dir, err = hashFileOrNestedExcluding(supportedTool.globToDetect, supportedTool.excludeIfExist)
 			} else {
-				hash, dir, err = hashFileOrNested(supportedTool.globToDetect)
+				hash, dir, err = hashFirstMatch(patterns, requires)
 			}
 			if err != nil {
 				return nil, nil, "", err
 			}
 
 			if hash != "" && !skipPrepare {
-				dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
+				dirsToCache, err := prepareRepo(supportedTool.preparer, dir)
 				if err != nil {
 					return nil, nil, "", err
 				}
 
-				directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+				for _, dirToCache := range dirsToCache {
+					directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+				}
+
 				if supportedTool.additionalCacheDirs != nil {
 					extraDirs, err := supportedTool.additionalCacheDirs(dir)
 					if err != nil {
