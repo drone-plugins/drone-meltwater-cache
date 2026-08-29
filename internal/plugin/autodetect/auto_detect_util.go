@@ -150,6 +150,59 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 				"Pipfile.lock",
 			},
 		},
+		// Lock file before manifest, same precedence as package-lock.json before
+		// package.json: the key should change when resolved versions change.
+		{
+			globToDetect:        "Podfile.lock",
+			tool:                "cocoapods",
+			preparer:            newCocoapodsPreparer(),
+			additionalCacheDirs: cocoapodsCacheDirs,
+		},
+		{
+			globToDetect:        "Podfile",
+			tool:                "cocoapods",
+			preparer:            newCocoapodsPreparer(),
+			additionalCacheDirs: cocoapodsCacheDirs,
+		},
+		// Package.resolved before the deeper Xcode locations and before
+		// Package.swift, so a root lock file supplies the cache key. Later
+		// entries only run when an earlier one misses, because containsTool
+		// skips a tool that was already detected. The Xcode globs are separate
+		// entries rather than a second probe list: hashFileOrNested already
+		// tries the glob and one directory deeper.
+		{
+			globToDetect: "Package.resolved",
+			tool:         "spm",
+			preparer:     newSPMPreparer(),
+		},
+		{
+			globToDetect: filepath.Join("*.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
+			tool:         "spm",
+			preparer:     newSPMPreparer(),
+		},
+		{
+			globToDetect: filepath.Join("*.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
+			tool:         "spm",
+			preparer:     newSPMPreparer(),
+		},
+		{
+			globToDetect: "Package.swift",
+			tool:         "spm",
+			preparer:     newSPMPreparer(),
+		},
+		// Gemfile.lock before Gemfile. Fastlane matches are further limited to
+		// directories that also hold an iOS project marker; see
+		// hashFileOrNestedRequiring.
+		{
+			globToDetect: "Gemfile.lock",
+			tool:         "fastlane",
+			preparer:     newFastlanePreparer(),
+		},
+		{
+			globToDetect: "Gemfile",
+			tool:         "fastlane",
+			preparer:     newFastlanePreparer(),
+		},
 	}
 
 	var directoriesToCache []string
@@ -195,9 +248,15 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 
 			var hash, dir string
 			var err error
-			if len(supportedTool.excludeIfExist) > 0 {
+			switch {
+			case supportedTool.tool == "fastlane":
+				// CI-23961 is iOS/Fastlane, not general Ruby. A Gemfile only
+				// counts when an iOS marker sits in that same directory, so a
+				// backend Gemfile in a monorepo is left alone.
+				hash, dir, err = hashFileOrNestedRequiring(supportedTool.globToDetect, iosProjectMarkers)
+			case len(supportedTool.excludeIfExist) > 0:
 				hash, dir, err = hashFileOrNestedExcluding(supportedTool.globToDetect, supportedTool.excludeIfExist)
-			} else {
+			default:
 				hash, dir, err = hashFileOrNested(supportedTool.globToDetect)
 			}
 			if err != nil {
@@ -263,6 +322,50 @@ func appendIfMissing(slice []string, elem string) []string {
 		}
 	}
 	return append(slice, elem)
+}
+
+// iosProjectMarkers are the files that mark a directory as an iOS project.
+// Gemfile detection requires one of these beside the Gemfile itself.
+var iosProjectMarkers = []string{"Podfile", "Package.swift", "*.xcodeproj", "*.xcworkspace"}
+
+// hashFileOrNestedRequiring is hashFileOrNested limited to matches whose own
+// directory also contains one of requires. The check is not repo-wide: an
+// ios/Podfile must not turn on Fastlane for an unrelated Gemfile at the root.
+func hashFileOrNestedRequiring(glob string, requires []string) (string, string, error) {
+	for _, pattern := range []string{glob, filepath.Join("**", glob)} {
+		matches, _ := filepath.Glob(pattern)
+
+		var eligible []string
+		for _, match := range matches {
+			if dirSatisfiesRequires(match, requires) {
+				eligible = append(eligible, match)
+			}
+		}
+
+		if len(eligible) > 0 {
+			return calculateMd5FromFiles(eligible)
+		}
+	}
+
+	return "", "", nil
+}
+
+// dirSatisfiesRequires reports whether the manifest's own directory holds one
+// of the required marker files. An empty requires list is always satisfied.
+func dirSatisfiesRequires(manifest string, requires []string) bool {
+	if len(requires) == 0 {
+		return true
+	}
+
+	base := filepath.Dir(manifest)
+
+	for _, glob := range requires {
+		if matches, _ := filepath.Glob(filepath.Join(base, glob)); len(matches) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // hashFileOrNested hashes the root match, falling back to one directory level down.
