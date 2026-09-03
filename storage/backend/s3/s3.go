@@ -141,7 +141,11 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 	}
 
 	if c.ACL != "" {
-		backend.acl = c.ACL
+		if isACLDisabled(c.ACL) {
+			logrus.WithField("acl", c.ACL).Info("PLUGIN_ACL set to disable sentinel; x-amz-acl header will not be sent")
+		} else {
+			backend.acl = c.ACL
+		}
 	}
 
 	return backend, nil
@@ -152,6 +156,19 @@ func normalizeEndpoint(endpoint string) string {
 		return endpoint
 	}
 	return "https://" + endpoint
+}
+
+// isACLDisabled returns true when the ACL value is a sentinel that means
+// "do not send the x-amz-acl header". Used so customers can opt out of ACL
+// on buckets with Object Ownership = BucketOwnerEnforced (ACLs disabled),
+// where any canned ACL other than bucket-owner-full-control is rejected with
+// AccessControlListNotSupported.
+func isACLDisabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "none", "disabled", "off":
+		return true
+	}
+	return false
 }
 
 // Get writes downloaded content to the given writer.

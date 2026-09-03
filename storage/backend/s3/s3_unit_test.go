@@ -160,6 +160,38 @@ func TestDetectDirectoryBucket_SuffixButNotDirectoryBucket(t *testing.T) {
 	test.Equals(t, false, result, "bucket with --x-s3 suffix but empty BucketLocationType should return false")
 }
 
+func TestIsACLDisabled(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{name: "empty string is not a sentinel", input: "", expected: false},
+		{name: "lowercase none", input: "none", expected: true},
+		{name: "uppercase NONE", input: "NONE", expected: true},
+		{name: "mixed case None", input: "None", expected: true},
+		{name: "none with surrounding whitespace", input: " none ", expected: true},
+		{name: "lowercase disabled", input: "disabled", expected: true},
+		{name: "uppercase DISABLED", input: "DISABLED", expected: true},
+		{name: "lowercase off", input: "off", expected: true},
+		{name: "uppercase OFF", input: "OFF", expected: true},
+		{name: "private is a real ACL", input: "private", expected: false},
+		{name: "public-read is a real ACL", input: "public-read", expected: false},
+		{name: "bucket-owner-full-control is a real ACL", input: "bucket-owner-full-control", expected: false},
+		{name: "arbitrary value is not a sentinel", input: "no", expected: false},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			test.Equals(t, tc.expected, isACLDisabled(tc.input), tc.name)
+		})
+	}
+}
+
 func TestPut_ACLHandling_RegularBucket(t *testing.T) {
 	t.Parallel()
 
