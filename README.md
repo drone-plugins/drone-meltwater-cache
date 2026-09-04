@@ -62,7 +62,7 @@ With restored dependencies from a cache, commands like `mix deps.get` will only 
 
 ### Auto-Detection and Configuration
 
-The plugin automatically detects the presence of lock/manifest files and configures the respective package manager to cache dependencies in repo-local directories (under `.cache/`). This enables caching across CI steps in containerized environments.
+The plugin automatically detects the presence of lock/manifest files and configures the respective package manager to cache dependencies in repo-local directories (under `.cache/`), unless the build already points the tool elsewhere via its cache environment variable, in which case that path is cached as-is. This enables caching across CI steps in containerized environments.
 
 #### Supported Tools and Configuration
 
@@ -75,58 +75,77 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
 | **.NET** | `*.csproj/*.vbproj/.fsproj` | Per-project dirs | `bin/obj` | ✅ Native |
 | **Bazel** | `WORKSPACE/MODULE.bazel` | `.bazelrc` | `bazel-cache` | ✅ Appended |
-| **Poetry** | `poetry.lock` | `poetry.toml` | `.cache/poetry`, `.venv` | ✅ Merged |
-| **uv** | `uv.lock` | `uv.toml` or `pyproject.toml` | `.cache/uv`, `.venv` | ✅ Merged |
-| **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv`, `.venv` | ✅ Merged |
-| **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `pip.conf` | `.cache/pip`, `.venv` | ✅ Merged |
+| **Poetry** | `poetry.lock` | `POETRY_CACHE_DIR` / `poetry.toml` | `.cache/poetry` | ✅ Merged |
+| **uv** | `uv.lock` | `UV_CACHE_DIR` / `uv.toml` or `pyproject.toml` | `.cache/uv` | ✅ Merged |
+| **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
+| **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 
 #### Python Package Manager Details
 
-**Poetry**: Modifies or creates Poetry's project-local `poetry.toml` file
-and enables in-project virtualenvs so `.venv` can be restored across steps.
+Every Python tool resolves its cache location from an environment variable in
+preference to any config file. When the build already exports that variable the
+plugin caches exactly that path and writes no config file, because the tool
+would ignore the file anyway. The env var is therefore the reliable way to point
+a Python cache somewhere specific:
+
+| Tool | Environment variable |
+|------|----------------------|
+| Poetry | `POETRY_CACHE_DIR` |
+| uv | `UV_CACHE_DIR` |
+| Pipenv | `PIPENV_CACHE_DIR` |
+| pip | `PIP_CACHE_DIR` |
+
+The config-file fallbacks below apply only when the variable is unset.
+
+**Poetry**: Modifies or creates Poetry's project-local `poetry.toml` file.
 
 ```toml
 cache-dir = ".cache/poetry"
-virtualenvs.in-project = true
 ```
 
 **uv**: Modifies `uv.toml` when it exists; otherwise it adds the setting to
 `[tool.uv]` in `pyproject.toml`. If neither file exists, it creates `uv.toml`.
+`UV_CACHE_DIR` outranks all three, so when it is set none of them are touched.
 
 ```toml
 [tool.uv]
 cache-dir = ".cache/uv"
 ```
 
-**Pipenv**: Uses `PIPENV_CACHE_DIR` when the build already sets it. Otherwise
-it records the repo-local path in `.env`. Pipenv reads that variable at
-process start, so later install steps should also set
-`PIPENV_CACHE_DIR=.cache/pipenv`.
+**Pipenv**: Records the repo-local path in `.env`. Pipenv reads
+`PIPENV_CACHE_DIR` at process start and does not re-read `.env` afterwards, so
+later install steps must also have `PIPENV_CACHE_DIR=.cache/pipenv` exported for
+the `.env` fallback to have any effect.
 
 ```dotenv
 PIPENV_CACHE_DIR=.cache/pipenv
 ```
 
-**pip**: Writes `pip.conf` and caches `.cache/pip`. pip does not load a
-repository-local file automatically, so later install steps should set
-`PIP_CONFIG_FILE=pip.conf` or `PIP_CACHE_DIR=.cache/pip`. Detection files
-are `requirements.txt`, `constraints.txt`, and `pyproject.toml` (when no
-Poetry/uv/Pipenv lock is present).
+**pip**: Writes `pip.conf` and caches `.cache/pip`. pip never loads a
+repository-local config file by itself, so for the fallback to work later
+install steps must set `PIP_CONFIG_FILE=pip.conf` or
+`PIP_CACHE_DIR=.cache/pip`. Detection files are `requirements.txt`,
+`constraints.txt`, and `pyproject.toml` (when no Poetry/uv/Pipenv lock is
+present).
 
 ```ini
 [global]
 cache-dir = .cache/pip
 ```
 
-**venv**: Every Python tool also caches project-local `.venv` and `venv`
-directories.
+Only each tool's package-download cache is cached — not the `.venv`/`venv`
+directory itself. A venv bakes in absolute interpreter paths (e.g. symlinks
+into the base image's system Python), which can go dangling if a later step
+or build uses a different image, so it is rebuilt from the warm download
+cache on every run instead of being restored directly.
 
 #### Example: Python Project with Poetry
 
 For projects using Poetry (`poetry.lock`), the plugin will:
 1. Automatically detect `poetry.lock`
-2. Modify `poetry.toml` to set Poetry cache to `.cache/poetry`
-3. Cache and restore `.cache/poetry` across builds
+2. Use `POETRY_CACHE_DIR` if the build exports it, otherwise modify
+   `poetry.toml` to set Poetry cache to `.cache/poetry`
+3. Cache and restore that directory across builds
 
 No explicit mount configuration needed - just add the cache steps to your pipeline.
 
