@@ -13,13 +13,12 @@ type buildToolInfo struct {
 	globToDetect string
 	tool         string
 	preparer     RepoPreparer
-	// A second directory to cache, resolved from where the detected file lives.
-	// Has to stay inside the workspace, the only shared volume.
-	additionalCacheDir func(dir string) (string, error)
-	// A second file to fold into the cache key. Hashed before globToDetect.
-	additionalHashGlob string
-	usePerProject      bool
-	excludeIfExist     []string
+	// additionalCacheDirs resolves extra directories to cache for this tool.
+	// Can be removed in the future by updating RepoPreparer.PrepareRepo to return []string.
+	additionalCacheDirs func(dir string) ([]string, error)
+	additionalHashGlob  string
+	usePerProject       bool
+	excludeIfExist      []string
 }
 
 // containsTool checks if a tool is already in the slice
@@ -36,8 +35,7 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 	return detectDirectoriesToCache(skipPrepare, false)
 }
 
-// DetectDirectoriesToCacheWithNpmPackageJSON replays a package.json fallback
-// selected by an earlier restore step, even if npm generated a lockfile since.
+// DetectDirectoriesToCacheWithNpmPackageJSON forces package.json fallback detection for the save step.
 func DetectDirectoriesToCacheWithNpmPackageJSON(skipPrepare bool) ([]string, []string, string, error) {
 	return detectDirectoriesToCache(skipPrepare, true)
 }
@@ -59,9 +57,6 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			tool:         "gradle",
 			preparer:     newGradlePreparer(),
 		},
-		// MODULE.bazel is checked BEFORE WORKSPACE because:
-		// 1. In modern Bazel (6+), MODULE.bazel takes precedence
-		// 2. We only want ONE Bazel preparer to run, not both
 		{
 			globToDetect: "MODULE.bazel",
 			tool:         "bazel",
@@ -73,30 +68,23 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:     newBazelPreparer(),
 		},
 		{
-			// The lockfile, not package.json: a dependency bump often lands in
-			// the lockfile alone, and that has to invalidate the cache.
-			globToDetect:       "package-lock.json",
-			tool:               "node",
-			preparer:           newNodePreparer(),
-			additionalCacheDir: npmCacheDir,
+			globToDetect:        "package-lock.json",
+			tool:                "node",
+			preparer:            newNodePreparer(),
+			additionalCacheDirs: npmCacheDirs,
 		},
 		{
-			// Fallback: package.json only. Caches node_modules without writing .npmrc.
-			// Blocked if another package manager's lockfile is present in the directory.
 			globToDetect:   "package.json",
 			tool:           "node",
 			preparer:       newNodeFallbackPreparer(),
 			excludeIfExist: []string{"yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"},
 		},
 		{
-			// Yarn repos matched the old package.json glob too, which is what
-			// cached node_modules and put package.json in the key. Both kept
-			// here so yarn behaviour is unchanged.
-			globToDetect:       "yarn.lock",
-			tool:               "yarn",
-			preparer:           newYarnPreparer(),
-			additionalCacheDir: nodeModulesDir,
-			additionalHashGlob: "package.json",
+			globToDetect:        "yarn.lock",
+			tool:                "yarn",
+			preparer:            newYarnPreparer(),
+			additionalCacheDirs: nodeModulesDirs,
+			additionalHashGlob:  "package.json",
 		},
 		{
 			globToDetect: "go.mod",
@@ -182,15 +170,15 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 				}
 
 				directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
-				if supportedTool.additionalCacheDir != nil {
-					dirToCache, err = supportedTool.additionalCacheDir(dir)
+				if supportedTool.additionalCacheDirs != nil {
+					extraDirs, err := supportedTool.additionalCacheDirs(dir)
 					if err != nil {
 						return nil, nil, "", err
 					}
-					// Empty when there is no second directory worth caching,
-					// e.g. npm's cache was never relocated.
-					if dirToCache != "" {
-						directoriesToCache = appendIfMissing(directoriesToCache, dirToCache)
+					for _, extra := range extraDirs {
+						if extra != "" {
+							directoriesToCache = appendIfMissing(directoriesToCache, extra)
+						}
 					}
 				}
 				buildToolsDetected = appendIfMissing(buildToolsDetected, supportedTool.tool)
@@ -212,8 +200,7 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 	return directoriesToCache, buildToolsDetected, hashes, nil
 }
 
-// NpmPackageJSONFallbackDetected reports whether normal detection selected
-// package.json because no npm lockfile was present.
+// NpmPackageJSONFallbackDetected reports whether package.json was selected as fallback.
 func NpmPackageJSONFallbackDetected() (bool, error) {
 	hash, _, err := hashFileOrNested("package-lock.json")
 	if err != nil || hash != "" {
@@ -237,8 +224,7 @@ func appendIfMissing(slice []string, elem string) []string {
 	return append(slice, elem)
 }
 
-// hashFileOrNested hashes the root-most match, falling back to one level down.
-// filepath.Glob does not treat ** as recursive, so it goes no deeper than that.
+// hashFileOrNested hashes the root match, falling back to one directory level down.
 func hashFileOrNested(glob string) (string, string, error) {
 	hash, dir, err := hashIfFileExist(glob)
 	if err != nil {

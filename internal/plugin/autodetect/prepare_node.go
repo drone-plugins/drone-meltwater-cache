@@ -8,10 +8,7 @@ import (
 	"strings"
 )
 
-// npm's tarball cache, moved out of ~/.npm. The plugin runs in its own
-// container, where $HOME is unset and would point at the wrong home anyway.
-// The workspace is the only volume shared with the build step, same reason
-// maven, gradle, yarn and bazel relocate theirs.
+// npmCacheDirName is the workspace directory for relocated npm tarball cache.
 const npmCacheDirName = ".npm"
 
 const npmrcFileName = ".npmrc"
@@ -23,8 +20,7 @@ func newNodePreparer() *nodePreparer {
 }
 
 func (*nodePreparer) PrepareRepo(dir string) (string, error) {
-	// Best effort. .npmrc is sometimes a read-only mounted secret, and failing
-	// to write it shouldn't fail the step - we just lose the tarball cache.
+	// Best-effort configuration of .npmrc.
 	_ = prepareNpmrc(dir)
 
 	return filepath.Join(dir, "node_modules"), nil
@@ -40,42 +36,35 @@ func (*nodeFallbackPreparer) PrepareRepo(dir string) (string, error) {
 	return filepath.Join(dir, "node_modules"), nil
 }
 
-// npmCacheDir reports where npm will actually put its tarball cache, following
-// npm's precedence: npm_config_cache beats .npmrc. An empty path means the
-// cache was never relocated, so there is nothing here worth archiving.
-func npmCacheDir(dir string) (string, error) {
+// npmCacheDirs resolves the effective npm cache directory.
+func npmCacheDirs(dir string) ([]string, error) {
 	if envCache := npmCacheFromEnv(); envCache != "" {
 		absPath, err := filepath.Abs(envCache)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		return filepath.Clean(absPath), nil
+		return []string{filepath.Clean(absPath)}, nil
 	}
 
-	// PrepareRepo ran first, so an entry exists unless .npmrc was unreadable.
 	configured, err := npmCacheFromNpmrc(filepath.Join(dir, npmrcFileName))
 	if err != nil || configured == "" {
-		return "", nil
+		return nil, nil
 	}
 
 	if filepath.IsAbs(configured) {
-		return filepath.Clean(configured), nil
+		return []string{filepath.Clean(configured)}, nil
 	}
 
-	return filepath.Join(dir, configured), nil
+	return []string{filepath.Join(dir, configured)}, nil
 }
 
-// nodeModulesDir is for tools that install into node_modules but keep their
-// download cache elsewhere, e.g. yarn.
-func nodeModulesDir(dir string) (string, error) {
-	return filepath.Join(dir, "node_modules"), nil
+// nodeModulesDirs resolves the node_modules path.
+func nodeModulesDirs(dir string) ([]string, error) {
+	return []string{filepath.Join(dir, "node_modules")}, nil
 }
 
-// prepareNpmrc appends cache=<dir>/.npm to .npmrc. An existing entry wins,
-// whether it is the user's or ours from an earlier step, so restore and save
-// agree on the path and we never append twice. npm_config_cache overrides
-// .npmrc anyway, so nothing is written when it is set.
+// prepareNpmrc appends cache=<dir>/.npm to .npmrc if not already configured.
 func prepareNpmrc(dir string) error {
 	if npmCacheFromEnv() != "" {
 		return nil
@@ -137,8 +126,7 @@ func npmCacheFromEnv() string {
 	return ""
 }
 
-// npmCacheFromNpmrc returns the last cache entry in the file, which is the one
-// npm honours. A missing file yields an empty value.
+// npmCacheFromNpmrc returns the cache entry from .npmrc.
 func npmCacheFromNpmrc(fileName string) (string, error) {
 	f, err := os.Open(fileName)
 	if err != nil {

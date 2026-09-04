@@ -26,8 +26,7 @@ var (
 	ErrPlanScopeMismatch = errors.New("cache plan scope does not match this execution")
 )
 
-// AutoDetectPlan preserves the package.json decision made by Restore.
-// PathIDs are hashes of autodetected paths, never paths trusted for archiving.
+// AutoDetectPlan preserves the fallback plan between restore and save steps.
 type AutoDetectPlan struct {
 	Key     string   `json:"key"`
 	Scope   string   `json:"scope"`
