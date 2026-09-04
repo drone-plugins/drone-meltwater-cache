@@ -109,6 +109,26 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:      newDotnetPreparer(),
 			usePerProject: true,
 		},
+		{
+			globToDetect: "poetry.lock",
+			tool:         "python",
+			preparer:     newPythonPreparer(),
+		},
+		{
+			globToDetect: "uv.lock",
+			tool:         "python",
+			preparer:     newUvPreparer(),
+		},
+		{
+			globToDetect: "Pipfile.lock",
+			tool:         "python",
+			preparer:     newPythonPreparer(),
+		},
+		{
+			globToDetect: "requirements.txt",
+			tool:         "python",
+			preparer:     newPythonPreparer(),
+		},
 	}
 
 	var directoriesToCache []string
