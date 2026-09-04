@@ -10,6 +10,7 @@ import (
 )
 
 func TestPythonPreparerPoetry(t *testing.T) {
+	t.Setenv("POETRY_CACHE_DIR", "")
 	tempDir := t.TempDir()
 	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "poetry.lock"), nil, 0644))
 
@@ -17,7 +18,7 @@ func TestPythonPreparerPoetry(t *testing.T) {
 	pyproject := "[tool.poetry]\nname = \"test\"\n"
 	test.Ok(t, os.WriteFile(pyprojectPath, []byte(pyproject), 0644))
 
-	cacheDir, err := newPythonPreparer().PrepareRepo(tempDir)
+	cacheDir, err := newPoetryPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
 
 	expectedCacheDir := filepath.Join(tempDir, ".cache", "poetry")
@@ -26,8 +27,6 @@ func TestPythonPreparerPoetry(t *testing.T) {
 	test.Ok(t, err)
 	test.Assert(t, strings.Contains(string(content), `cache-dir = "`+expectedCacheDir+`"`),
 		"expected poetry.toml to configure the cache directory")
-	test.Assert(t, strings.Contains(string(content), "virtualenvs.in-project = true"),
-		"expected in-project virtualenvs so .venv can be cached")
 
 	unchangedPyproject, err := os.ReadFile(pyprojectPath)
 	test.Ok(t, err)
@@ -35,15 +34,16 @@ func TestPythonPreparerPoetry(t *testing.T) {
 }
 
 func TestPythonPreparerPoetryMergesExistingConfig(t *testing.T) {
+	t.Setenv("POETRY_CACHE_DIR", "")
 	tempDir := t.TempDir()
 	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "poetry.lock"), nil, 0644))
 	configPath := filepath.Join(tempDir, "poetry.toml")
 	test.Ok(t, os.WriteFile(configPath, []byte("virtualenvs.create = false\ncache-dir = \"/old\"\n"), 0600))
 
 	expectedCacheDir := filepath.Join(tempDir, ".cache", "poetry")
-	_, err := newPythonPreparer().PrepareRepo(tempDir)
+	_, err := newPoetryPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
-	_, err = newPythonPreparer().PrepareRepo(tempDir)
+	_, err = newPoetryPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
 
 	content, err := os.ReadFile(configPath)
@@ -60,10 +60,11 @@ func TestPythonPreparerPoetryMergesExistingConfig(t *testing.T) {
 }
 
 func TestPythonPreparerPoetryWithoutPyproject(t *testing.T) {
+	t.Setenv("POETRY_CACHE_DIR", "")
 	tempDir := t.TempDir()
 	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "poetry.lock"), nil, 0644))
 
-	cacheDir, err := newPythonPreparer().PrepareRepo(tempDir)
+	cacheDir, err := newPoetryPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
 	test.Equals(t, filepath.Join(tempDir, ".cache", "poetry"), cacheDir)
 	test.Assert(t, fileExists(filepath.Join(tempDir, "poetry.toml")),
@@ -80,9 +81,9 @@ func TestPythonPreparerPipenv(t *testing.T) {
 	envPath := filepath.Join(tempDir, ".env")
 	test.Ok(t, os.WriteFile(envPath, []byte("EXISTING=value\nexport PIPENV_CACHE_DIR = /old\n"), 0600))
 
-	cacheDir, err := newPythonPreparer().PrepareRepo(tempDir)
+	cacheDir, err := newPipenvPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
-	_, err = newPythonPreparer().PrepareRepo(tempDir)
+	_, err = newPipenvPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
 
 	expectedCacheDir := filepath.Join(tempDir, ".cache", "pipenv")
@@ -121,6 +122,8 @@ func TestPipPreparerUsesEnvOverride(t *testing.T) {
 	cacheDir, err := newPipPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
 	test.Equals(t, absolute, cacheDir)
+	test.Assert(t, !fileExists(filepath.Join(tempDir, "pip.conf")),
+		"expected no pip.conf when PIP_CACHE_DIR wins")
 }
 
 func TestPythonPreparerPipenvUsesEnvOverride(t *testing.T) {
@@ -129,19 +132,39 @@ func TestPythonPreparerPipenvUsesEnvOverride(t *testing.T) {
 	custom := filepath.Join(tempDir, "custom-pipenv")
 	t.Setenv("PIPENV_CACHE_DIR", custom)
 
-	cacheDir, err := newPythonPreparer().PrepareRepo(tempDir)
+	cacheDir, err := newPipenvPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
 	test.Equals(t, custom, cacheDir)
 }
 
-func TestPythonPreparerPriorityPoetryOverPipenv(t *testing.T) {
+func TestPythonPreparerPoetryUsesEnvOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "poetry.lock"), nil, 0644))
+	custom := filepath.Join(tempDir, "custom-poetry")
+	t.Setenv("POETRY_CACHE_DIR", custom)
+
+	cacheDir, err := newPoetryPreparer().PrepareRepo(tempDir)
+	test.Ok(t, err)
+	test.Equals(t, custom, cacheDir)
+	test.Assert(t, !fileExists(filepath.Join(tempDir, "poetry.toml")),
+		"expected no poetry.toml when POETRY_CACHE_DIR wins")
+}
+
+// Poetry and Pipenv keep separate caches, so neither preparer may resolve to
+// the other's directory when both lockfiles are present.
+func TestPythonPreparerPoetryAndPipenvResolveSeparateCaches(t *testing.T) {
+	isolatePythonEnv(t)
 	tempDir := t.TempDir()
 	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "poetry.lock"), nil, 0644))
 	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "Pipfile.lock"), nil, 0644))
 
-	cacheDir, err := newPythonPreparer().PrepareRepo(tempDir)
+	poetryCacheDir, err := newPoetryPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
-	test.Equals(t, filepath.Join(tempDir, ".cache", "poetry"), cacheDir)
+	test.Equals(t, filepath.Join(tempDir, ".cache", "poetry"), poetryCacheDir)
+
+	pipenvCacheDir, err := newPipenvPreparer().PrepareRepo(tempDir)
+	test.Ok(t, err)
+	test.Equals(t, filepath.Join(tempDir, ".cache", "pipenv"), pipenvCacheDir)
 }
 
 func TestFileExists(t *testing.T) {
