@@ -375,6 +375,7 @@ func TestDetectDirectoriesToCachePythonPoetry(t *testing.T) {
 	test.Ok(t, err)
 	test.Ok(t, os.RemoveAll("poetry.lock"))
 	test.Ok(t, os.RemoveAll("pyproject.toml"))
+	test.Ok(t, os.RemoveAll("poetry.toml"))
 
 	// Should detect python tool
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
@@ -401,6 +402,7 @@ func TestDetectDirectoriesToCachePythonPipfile(t *testing.T) {
 	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
 	test.Ok(t, os.RemoveAll("Pipfile.lock"))
+	test.Ok(t, os.RemoveAll(".env"))
 
 	// Python should be detected
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
@@ -418,6 +420,7 @@ func TestDetectDirectoriesToCachePythonPipfile(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
+	t.Setenv("PIP_CACHE_DIR", ".cache/pip")
 	f, err := os.Create("requirements.txt")
 	test.Ok(t, err)
 	defer f.Close()
@@ -441,6 +444,18 @@ func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
 		}
 	}
 	test.Assert(t, pipCacheFound, "expected pip cache dir in %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCachePythonRequirementsNeedsCacheDir(t *testing.T) {
+	t.Setenv("PIP_CACHE_DIR", "")
+	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent), 0644))
+	defer os.Remove("requirements.txt")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Assert(t, !containsTool(buildToolsDetected, "python"),
+		"expected pip detection to require PIP_CACHE_DIR, got %v", buildToolsDetected)
+	test.Equals(t, 0, len(directoriesToCache))
 }
 
 func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
@@ -469,6 +484,7 @@ func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
 	test.Ok(t, os.RemoveAll("poetry.lock"))
 	test.Ok(t, os.RemoveAll("pyproject.toml"))
 	test.Ok(t, os.RemoveAll("requirements.txt"))
+	test.Ok(t, os.RemoveAll("poetry.toml"))
 
 	// Should detect python tool
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")

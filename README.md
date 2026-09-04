@@ -75,41 +75,47 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
 | **.NET** | `*.csproj/*.vbproj/.fsproj` | Per-project dirs | `bin/obj` | ✅ Native |
 | **Bazel** | `WORKSPACE/MODULE.bazel` | `.bazelrc` | `bazel-cache` | ✅ Appended |
-| **Poetry** | `poetry.lock` | `pyproject.toml` | `.cache/poetry` | ✅ Appended |
-| **uv** | `uv.lock` | `pyproject.toml` | `.cache/uv` | ✅ Appended |
-| **Pipenv** | `Pipfile.lock` | `.env.local` | `.cache/pipenv` | ✅ Created |
-| **pip** | `requirements.txt` | `setup.cfg` | `.cache/pip` | ✅ Appended |
+| **Poetry** | `poetry.lock` | `poetry.toml` | `.cache/poetry` | ✅ Merged |
+| **uv** | `uv.lock` | `uv.toml` or `pyproject.toml` | `.cache/uv` | ✅ Merged |
+| **Pipenv** | `Pipfile.lock` | `.env` | `.cache/pipenv` | ✅ Merged |
+| **pip** | `requirements.txt` | `PIP_CACHE_DIR` | User configured | ✅ Unchanged |
 
 #### Python Package Manager Details
 
-**Poetry & uv**: Modifies `pyproject.toml` to add cache-dir under `[tool.poetry]` and `[tool.uv]` respectively.
+**Poetry**: Modifies or creates Poetry's project-local `poetry.toml` file.
 
 ```toml
-[tool.poetry]
 cache-dir = ".cache/poetry"
+```
 
+**uv**: Modifies `uv.toml` when it exists; otherwise it adds the setting to
+`[tool.uv]` in `pyproject.toml`. If neither file exists, it creates `uv.toml`.
+
+```toml
 [tool.uv]
 cache-dir = ".cache/uv"
 ```
 
-**Pipenv**: Creates `.env.local` with cache directory environment variable.
+**Pipenv**: Adds the cache directory to the `.env` file that Pipenv loads
+automatically. Existing values and the `Pipfile` are preserved.
 
-```bash
-export PIPENV_CACHE_DIR=.cache/pipenv
+```dotenv
+PIPENV_CACHE_DIR=.cache/pipenv
 ```
 
-**pip**: Modifies or creates `setup.cfg` with cache-dir setting.
+**pip**: pip does not automatically load a repository-local configuration
+file. Set `PIP_CACHE_DIR` to a path shared by the cache and build steps. The
+plugin detects `requirements.txt` only when this variable is set.
 
-```ini
-[global]
-cache-dir = .cache/pip
+```bash
+PIP_CACHE_DIR=.cache/pip
 ```
 
 #### Example: Python Project with Poetry
 
 For projects using Poetry (`poetry.lock`), the plugin will:
 1. Automatically detect `poetry.lock`
-2. Modify `pyproject.toml` to set Poetry cache to `.cache/poetry`
+2. Modify `poetry.toml` to set Poetry cache to `.cache/poetry`
 3. Cache and restore `.cache/poetry` across builds
 
 No explicit mount configuration needed - just add the cache steps to your pipeline.
