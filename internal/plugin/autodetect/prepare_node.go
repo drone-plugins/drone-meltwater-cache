@@ -30,6 +30,16 @@ func (*nodePreparer) PrepareRepo(dir string) (string, error) {
 	return filepath.Join(dir, "node_modules"), nil
 }
 
+type nodeFallbackPreparer struct{}
+
+func newNodeFallbackPreparer() *nodeFallbackPreparer {
+	return &nodeFallbackPreparer{}
+}
+
+func (*nodeFallbackPreparer) PrepareRepo(dir string) (string, error) {
+	return filepath.Join(dir, "node_modules"), nil
+}
+
 // npmCacheDir reports where npm will actually put its tarball cache, following
 // npm's precedence: npm_config_cache beats .npmrc. An empty path means the
 // cache was never relocated, so there is nothing here worth archiving.

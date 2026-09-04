@@ -415,7 +415,7 @@ func TestDetectDirectoriesToCacheNodeModulesBesideNestedPackageLock(t *testing.T
 	test.Exists(t, filepath.Join(nestedDirectory, npmrcFile))
 }
 
-func TestDetectDirectoriesToCacheNodeIgnoresPackageJSONOnly(t *testing.T) {
+func TestDetectDirectoriesToCacheNodeFallsBackToPackageJSON(t *testing.T) {
 	isolateNpmEnv(t)
 	test.Ok(t, os.WriteFile(packageJSONFile, []byte(testFileContent), 0644))
 	defer os.Remove(packageJSONFile)
@@ -423,9 +423,79 @@ func TestDetectDirectoriesToCacheNodeIgnoresPackageJSONOnly(t *testing.T) {
 	directoriesToCache, buildToolsDetected, hash, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
 
-	test.Assert(t, directoriesToCache == nil, "expected no cache directories, got %v", directoriesToCache)
-	test.Assert(t, buildToolsDetected == nil, "expected no detected tools, got %v", buildToolsDetected)
-	test.Equals(t, hash, "")
+	workspace, err := filepath.Abs(".")
+	test.Ok(t, err)
+	test.Equals(t, directoriesToCache, []string{filepath.Join(workspace, "node_modules")})
+	test.Equals(t, buildToolsDetected, []string{toolNode})
+	test.Equals(t, hash, md5Hex(t, testFileContent))
+
+	_, err = os.Stat(npmrcFile)
+	test.Assert(t, os.IsNotExist(err), "package.json fallback must not write .npmrc")
+}
+
+func TestDetectDirectoriesToCacheNodePrefersPackageLock(t *testing.T) {
+	isolateNpmEnv(t)
+	test.Ok(t, os.WriteFile(packageJSONFile, []byte(testFileContent2), 0644))
+	defer os.Remove(packageJSONFile)
+	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))
+	defer os.Remove(packageLockFile)
+	defer os.Remove(npmrcFile)
+
+	directoriesToCache, buildToolsDetected, hash, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	workspace, err := filepath.Abs(".")
+	test.Ok(t, err)
+	test.Equals(t, directoriesToCache, []string{
+		filepath.Join(workspace, "node_modules"),
+		filepath.Join(workspace, npmCacheDirName),
+	})
+	test.Equals(t, buildToolsDetected, []string{toolNode})
+	test.Equals(t, hash, md5Hex(t, testFileContent))
+}
+
+func TestDetectDirectoriesToCacheNodeModulesBesideNestedPackageJSON(t *testing.T) {
+	isolateNpmEnv(t)
+	test.Ok(t, os.MkdirAll(nestedDirectory, 0755))
+	defer os.RemoveAll(nestedDirectory)
+	test.Ok(t, os.WriteFile(
+		filepath.Join(nestedDirectory, packageJSONFile),
+		[]byte(testFileContent),
+		0644,
+	))
+
+	directoriesToCache, buildToolsDetected, hash, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	nested, err := filepath.Abs(nestedDirectory)
+	test.Ok(t, err)
+	test.Equals(t, directoriesToCache, []string{filepath.Join(nested, "node_modules")})
+	test.Equals(t, buildToolsDetected, []string{toolNode})
+	test.Equals(t, hash, md5Hex(t, testFileContent))
+}
+
+func TestDetectDirectoriesToCacheNodeFallbackIgnoresOtherPackageManagers(t *testing.T) {
+	for _, lockfile := range []string{"yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"} {
+		t.Run(lockfile, func(t *testing.T) {
+			isolateNpmEnv(t)
+			dir := t.TempDir()
+			t.Chdir(dir)
+			test.Ok(t, os.WriteFile(packageJSONFile, []byte(testFileContent), 0644))
+			test.Ok(t, os.WriteFile(lockfile, []byte(testFileContent2), 0644))
+
+			directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+			test.Ok(t, err)
+
+			if lockfile == yarnLockFile {
+				test.Equals(t, buildToolsDetected, []string{toolYarn})
+				test.Assert(t, len(directoriesToCache) == 2, "expected yarn cache paths")
+				return
+			}
+
+			test.Assert(t, directoriesToCache == nil, "expected no npm cache paths, got %v", directoriesToCache)
+			test.Assert(t, buildToolsDetected == nil, "expected no detected tools, got %v", buildToolsDetected)
+		})
+	}
 }
 
 func TestDetectDirectoriesToCacheNodeLockfileChangeInvalidatesKey(t *testing.T) {

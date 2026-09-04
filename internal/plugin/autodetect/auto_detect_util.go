@@ -19,6 +19,7 @@ type buildToolInfo struct {
 	// A second file to fold into the cache key. Hashed before globToDetect.
 	additionalHashGlob string
 	usePerProject      bool
+	excludeIfExist     []string
 }
 
 // containsTool checks if a tool is already in the slice
@@ -32,6 +33,16 @@ func containsTool(slice []string, tool string) bool {
 }
 
 func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, error) {
+	return detectDirectoriesToCache(skipPrepare, false)
+}
+
+// DetectDirectoriesToCacheWithNpmPackageJSON replays a package.json fallback
+// selected by an earlier restore step, even if npm generated a lockfile since.
+func DetectDirectoriesToCacheWithNpmPackageJSON(skipPrepare bool) ([]string, []string, string, error) {
+	return detectDirectoriesToCache(skipPrepare, true)
+}
+
+func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, []string, string, error) {
 	var buildToolInfoMapping = []buildToolInfo{
 		{
 			globToDetect: "pom.xml",
@@ -68,6 +79,14 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			tool:               "node",
 			preparer:           newNodePreparer(),
 			additionalCacheDir: npmCacheDir,
+		},
+		{
+			// Fallback: package.json only. Caches node_modules without writing .npmrc.
+			// Blocked if another package manager's lockfile is present in the directory.
+			globToDetect:   "package.json",
+			tool:           "node",
+			preparer:       newNodeFallbackPreparer(),
+			excludeIfExist: []string{"yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"},
 		},
 		{
 			// Yarn repos matched the old package.json glob too, which is what
@@ -141,10 +160,21 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 				hashes += hash
 			}
 		} else {
-			hash, dir, err := hashFileOrNested(supportedTool.globToDetect)
+			if forceNpmPackageJSON && supportedTool.tool == "node" && supportedTool.globToDetect == "package-lock.json" {
+				continue
+			}
+
+			var hash, dir string
+			var err error
+			if len(supportedTool.excludeIfExist) > 0 {
+				hash, dir, err = hashFileOrNestedExcluding(supportedTool.globToDetect, supportedTool.excludeIfExist)
+			} else {
+				hash, dir, err = hashFileOrNested(supportedTool.globToDetect)
+			}
 			if err != nil {
 				return nil, nil, "", err
 			}
+
 			if hash != "" && !skipPrepare {
 				dirToCache, err := supportedTool.preparer.PrepareRepo(dir)
 				if err != nil {
@@ -182,6 +212,22 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 	return directoriesToCache, buildToolsDetected, hashes, nil
 }
 
+// NpmPackageJSONFallbackDetected reports whether normal detection selected
+// package.json because no npm lockfile was present.
+func NpmPackageJSONFallbackDetected() (bool, error) {
+	hash, _, err := hashFileOrNested("package-lock.json")
+	if err != nil || hash != "" {
+		return false, err
+	}
+
+	hash, _, err = hashFileOrNestedExcluding(
+		"package.json",
+		[]string{"yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"},
+	)
+
+	return hash != "", err
+}
+
 func appendIfMissing(slice []string, elem string) []string {
 	for _, v := range slice {
 		if v == elem {
@@ -204,6 +250,40 @@ func hashFileOrNested(glob string) (string, string, error) {
 	}
 
 	return hashIfFileExist(filepath.Join("**", glob))
+}
+
+func hashFileOrNestedExcluding(glob string, blockers []string) (string, string, error) {
+	hash, dir, err := hashIfFileExistExcluding(glob, blockers)
+	if err != nil || hash != "" {
+		return hash, dir, err
+	}
+
+	return hashIfFileExistExcluding(filepath.Join("**", glob), blockers)
+}
+
+func hashIfFileExistExcluding(glob string, blockers []string) (string, string, error) {
+	matches, _ := filepath.Glob(glob)
+
+	var eligible []string
+	for _, match := range matches {
+		blocked := false
+		for _, blocker := range blockers {
+			info, err := os.Stat(filepath.Join(filepath.Dir(match), blocker))
+			if err == nil && !info.IsDir() {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			eligible = append(eligible, match)
+		}
+	}
+
+	if len(eligible) == 0 {
+		return "", "", nil
+	}
+
+	return calculateMd5FromFiles(eligible)
 }
 
 func hashIfFileExist(glob string) (string, string, error) {
