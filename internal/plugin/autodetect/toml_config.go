@@ -33,12 +33,12 @@ func upsertTOMLString(path, section, key, value string) error {
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		if header, ok := tomlTableHeader(trimmed); ok {
 			if inTarget {
 				insertAt = i
 				break
 			}
-			inTarget = trimmed == targetHeader
+			inTarget = header == targetHeader
 			if inTarget {
 				targetFound = true
 				insertAt = i + 1
@@ -62,6 +62,24 @@ func upsertTOMLString(path, section, key, value string) error {
 	}
 
 	return writeTOMLLines(path, lines, newline, mode)
+}
+
+// tomlTableHeader reports whether a trimmed line is a TOML table header and
+// returns the header text with any trailing comment removed, so headers like
+// "[tool.uv]  # note" are still recognized. Only text after the final ']' is
+// treated as a comment, so a '#' inside the brackets (e.g. a quoted key) is
+// preserved. Without this, an unrecognized header caused the target section to
+// be appended a second time, producing a duplicate table and invalid TOML.
+func tomlTableHeader(trimmed string) (string, bool) {
+	if lb := strings.LastIndex(trimmed, "]"); lb >= 0 {
+		if strings.Contains(trimmed[lb+1:], "#") {
+			trimmed = strings.TrimSpace(trimmed[:lb+1])
+		}
+	}
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		return trimmed, true
+	}
+	return "", false
 }
 
 func tomlKeyMatches(line, key string) bool {
