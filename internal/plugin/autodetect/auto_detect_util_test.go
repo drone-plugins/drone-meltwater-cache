@@ -356,3 +356,220 @@ func TestDetectDirectoriesToCacheDotnetMixedProjectTypes(t *testing.T) {
 	test.Equals(t, buildToolsDetected, expectedDetectedTool)
 	test.Equals(t, hashes, expectedHash)
 }
+
+func TestDetectDirectoriesToCachePythonPoetry(t *testing.T) {
+	f, err := os.Create("poetry.lock")
+	test.Ok(t, err)
+	defer f.Close()
+	_, err = f.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	// Poetry requires pyproject.toml
+	fp, err := os.Create("pyproject.toml")
+	test.Ok(t, err)
+	defer fp.Close()
+	_, err = fp.WriteString("[tool.poetry]\nname = \"test\"\n")
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll("poetry.lock"))
+	test.Ok(t, os.RemoveAll("pyproject.toml"))
+	test.Ok(t, os.RemoveAll("poetry.toml"))
+
+	// Should detect python tool
+	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Equals(t, len(directoriesToCache) > 0, true)
+	// Find the poetry cache dir
+	var poetryCacheFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "poetry" {
+			poetryCacheFound = true
+			break
+		}
+	}
+	test.Assert(t, poetryCacheFound, "expected poetry cache dir in %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCachePythonPipfile(t *testing.T) {
+	f, err := os.Create("Pipfile.lock")
+	test.Ok(t, err)
+	defer f.Close()
+	_, err = f.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll("Pipfile.lock"))
+	test.Ok(t, os.RemoveAll(".env"))
+
+	// Python should be detected
+	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Equals(t, len(directoriesToCache) > 0, true)
+	// Find the pipenv cache dir
+	var pipenvCacheFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "pipenv" {
+			pipenvCacheFound = true
+			break
+		}
+	}
+	test.Assert(t, pipenvCacheFound, "expected pipenv cache dir in %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
+	t.Setenv("PIP_CACHE_DIR", ".cache/pip")
+	f, err := os.Create("requirements.txt")
+	test.Ok(t, err)
+	defer f.Close()
+	_, err = f.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll("requirements.txt"))
+
+	// Python should be detected
+	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Equals(t, len(directoriesToCache) > 0, true)
+	// Find the pip cache dir
+	var pipCacheFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "pip" {
+			pipCacheFound = true
+			break
+		}
+	}
+	test.Assert(t, pipCacheFound, "expected pip cache dir in %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCachePythonRequirementsNeedsCacheDir(t *testing.T) {
+	t.Setenv("PIP_CACHE_DIR", "")
+	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent), 0644))
+	defer os.Remove("requirements.txt")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Assert(t, !containsTool(buildToolsDetected, "python"),
+		"expected pip detection to require PIP_CACHE_DIR, got %v", buildToolsDetected)
+	test.Equals(t, 0, len(directoriesToCache))
+}
+
+func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
+	// Create both poetry.lock and requirements.txt
+	f1, err := os.Create("poetry.lock")
+	test.Ok(t, err)
+	defer f1.Close()
+	_, err = f1.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	// Poetry requires pyproject.toml
+	fp, err := os.Create("pyproject.toml")
+	test.Ok(t, err)
+	defer fp.Close()
+	_, err = fp.WriteString("[tool.poetry]\nname = \"test\"\n")
+	test.Ok(t, err)
+
+	f2, err := os.Create("requirements.txt")
+	test.Ok(t, err)
+	defer f2.Close()
+	_, err = f2.WriteString(testFileContent2)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll("poetry.lock"))
+	test.Ok(t, os.RemoveAll("pyproject.toml"))
+	test.Ok(t, os.RemoveAll("requirements.txt"))
+	test.Ok(t, os.RemoveAll("poetry.toml"))
+
+	// Should detect python tool
+	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	// Should prefer poetry over pip - find poetry cache dir
+	var poetryCacheFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "poetry" {
+			poetryCacheFound = true
+			break
+		}
+	}
+	test.Assert(t, poetryCacheFound, "expected poetry cache dir (should take priority over pip), got %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCacheUv(t *testing.T) {
+	// Create uv.lock and pyproject.toml
+	f, err := os.Create("uv.lock")
+	test.Ok(t, err)
+	defer f.Close()
+	_, err = f.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	fp, err := os.Create("pyproject.toml")
+	test.Ok(t, err)
+	defer fp.Close()
+	_, err = fp.WriteString("[project]\nname = \"test\"\n")
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll("uv.lock"))
+	test.Ok(t, os.RemoveAll("pyproject.toml"))
+
+	// uv should be detected as python tool
+	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Equals(t, len(directoriesToCache) > 0, true)
+	// Find the uv cache dir
+	var uvCacheFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "uv" {
+			uvCacheFound = true
+			break
+		}
+	}
+	test.Assert(t, uvCacheFound, "expected uv cache dir in %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCacheUvPriority(t *testing.T) {
+	// Create uv.lock and Pipfile.lock - uv should take priority
+	f1, err := os.Create("uv.lock")
+	test.Ok(t, err)
+	defer f1.Close()
+	_, err = f1.WriteString(testFileContent)
+	test.Ok(t, err)
+
+	fp, err := os.Create("pyproject.toml")
+	test.Ok(t, err)
+	defer fp.Close()
+	_, err = fp.WriteString("[project]\nname = \"test\"\n")
+	test.Ok(t, err)
+
+	f2, err := os.Create("Pipfile.lock")
+	test.Ok(t, err)
+	defer f2.Close()
+	_, err = f2.WriteString(testFileContent2)
+	test.Ok(t, err)
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Ok(t, os.RemoveAll("uv.lock"))
+	test.Ok(t, os.RemoveAll("pyproject.toml"))
+	test.Ok(t, os.RemoveAll("Pipfile.lock"))
+
+	// Should detect python tool
+	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	// Should prefer uv over pipenv - find uv cache dir
+	var uvCacheFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "uv" {
+			uvCacheFound = true
+			break
+		}
+	}
+	test.Assert(t, uvCacheFound, "expected uv cache dir (should take priority over pipenv), got %v", directoriesToCache)
+}

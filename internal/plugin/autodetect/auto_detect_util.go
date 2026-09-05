@@ -89,6 +89,30 @@ func DetectDirectoriesToCache(skipPrepare bool) ([]string, []string, string, err
 			preparer:      newDotnetPreparer(),
 			usePerProject: true,
 		},
+		{
+			globToDetect: "poetry.lock",
+			tool:         "python",
+			preparer:     newPythonPreparer(),
+		},
+		{
+			globToDetect: "uv.lock",
+			tool:         "python",
+			preparer:     newUvPreparer(),
+		},
+		{
+			globToDetect: "Pipfile.lock",
+			tool:         "python",
+			preparer:     newPythonPreparer(),
+		},
+	}
+	// pip does not discover repository-local configuration. Only enable its
+	// cache when the same PIP_CACHE_DIR can be supplied to pip build steps.
+	if pipCacheDir := os.Getenv("PIP_CACHE_DIR"); pipCacheDir != "" {
+		buildToolInfoMapping = append(buildToolInfoMapping, buildToolInfo{
+			globToDetect: "requirements.txt",
+			tool:         "python",
+			preparer:     newPipPreparer(pipCacheDir),
+		})
 	}
 
 	var directoriesToCache []string
