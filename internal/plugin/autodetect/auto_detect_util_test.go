@@ -498,6 +498,40 @@ func TestDetectDirectoriesToCacheNodeFallbackIgnoresOtherPackageManagers(t *test
 	}
 }
 
+func TestDetectDirectoriesToCacheNodeFallbackDoesNotUseNestedPackageJSONWhenRootIsBlocked(t *testing.T) {
+	for _, lockfile := range []string{"yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"} {
+		t.Run(lockfile, func(t *testing.T) {
+			isolateNpmEnv(t)
+			dir := t.TempDir()
+			t.Chdir(dir)
+			test.Ok(t, os.WriteFile(packageJSONFile, []byte(testFileContent), 0644))
+			test.Ok(t, os.WriteFile(lockfile, []byte(testFileContent2), 0644))
+			test.Ok(t, os.MkdirAll(nestedDirectory, 0755))
+			test.Ok(t, os.WriteFile(
+				filepath.Join(nestedDirectory, packageJSONFile),
+				[]byte(testFileContent),
+				0644,
+			))
+
+			directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+			test.Ok(t, err)
+
+			fallback, err := NpmPackageJSONFallbackDetected()
+			test.Ok(t, err)
+			test.Assert(t, !fallback, "expected no package.json fallback when a root lockfile blocks it")
+
+			if lockfile == yarnLockFile {
+				test.Equals(t, buildToolsDetected, []string{toolYarn})
+				test.Assert(t, len(directoriesToCache) == 2, "expected yarn cache paths")
+				return
+			}
+
+			test.Assert(t, directoriesToCache == nil, "expected no npm cache paths, got %v", directoriesToCache)
+			test.Assert(t, buildToolsDetected == nil, "expected no detected tools, got %v", buildToolsDetected)
+		})
+	}
+}
+
 func TestDetectDirectoriesToCacheNodeLockfileChangeInvalidatesKey(t *testing.T) {
 	isolateNpmEnv(t)
 	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))

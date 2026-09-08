@@ -239,9 +239,9 @@ func hashFileOrNested(glob string) (string, string, error) {
 }
 
 func hashFileOrNestedExcluding(glob string, blockers []string) (string, string, error) {
-	hash, dir, err := hashIfFileExistExcluding(glob, blockers)
-	if err != nil || hash != "" {
-		return hash, dir, err
+	matches, _ := filepath.Glob(glob)
+	if len(matches) > 0 {
+		return hashIfFileExistExcluding(glob, blockers)
 	}
 
 	return hashIfFileExistExcluding(filepath.Join("**", glob), blockers)
