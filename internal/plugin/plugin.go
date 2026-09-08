@@ -87,13 +87,41 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	// }
 
 	var generator key.Generator
+	var fallbackPlanUsed bool
 
 	switch {
 	case cfg.AutoDetect:
 		{
-			var toolDetected, keyOverriden bool = false, false
+			var toolDetected bool
 			pathOverridden := len(p.Config.Mount) > 0
-			dirs, buildTools, cacheKey, err := autodetect.DetectDirectoriesToCache(pathOverridden)
+			keyOverriden := cfg.CacheKeyTemplate != ""
+
+			var fallbackPlan autodetect.AutoDetectPlan
+			var fallbackPlanFound bool
+			if cfg.Rebuild && !pathOverridden && !keyOverriden &&
+				strings.TrimSpace(os.Getenv("HARNESS_TMP_PATH")) != "" {
+				var err error
+				fallbackPlan, fallbackPlanFound, err = autodetect.ReadAutoDetectPlan()
+				if err != nil {
+					level.Warn(p.logger).Log(
+						"msg", "could not read package.json cache plan; using current workspace state",
+						"err", err,
+					)
+					_ = autodetect.RemoveAutoDetectPlan()
+					fallbackPlanFound = false
+				}
+			}
+
+			var dirs, buildTools []string
+			var cacheKey string
+			var err error
+			if fallbackPlanFound {
+				dirs, buildTools, cacheKey, err =
+					autodetect.DetectDirectoriesToCacheWithNpmPackageJSON(pathOverridden)
+			} else {
+				dirs, buildTools, cacheKey, err =
+					autodetect.DetectDirectoriesToCache(pathOverridden)
+			}
 			if err != nil {
 				return fmt.Errorf("autodetect enabled but failed to detect, falling back to default, %w", err)
 			}
@@ -105,17 +133,45 @@ func (p *Plugin) Exec() error { // nolint:funlen
 			} else {
 				p.logger.Log("msg", "no supported build tool detected") //nolint: errcheck
 			}
+			if cfg.CacheKeyTemplate != "" {
+				cacheKey = cfg.CacheKeyTemplate
+			} else if cacheKey == "" {
+				cacheKey = "default"
+			}
+
+			if !keyOverriden && !pathOverridden {
+				if cfg.Restore && toolDetected {
+					fallbackDetected, err := autodetect.NpmPackageJSONFallbackDetected()
+					if err != nil {
+						return fmt.Errorf("identify package.json cache fallback, %w", err)
+					}
+					if fallbackDetected {
+						plan := autodetect.AutoDetectPlan{
+							Key:     cacheKey,
+							PathIDs: autodetect.PathIdentities(dirs),
+						}
+						if err := autodetect.WriteAutoDetectPlan(plan); err != nil {
+							level.Warn(p.logger).Log(
+								"msg", "could not record package.json cache plan",
+								"err", err,
+							)
+						}
+					}
+				}
+
+				if cfg.Rebuild && fallbackPlanFound {
+					cacheKey = fallbackPlan.Key
+					dirs = autodetect.FilterPathsForPlan(dirs, fallbackPlan.PathIDs)
+					toolDetected = true
+					fallbackPlanUsed = true
+				}
+			}
+
 			if !pathOverridden {
 				p.Config.Mount = dirs
 				options = append(options, cache.WithGracefulDetect(true))
 			} else {
 				options = append(options, cache.WithGracefulDetect(false))
-			}
-			if cfg.CacheKeyTemplate != "" {
-				keyOverriden = true
-				cacheKey = cfg.CacheKeyTemplate
-			} else if cacheKey == "" {
-				cacheKey = "default"
 			}
 
 			/*
@@ -212,6 +268,11 @@ func (p *Plugin) Exec() error { // nolint:funlen
 		if err := c.Rebuild(p.Config.Mount); err != nil {
 			level.Debug(p.logger).Log("err", fmt.Sprintf("%+v\n", err))
 			return Error(fmt.Sprintf("[IMPORTANT] build cache, %+v\n", err))
+		}
+		if fallbackPlanUsed {
+			if err := autodetect.RemoveAutoDetectPlan(); err != nil {
+				level.Warn(p.logger).Log("msg", "could not remove consumed package.json cache plan", "err", err)
+			}
 		}
 	}
 
