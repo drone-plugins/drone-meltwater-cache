@@ -292,13 +292,13 @@ You can find released images at [DockerHub](https://hub.docker.com/r/meltwater/d
 
 ## Versioning
 
-`drone-cache` uses [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/meltwater/drone-cache/tags).
+`drone-cache` uses [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/drone-plugins/drone-meltwater-cache/tags).
 
 As the versioning scheme dictates, `drone-cache` respects _backward compatibility_ within the major versions. However, the project only offers guarantees regarding the command-line interface (flags and environment variables). **Any exported public package can change its API.**
 
 ## Authors and Acknowledgement
 
-See the list of [all contributors](https://github.com/meltwater/drone-cache/graphs/contributors).
+See the list of [all contributors](https://github.com/drone-plugins/drone-meltwater-cache/graphs/contributors).
 
 - [@dim](https://github.com/dim) - Thanks for [original work](https://github.com/bsm/drone-s3-cache)!
 - [@AdamGlazerMW](https://github.com/AdamGlazerMW) - Special thanks to Adam for the amazing artwork!
@@ -315,9 +315,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) to understand how to submit pull 
 
 ## Future work
 
-All ideas for new features and bug reports will be kept in [github.com/meltwater/drone-cache/issues](https://github.com/meltwater/drone-cache/issues).
-
-One bigger area of future investment is to add a couple of [new storage backends](https://github.com/meltwater/drone-cache/labels/storage-backend) for caching the workspace files.
+All ideas for new features and bug reports will be kept in [github.com/drone-plugins/drone-meltwater-cache/issues](https://github.com/drone-plugins/drone-meltwater-cache/issues).
 
 ## License and Copyright
 
