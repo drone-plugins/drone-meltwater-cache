@@ -59,6 +59,22 @@ func TestRoundTrip(t *testing.T) {
 	roundTrip(t, backend)
 }
 
+func TestRoundTripMultipart(t *testing.T) {
+	t.Parallel()
+
+	backend, cleanUp := setup(t, Config{
+		ACL:       acl,
+		Bucket:    "s3-round-trip-multipart",
+		Endpoint:  endpoint,
+		Key:       accessKey,
+		PathStyle: true,
+		Region:    defaultRegion,
+		Secret:    secretAccessKey,
+	})
+	t.Cleanup(cleanUp)
+	roundTripMultipart(t, backend)
+}
+
 func TestRoundTripWithAssumeRoleAndExternalID(t *testing.T) {
 	t.Parallel()
 
@@ -124,6 +140,30 @@ func roundTrip(t *testing.T, backend *Backend) {
 	entries, err := backend.List(context.TODO(), "")
 	test.Ok(t, err)
 	test.Equals(t, 1, len(entries))
+}
+
+func roundTripMultipart(t *testing.T, backend *Backend) {
+	// >5MiB payload forces the multipart upload path (the manager's default
+	// part size is 5MiB) — the path failing against S3-compatible backends
+	// in CI-24370. The reader is unseekable, like the archive layer's pipe
+	// readers.
+	content := bytes.Repeat([]byte("multipart-round-trip."), 6<<20/20+1)
+
+	r := struct{ io.Reader }{bytes.NewReader(content)}
+	test.Ok(t, backend.Put(context.TODO(), "test-multipart.t", r))
+
+	var buf bytes.Buffer
+	test.Ok(t, backend.Get(context.TODO(), "test-multipart.t", &buf))
+
+	b, err := io.ReadAll(&buf)
+	test.Ok(t, err)
+
+	test.Equals(t, content, b)
+
+	exists, err := backend.Exists(context.TODO(), "test-multipart.t")
+	test.Ok(t, err)
+
+	test.Equals(t, true, exists)
 }
 
 // Helpers

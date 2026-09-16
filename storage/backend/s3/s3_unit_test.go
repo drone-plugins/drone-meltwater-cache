@@ -1,14 +1,24 @@
 package s3
 
 import (
+	"bytes"
 	"context"
+	"encoding/pem"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/go-kit/log"
 	"github.com/meltwater/drone-cache/test"
 )
 
@@ -432,4 +442,285 @@ func TestList_PrefixHandling_DirectoryBucket(t *testing.T) {
 			test.Equals(t, tc.expectedPrefix, prefix, tc.description)
 		})
 	}
+}
+
+// --- Checksum suppression for S3-compatible endpoints (CI-24370) ---
+
+func TestHasCustomEndpoint(t *testing.T) {
+	// Uses t.Setenv, so no t.Parallel.
+	t.Setenv("AWS_ENDPOINT_URL", "")
+	t.Setenv("AWS_ENDPOINT_URL_S3", "")
+
+	testCases := []struct {
+		name           string
+		pluginEndpoint string
+		cfgEndpoint    *string
+		s3EndpointEnv  string
+		expected       bool
+	}{
+		{
+			name:           "plugin endpoint set",
+			pluginEndpoint: "https://minio.example.com",
+			expected:       true,
+		},
+		{
+			name:        "config base endpoint set (AWS_ENDPOINT_URL env chain)",
+			cfgEndpoint: aws.String("https://minio.example.com"),
+			expected:    true,
+		},
+		{
+			name:          "service specific endpoint env (AWS_ENDPOINT_URL_S3)",
+			s3EndpointEnv: "https://minio.example.com",
+			expected:      true,
+		},
+		{
+			name:     "aws s3 defaults (no endpoint)",
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.s3EndpointEnv != "" {
+				t.Setenv("AWS_ENDPOINT_URL_S3", tc.s3EndpointEnv)
+			}
+
+			cfg := aws.Config{}
+			if tc.cfgEndpoint != nil {
+				cfg.BaseEndpoint = tc.cfgEndpoint
+			}
+
+			test.Equals(t, tc.expected, hasCustomEndpoint(tc.pluginEndpoint, cfg), tc.name)
+		})
+	}
+}
+
+// capturedS3Request records a single S3 API request received by the fake
+// S3 test server.
+type capturedS3Request struct {
+	method string
+	path   string
+	query  url.Values
+	header http.Header
+}
+
+// fakeS3Recorder records requests received by the fake S3 server. Uploads
+// run parts concurrently, so access is guarded by a mutex.
+type fakeS3Recorder struct {
+	mu       sync.Mutex
+	requests []capturedS3Request
+}
+
+func (r *fakeS3Recorder) record(req capturedS3Request) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = append(r.requests, req)
+}
+
+func (r *fakeS3Recorder) all() []capturedS3Request {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]capturedS3Request(nil), r.requests...)
+}
+
+// newFakeS3TLSServer starts an HTTPS httptest server implementing the minimal
+// S3 API surface the multipart upload manager needs: CreateMultipartUpload,
+// UploadPart, CompleteMultipartUpload, and PutObject.
+func newFakeS3TLSServer(t *testing.T) (*httptest.Server, *fakeS3Recorder) {
+	t.Helper()
+
+	rec := &fakeS3Recorder{}
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+
+		rec.record(capturedS3Request{
+			method: r.Method,
+			path:   r.URL.Path,
+			query:  r.URL.Query(),
+			header: r.Header.Clone(),
+		})
+
+		w.Header().Set("Content-Type", "application/xml")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Query().Has("uploads"):
+			// CreateMultipartUpload
+			_, _ = w.Write([]byte(`<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>key</Key><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>`))
+		case r.Method == http.MethodPut && r.URL.Query().Has("uploadId"):
+			// UploadPart
+			w.Header().Set("ETag", `"etag"`)
+		case r.Method == http.MethodPost && r.URL.Query().Has("uploadId"):
+			// CompleteMultipartUpload
+			_, _ = w.Write([]byte(`<CompleteMultipartUploadResult><Location>localhost</Location><Bucket>bucket</Bucket><Key>key</Key><ETag>"etag"</ETag></CompleteMultipartUploadResult>`))
+		default:
+			// PutObject and anything else
+			w.Header().Set("ETag", `"etag"`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv, rec
+}
+
+// trustTestServerCert makes the SDK (LoadDefaultConfig) trust the httptest
+// TLS server certificate via the AWS_CA_BUNDLE environment variable.
+func trustTestServerCert(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+
+	cert := srv.Certificate()
+	if cert == nil {
+		t.Fatal("test server did not expose its certificate")
+	}
+
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	certFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(certFile, pemBytes, 0o600); err != nil {
+		t.Fatalf("write CA bundle: %v", err)
+	}
+
+	t.Setenv("AWS_CA_BUNDLE", certFile)
+}
+
+// assertMultipartUpload verifies the payload actually went through the
+// multipart upload path (CreateMultipartUpload + UploadPart + Complete).
+func assertMultipartUpload(t *testing.T, requests []capturedS3Request) {
+	t.Helper()
+
+	var sawCreate, sawUploadPart, sawComplete bool
+	for _, req := range requests {
+		if req.method == http.MethodPost && req.query.Has("uploads") {
+			sawCreate = true
+		}
+		if req.method == http.MethodPut && req.query.Has("uploadId") {
+			sawUploadPart = true
+		}
+		if req.method == http.MethodPost && req.query.Has("uploadId") {
+			sawComplete = true
+		}
+	}
+
+	test.Assert(t, sawCreate, "CreateMultipartUpload should have been issued (payload exceeds 5MiB part size)")
+	test.Assert(t, sawUploadPart, "UploadPart should have been issued (the call failing for NetApp ONTAP S3 in CI-24370)")
+	test.Assert(t, sawComplete, "CompleteMultipartUpload should have been issued")
+}
+
+// assertNoDefaultChecksums verifies none of the requests carry the AWS SDK
+// v2 default CRC32 checksums. S3-compatible backends such as NetApp ONTAP S3
+// reject the resulting streaming trailer with 400 InvalidArgument
+// (x-amz-content-sha256 must be UNSIGNED-PAYLOAD, ... or a valid sha256).
+func assertNoDefaultChecksums(t *testing.T, requests []capturedS3Request) {
+	t.Helper()
+
+	for _, req := range requests {
+		for _, header := range []string{
+			"x-amz-checksum-algorithm",
+			"x-amz-sdk-checksum-algorithm",
+			"x-amz-checksum-crc32",
+			"x-amz-trailer",
+		} {
+			if v := req.header.Get(header); v != "" {
+				t.Errorf("%s %s: %s header is set to %q, want no default checksum headers for S3-compatible endpoints",
+					req.method, req.path, header, v)
+			}
+		}
+
+		// Requests carrying a body must use UNSIGNED-PAYLOAD, not the
+		// STREAMING-UNSIGNED-PAYLOAD-TRAILER value rejected by NetApp ONTAP S3.
+		if req.method == http.MethodPut {
+			if got := req.header.Get("x-amz-content-sha256"); got != "UNSIGNED-PAYLOAD" {
+				t.Errorf("%s %s: x-amz-content-sha256 = %q, want UNSIGNED-PAYLOAD (CI-24370)",
+					req.method, req.path, got)
+			}
+		}
+	}
+}
+
+// TestPut_MultipartUpload_NoDefaultChecksums_PluginEndpoint reproduces
+// CI-24370: multipart uploads (cache archives exceed the 5MiB default part
+// size) to an S3-compatible endpoint must not send the AWS SDK v2 default
+// CRC32 streaming/trailing checksums that NetApp ONTAP S3 rejects with
+// 400 InvalidArgument.
+func TestPut_MultipartUpload_NoDefaultChecksums_PluginEndpoint(t *testing.T) {
+	// Uses t.Setenv (CA bundle), so no t.Parallel.
+	srv, rec := newFakeS3TLSServer(t)
+	trustTestServerCert(t, srv)
+
+	backend, err := New(log.NewNopLogger(), Config{
+		Bucket:   "test-bucket",
+		Endpoint: srv.URL,
+		Key:      "test-access-key",
+		Secret:   "test-secret-key",
+		Region:   "eu-west-1",
+	}, false)
+	test.Ok(t, err)
+
+	// 6MiB unseekable payload (like the pipe readers the archive layer
+	// produces) exceeds the manager's 5MiB default part size and forces the
+	// multipart UploadPart path — the customer's failing call.
+	payload := struct{ io.Reader }{bytes.NewReader(bytes.Repeat([]byte("cache-archive"), 6<<20/13+1))}
+
+	test.Ok(t, backend.Put(context.Background(), "test-key", payload))
+
+	requests := rec.all()
+	assertMultipartUpload(t, requests)
+	assertNoDefaultChecksums(t, requests)
+}
+
+// TestPut_MultipartUpload_NoDefaultChecksums_EnvChainEndpoint covers the
+// endpoint arriving through the standard AWS environment chain
+// (AWS_ENDPOINT_URL) instead of plugin configuration: it must still be
+// treated as an S3-compatible endpoint and get checksum suppression.
+func TestPut_MultipartUpload_NoDefaultChecksums_EnvChainEndpoint(t *testing.T) {
+	// Uses t.Setenv, so no t.Parallel.
+	srv, rec := newFakeS3TLSServer(t)
+	trustTestServerCert(t, srv)
+
+	t.Setenv("AWS_ENDPOINT_URL", srv.URL)
+	t.Setenv("AWS_ENDPOINT_URL_S3", "")
+
+	backend, err := New(log.NewNopLogger(), Config{
+		Bucket: "test-bucket",
+		Key:    "test-access-key",
+		Secret: "test-secret-key",
+		Region: "eu-west-1",
+	}, false)
+	test.Ok(t, err)
+
+	payload := struct{ io.Reader }{bytes.NewReader(bytes.Repeat([]byte("cache-archive"), 6<<20/13+1))}
+
+	test.Ok(t, backend.Put(context.Background(), "test-key", payload))
+
+	requests := rec.all()
+	// Sanity: the env-chain endpoint must have actually directed traffic to
+	// the fake server (otherwise the test proves nothing).
+	test.Assert(t, len(requests) > 0, "requests should have reached the fake S3 server via AWS_ENDPOINT_URL")
+	assertMultipartUpload(t, requests)
+	assertNoDefaultChecksums(t, requests)
+}
+
+// TestPut_SinglePart_NoDefaultChecksums_PluginEndpoint guards the single-part
+// PutObject path: small uploads to S3-compatible endpoints must also stay
+// free of default checksums.
+func TestPut_SinglePart_NoDefaultChecksums_PluginEndpoint(t *testing.T) {
+	// Uses t.Setenv (CA bundle), so no t.Parallel.
+	srv, rec := newFakeS3TLSServer(t)
+	trustTestServerCert(t, srv)
+
+	backend, err := New(log.NewNopLogger(), Config{
+		Bucket:   "test-bucket",
+		Endpoint: srv.URL,
+		Key:      "test-access-key",
+		Secret:   "test-secret-key",
+		Region:   "eu-west-1",
+	}, false)
+	test.Ok(t, err)
+
+	test.Ok(t, backend.Put(context.Background(), "small-key", strings.NewReader("hello world")))
+
+	requests := rec.all()
+	test.Equals(t, 1, len(requests), "small object should be a single PutObject request")
+	test.Equals(t, http.MethodPut, requests[0].method, "expected a PutObject request")
+	assertNoDefaultChecksums(t, requests)
 }

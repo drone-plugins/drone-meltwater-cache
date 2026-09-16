@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -86,15 +87,25 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
 			o.UsePathStyle = c.PathStyle
-			// S3-compatible services (MinIO, Spaces, B2, etc.) may not support the
-			// CRC32 checksums that SDK v2 sends by default. Pipe-based uploads are
-			// also unseekable and break trailing checksums over plain HTTP.
-			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		})
 	} else if c.PathStyle {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.UsePathStyle = true
 		})
+	}
+
+	customEndpoint := hasCustomEndpoint(endpoint, cfg)
+	if customEndpoint {
+		// S3-compatible services (MinIO, Spaces, B2, NetApp ONTAP, etc.) may not
+		// support the CRC32 checksums that SDK v2 sends by default. Pipe-based
+		// uploads are also unseekable and break trailing checksums over plain
+		// HTTP. Suppress default request checksum calculation for non-AWS
+		// endpoints; AWS S3 keeps the SDK default (WHEN_SUPPORTED) for data
+		// integrity.
+		s3Opts = append(s3Opts, func(o *s3.Options) {
+			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+		})
+		logrus.Info("Custom S3 endpoint detected; default CRC32 request checksums disabled for S3 compatibility")
 	}
 
 	client := s3.NewFromConfig(cfg, s3Opts...)
@@ -122,12 +133,27 @@ func New(l log.Logger, c Config, debug bool) (*Backend, error) {
 		"Client": client,
 	}).Info("New Client set here.")
 
+	// The multipart upload manager keeps its own RequestChecksumCalculation
+	// default (WHEN_SUPPORTED) and injects an explicit CRC32 algorithm into
+	// multipart part inputs, which overrides the client-level option set
+	// above. S3-compatible backends (e.g. NetApp ONTAP S3) reject those
+	// trailing checksums with 400 InvalidArgument, so suppress them at the
+	// uploader level too. AWS S3 keeps SDK defaults for data integrity.
+	var uploader *s3manager.Uploader
+	if customEndpoint {
+		uploader = s3manager.NewUploader(client, func(u *s3manager.Uploader) {
+			u.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+		})
+	} else {
+		uploader = s3manager.NewUploader(client)
+	}
+
 	backend := &Backend{
 		logger:            l,
 		bucket:            c.Bucket,
 		encryption:        c.Encryption,
 		client:            client,
-		uploader:          s3manager.NewUploader(client),
+		uploader:          uploader,
 		isDirectoryBucket: detectDirectoryBucket(ctx, client, c.Bucket),
 	}
 
@@ -152,6 +178,18 @@ func normalizeEndpoint(endpoint string) string {
 		return endpoint
 	}
 	return "https://" + endpoint
+}
+
+// hasCustomEndpoint reports whether the backend will talk to an S3-compatible
+// service rather than AWS S3. The endpoint can be configured directly on the
+// plugin (PLUGIN_ENDPOINT / S3_ENDPOINT) or reach the SDK through the standard
+// AWS environment chain (AWS_ENDPOINT_URL via cfg.BaseEndpoint, and the
+// service-specific AWS_ENDPOINT_URL_S3) resolved by LoadDefaultConfig.
+func hasCustomEndpoint(pluginEndpoint string, cfg aws.Config) bool {
+	if pluginEndpoint != "" || cfg.BaseEndpoint != nil {
+		return true
+	}
+	return os.Getenv("AWS_ENDPOINT_URL_S3") != ""
 }
 
 // Get writes downloaded content to the given writer.
