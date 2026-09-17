@@ -802,7 +802,7 @@ func TestDetectDirectoriesToCachePythonPipfile(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
-	t.Setenv("PIP_CACHE_DIR", ".cache/pip")
+	t.Setenv("PIP_CACHE_DIR", "")
 	f, err := os.Create("requirements.txt")
 	test.Ok(t, err)
 	defer f.Close()
@@ -812,6 +812,7 @@ func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
 	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
 	test.Ok(t, os.RemoveAll("requirements.txt"))
+	test.Ok(t, os.RemoveAll("pip.conf"))
 
 	// Python should be detected
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
@@ -828,16 +829,27 @@ func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
 	test.Assert(t, pipCacheFound, "expected pip cache dir in %v", directoriesToCache)
 }
 
-func TestDetectDirectoriesToCachePythonRequirementsNeedsCacheDir(t *testing.T) {
+func TestDetectDirectoriesToCachePythonRequirementsWithoutEnv(t *testing.T) {
 	t.Setenv("PIP_CACHE_DIR", "")
 	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent), 0644))
 	defer os.Remove("requirements.txt")
+	defer os.Remove("pip.conf")
 
 	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
-	test.Assert(t, !containsTool(buildToolsDetected, "python"),
-		"expected pip detection to require PIP_CACHE_DIR, got %v", buildToolsDetected)
-	test.Equals(t, 0, len(directoriesToCache))
+	test.Assert(t, containsTool(buildToolsDetected, "python"),
+		"expected pip detection without PIP_CACHE_DIR, got %v", buildToolsDetected)
+	var pipCacheFound, venvFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "pip" {
+			pipCacheFound = true
+		}
+		if filepath.Base(dir) == ".venv" {
+			venvFound = true
+		}
+	}
+	test.Assert(t, pipCacheFound, "expected pip cache dir in %v", directoriesToCache)
+	test.Assert(t, venvFound, "expected .venv cache dir in %v", directoriesToCache)
 }
 
 func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
@@ -867,6 +879,7 @@ func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
 	test.Ok(t, os.RemoveAll("pyproject.toml"))
 	test.Ok(t, os.RemoveAll("requirements.txt"))
 	test.Ok(t, os.RemoveAll("poetry.toml"))
+	test.Ok(t, os.RemoveAll("pip.conf"))
 
 	// Should detect python tool
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
@@ -954,4 +967,40 @@ func TestDetectDirectoriesToCacheUvPriority(t *testing.T) {
 		}
 	}
 	test.Assert(t, uvCacheFound, "expected uv cache dir (should take priority over pipenv), got %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCachePythonConstraints(t *testing.T) {
+	t.Setenv("PIP_CACHE_DIR", "")
+	test.Ok(t, os.WriteFile("constraints.txt", []byte("requests==2.0.0\n"), 0644))
+	defer os.Remove("constraints.txt")
+	defer os.Remove("pip.conf")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	var pipFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "pip" {
+			pipFound = true
+		}
+	}
+	test.Assert(t, pipFound, "expected pip cache dir for constraints.txt in %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCachePythonPyproject(t *testing.T) {
+	t.Setenv("PIP_CACHE_DIR", "")
+	test.Ok(t, os.WriteFile("pyproject.toml", []byte("[project]\nname = \"demo\"\n"), 0644))
+	defer os.Remove("pyproject.toml")
+	defer os.Remove("pip.conf")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	var pipFound bool
+	for _, dir := range directoriesToCache {
+		if filepath.Base(dir) == "pip" {
+			pipFound = true
+		}
+	}
+	test.Assert(t, pipFound, "expected pip cache dir for pyproject.toml in %v", directoriesToCache)
 }

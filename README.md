@@ -75,17 +75,19 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
 | **.NET** | `*.csproj/*.vbproj/.fsproj` | Per-project dirs | `bin/obj` | ✅ Native |
 | **Bazel** | `WORKSPACE/MODULE.bazel` | `.bazelrc` | `bazel-cache` | ✅ Appended |
-| **Poetry** | `poetry.lock` | `poetry.toml` | `.cache/poetry` | ✅ Merged |
-| **uv** | `uv.lock` | `uv.toml` or `pyproject.toml` | `.cache/uv` | ✅ Merged |
-| **Pipenv** | `Pipfile.lock` | `.env` | `.cache/pipenv` | ✅ Merged |
-| **pip** | `requirements.txt` | `PIP_CACHE_DIR` | User configured | ✅ Unchanged |
+| **Poetry** | `poetry.lock` | `poetry.toml` | `.cache/poetry`, `.venv` | ✅ Merged |
+| **uv** | `uv.lock` | `uv.toml` or `pyproject.toml` | `.cache/uv`, `.venv` | ✅ Merged |
+| **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv`, `.venv` | ✅ Merged |
+| **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `pip.conf` | `.cache/pip`, `.venv` | ✅ Merged |
 
 #### Python Package Manager Details
 
-**Poetry**: Modifies or creates Poetry's project-local `poetry.toml` file.
+**Poetry**: Modifies or creates Poetry's project-local `poetry.toml` file
+and enables in-project virtualenvs so `.venv` can be restored across steps.
 
 ```toml
 cache-dir = ".cache/poetry"
+virtualenvs.in-project = true
 ```
 
 **uv**: Modifies `uv.toml` when it exists; otherwise it adds the setting to
@@ -96,20 +98,28 @@ cache-dir = ".cache/poetry"
 cache-dir = ".cache/uv"
 ```
 
-**Pipenv**: Adds the cache directory to the `.env` file that Pipenv loads
-automatically. Existing values and the `Pipfile` are preserved.
+**Pipenv**: Uses `PIPENV_CACHE_DIR` when the build already sets it. Otherwise
+it records the repo-local path in `.env`. Pipenv reads that variable at
+process start, so later install steps should also set
+`PIPENV_CACHE_DIR=.cache/pipenv`.
 
 ```dotenv
 PIPENV_CACHE_DIR=.cache/pipenv
 ```
 
-**pip**: pip does not automatically load a repository-local configuration
-file. Set `PIP_CACHE_DIR` to a path shared by the cache and build steps. The
-plugin detects `requirements.txt` only when this variable is set.
+**pip**: Writes `pip.conf` and caches `.cache/pip`. pip does not load a
+repository-local file automatically, so later install steps should set
+`PIP_CONFIG_FILE=pip.conf` or `PIP_CACHE_DIR=.cache/pip`. Detection files
+are `requirements.txt`, `constraints.txt`, and `pyproject.toml` (when no
+Poetry/uv/Pipenv lock is present).
 
-```bash
-PIP_CACHE_DIR=.cache/pip
+```ini
+[global]
+cache-dir = .cache/pip
 ```
+
+**venv**: Every Python tool also caches project-local `.venv` and `venv`
+directories.
 
 #### Example: Python Project with Poetry
 

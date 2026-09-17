@@ -16,6 +16,13 @@ func newPythonPreparer() *pythonPreparer {
 	return &pythonPreparer{}
 }
 
+func newPipPreparer() *pipPreparer {
+	if cacheDir := os.Getenv("PIP_CACHE_DIR"); cacheDir != "" {
+		return &pipPreparer{cacheDir: cacheDir}
+	}
+	return &pipPreparer{cacheDir: filepath.Join(".cache", "pip")}
+}
+
 // PrepareRepo injects cache configuration for Poetry or Pipenv.
 // Priority: poetry.lock > Pipfile.lock.
 func (*pythonPreparer) PrepareRepo(dir string) (string, error) {
@@ -30,48 +37,99 @@ func (*pythonPreparer) PrepareRepo(dir string) (string, error) {
 	return "", fmt.Errorf("unsupported Python project in %s", dir)
 }
 
-func newPipPreparer(cacheDir string) *pipPreparer {
-	return &pipPreparer{cacheDir: cacheDir}
+// PrepareRepo writes pip.conf so later build steps can use PIP_CONFIG_FILE=pip.conf
+// (or PIP_CACHE_DIR). pip does not discover a repo-local config file by itself.
+func (p *pipPreparer) PrepareRepo(dir string) (string, error) {
+	cacheDir, err := resolveRepoPath(dir, p.cacheDir)
+	if err != nil {
+		return "", err
+	}
+	if err := upsertPipConf(filepath.Join(dir, "pip.conf"), cacheDir); err != nil {
+		return "", err
+	}
+	return cacheDir, nil
 }
 
-// PrepareRepo returns the PIP_CACHE_DIR used by the build. pip has no
-// repository-local configuration file that it discovers automatically, so
-// auto-detection enables pip only when this environment variable is provided.
-func (p *pipPreparer) PrepareRepo(dir string) (string, error) {
-	if filepath.IsAbs(p.cacheDir) {
-		return filepath.Clean(p.cacheDir), nil
-	}
+func pythonVenvDirs(dir string) ([]string, error) {
+	return []string{
+		filepath.Join(dir, ".venv"),
+		filepath.Join(dir, "venv"),
+	}, nil
+}
 
-	path, err := filepath.Abs(filepath.Join(dir, p.cacheDir))
+func resolveRepoPath(dir, cacheDir string) (string, error) {
+	if filepath.IsAbs(cacheDir) {
+		return filepath.Clean(cacheDir), nil
+	}
+	path, err := filepath.Abs(filepath.Join(dir, cacheDir))
 	if err != nil {
 		return "", err
 	}
 	return filepath.Clean(path), nil
 }
 
-// preparePoetry writes Poetry's project-local application configuration.
-// Poetry deliberately keeps poetry.toml separate from package metadata in
-// pyproject.toml.
+// preparePoetry writes Poetry's project-local application configuration and
+// keeps the virtualenv inside the repo so it can be cached with .venv.
 func preparePoetry(dir string) (string, error) {
 	cacheDir := filepath.Join(dir, ".cache", "poetry")
 	configPath := filepath.Join(dir, "poetry.toml")
 	if err := upsertTOMLString(configPath, "", "cache-dir", cacheDir); err != nil {
 		return "", err
 	}
+	if err := upsertTOMLBool(configPath, "", "virtualenvs.in-project", true); err != nil {
+		return "", err
+	}
 
 	return cacheDir, nil
 }
 
-// preparePipenv adds PIPENV_CACHE_DIR to the .env file that Pipenv
-// automatically loads. It deliberately leaves Pipfile untouched so its lock
-// hash remains valid.
+// preparePipenv uses PIPENV_CACHE_DIR when the build already sets it. Otherwise
+// it caches a repo-local directory. Pipenv reads that variable at process start,
+// so later steps still need PIPENV_CACHE_DIR set to the same path.
 func preparePipenv(dir string) (string, error) {
+	if envDir := os.Getenv("PIPENV_CACHE_DIR"); envDir != "" {
+		return resolveRepoPath(dir, envDir)
+	}
+
 	cacheDir := filepath.Join(dir, ".cache", "pipenv")
 	if err := upsertEnv(filepath.Join(dir, ".env"), "PIPENV_CACHE_DIR", cacheDir); err != nil {
 		return "", err
 	}
 
 	return cacheDir, nil
+}
+
+func upsertPipConf(path, cacheDir string) error {
+	content, mode, err := readOptionalFile(path)
+	if err != nil {
+		return err
+	}
+	if iniHasKey(content, "cache-dir") {
+		return nil
+	}
+
+	block := fmt.Sprintf("[global]\ncache-dir = %s\n", cacheDir)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if content != "" {
+		block = "\n" + block
+	}
+	return os.WriteFile(path, []byte(content+block), mode)
+}
+
+func iniHasKey(content, key string) bool {
+	prefix := key + " "
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, prefix) || strings.HasPrefix(trimmed, key+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func upsertEnv(path, key, value string) error {
@@ -118,7 +176,6 @@ func readOptionalFile(path string) (string, os.FileMode, error) {
 	return string(content), info.Mode().Perm(), nil
 }
 
-// fileExists checks if a file exists at the given path
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

@@ -26,6 +26,8 @@ func TestPythonPreparerPoetry(t *testing.T) {
 	test.Ok(t, err)
 	test.Assert(t, strings.Contains(string(content), `cache-dir = "`+expectedCacheDir+`"`),
 		"expected poetry.toml to configure the cache directory")
+	test.Assert(t, strings.Contains(string(content), "virtualenvs.in-project = true"),
+		"expected in-project virtualenvs so .venv can be cached")
 
 	unchangedPyproject, err := os.ReadFile(pyprojectPath)
 	test.Ok(t, err)
@@ -69,6 +71,7 @@ func TestPythonPreparerPoetryWithoutPyproject(t *testing.T) {
 }
 
 func TestPythonPreparerPipenv(t *testing.T) {
+	t.Setenv("PIPENV_CACHE_DIR", "")
 	tempDir := t.TempDir()
 	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "Pipfile.lock"), nil, 0644))
 	pipfilePath := filepath.Join(tempDir, "Pipfile")
@@ -99,15 +102,36 @@ func TestPythonPreparerPipenv(t *testing.T) {
 
 func TestPipPreparer(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("PIP_CACHE_DIR", "")
 
-	cacheDir, err := newPipPreparer(".cache/pip").PrepareRepo(tempDir)
+	cacheDir, err := newPipPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
-	test.Equals(t, filepath.Join(tempDir, ".cache", "pip"), cacheDir)
+	expected := filepath.Join(tempDir, ".cache", "pip")
+	test.Equals(t, expected, cacheDir)
+	content, err := os.ReadFile(filepath.Join(tempDir, "pip.conf"))
+	test.Ok(t, err)
+	test.Assert(t, strings.Contains(string(content), expected), "expected pip.conf to set cache-dir")
+}
 
+func TestPipPreparerUsesEnvOverride(t *testing.T) {
+	tempDir := t.TempDir()
 	absolute := filepath.Join(tempDir, "custom-pip-cache")
-	cacheDir, err = newPipPreparer(absolute).PrepareRepo(tempDir)
+	t.Setenv("PIP_CACHE_DIR", absolute)
+
+	cacheDir, err := newPipPreparer().PrepareRepo(tempDir)
 	test.Ok(t, err)
 	test.Equals(t, absolute, cacheDir)
+}
+
+func TestPythonPreparerPipenvUsesEnvOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	test.Ok(t, os.WriteFile(filepath.Join(tempDir, "Pipfile.lock"), nil, 0644))
+	custom := filepath.Join(tempDir, "custom-pipenv")
+	t.Setenv("PIPENV_CACHE_DIR", custom)
+
+	cacheDir, err := newPythonPreparer().PrepareRepo(tempDir)
+	test.Ok(t, err)
+	test.Equals(t, custom, cacheDir)
 }
 
 func TestPythonPreparerPriorityPoetryOverPipenv(t *testing.T) {

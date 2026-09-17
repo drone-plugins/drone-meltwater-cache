@@ -21,11 +21,31 @@ func upsertTOMLString(path, section, key, value string) error {
 		content = strings.ReplaceAll(content, "\r\n", "\n")
 	}
 
+	setting := fmt.Sprintf("%s = %q", key, value)
+	return upsertTOMLAssignment(path, section, key, setting, content, newline, mode)
+}
+
+func upsertTOMLBool(path, section, key string, value bool) error {
+	content, mode, err := readOptionalFile(path)
+	if err != nil {
+		return err
+	}
+
+	newline := "\n"
+	if strings.Contains(content, "\r\n") {
+		newline = "\r\n"
+		content = strings.ReplaceAll(content, "\r\n", "\n")
+	}
+
+	setting := fmt.Sprintf("%s = %t", key, value)
+	return upsertTOMLAssignment(path, section, key, setting, content, newline, mode)
+}
+
+func upsertTOMLAssignment(path, section, key, setting, content, newline string, mode os.FileMode) error {
 	var lines []string
 	if content != "" {
 		lines = strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 	}
-	setting := fmt.Sprintf("%s = %q", key, value)
 	targetHeader := "[" + section + "]"
 	inTarget := section == ""
 	targetFound := section == ""

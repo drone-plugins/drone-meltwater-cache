@@ -110,29 +110,46 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			usePerProject: true,
 		},
 		{
-			globToDetect: "poetry.lock",
-			tool:         "python",
-			preparer:     newPythonPreparer(),
+			globToDetect:        "poetry.lock",
+			tool:                "python",
+			preparer:            newPythonPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
 		},
 		{
-			globToDetect: "uv.lock",
-			tool:         "python",
-			preparer:     newUvPreparer(),
+			globToDetect:        "uv.lock",
+			tool:                "python",
+			preparer:            newUvPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
 		},
 		{
-			globToDetect: "Pipfile.lock",
-			tool:         "python",
-			preparer:     newPythonPreparer(),
+			globToDetect:        "Pipfile.lock",
+			tool:                "python",
+			preparer:            newPythonPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
 		},
-	}
-	// pip does not discover repository-local configuration. Only enable its
-	// cache when the same PIP_CACHE_DIR can be supplied to pip build steps.
-	if pipCacheDir := os.Getenv("PIP_CACHE_DIR"); pipCacheDir != "" {
-		buildToolInfoMapping = append(buildToolInfoMapping, buildToolInfo{
-			globToDetect: "requirements.txt",
-			tool:         "python",
-			preparer:     newPipPreparer(pipCacheDir),
-		})
+		{
+			globToDetect:        "requirements.txt",
+			tool:                "python",
+			preparer:            newPipPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+		},
+		{
+			globToDetect:        "constraints.txt",
+			tool:                "python",
+			preparer:            newPipPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+		},
+		{
+			globToDetect:        "pyproject.toml",
+			tool:                "python",
+			preparer:            newPipPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+			excludeIfExist: []string{
+				"poetry.lock",
+				"uv.lock",
+				"Pipfile.lock",
+			},
+		},
 	}
 
 	var directoriesToCache []string
