@@ -109,6 +109,47 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:      newDotnetPreparer(),
 			usePerProject: true,
 		},
+		{
+			globToDetect:        "poetry.lock",
+			tool:                "python",
+			preparer:            newPythonPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+		},
+		{
+			globToDetect:        "uv.lock",
+			tool:                "python",
+			preparer:            newUvPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+		},
+		{
+			globToDetect:        "Pipfile.lock",
+			tool:                "python",
+			preparer:            newPythonPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+		},
+		{
+			globToDetect:        "requirements.txt",
+			tool:                "python",
+			preparer:            newPipPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+		},
+		{
+			globToDetect:        "constraints.txt",
+			tool:                "python",
+			preparer:            newPipPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+		},
+		{
+			globToDetect:        "pyproject.toml",
+			tool:                "python",
+			preparer:            newPipPreparer(),
+			additionalCacheDirs: pythonVenvDirs,
+			excludeIfExist: []string{
+				"poetry.lock",
+				"uv.lock",
+				"Pipfile.lock",
+			},
+		},
 	}
 
 	var directoriesToCache []string

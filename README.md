@@ -56,6 +56,80 @@ The best example would be to use this with your package managers such as Mix, Bu
 
 With restored dependencies from a cache, commands like `mix deps.get` will only need to download new dependencies, rather than re-download every package on each build.
 
+## Supported Build Tools
+
+`drone-cache` automatically detects and configures cache directories for popular build tools. Configuration is injected into native tool config files, enabling caching to work seamlessly in containerized CI environments where only the repository directory is mounted.
+
+### Auto-Detection and Configuration
+
+The plugin automatically detects the presence of lock/manifest files and configures the respective package manager to cache dependencies in repo-local directories (under `.cache/`). This enables caching across CI steps in containerized environments.
+
+#### Supported Tools and Configuration
+
+| Build Tool | Detection File | Config Method | Cache Location | Config Preserved |
+|------------|----------------|----------------|-----------------|-----------------|
+| **Maven** | `pom.xml` | `.mvn/maven.config` | `.m2/repository` | ✅ Appended |
+| **Gradle** | `build.gradle[.kts]` | `gradle.properties` | `.gradle` | ✅ Appended |
+| **Node.js** | `package.json` | `npm` cache dir | `.npm` | ✅ Via npm config |
+| **Yarn** | `yarn.lock` | `.yarnrc` | `.yarn/cache` | ✅ Appended |
+| **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
+| **.NET** | `*.csproj/*.vbproj/.fsproj` | Per-project dirs | `bin/obj` | ✅ Native |
+| **Bazel** | `WORKSPACE/MODULE.bazel` | `.bazelrc` | `bazel-cache` | ✅ Appended |
+| **Poetry** | `poetry.lock` | `poetry.toml` | `.cache/poetry`, `.venv` | ✅ Merged |
+| **uv** | `uv.lock` | `uv.toml` or `pyproject.toml` | `.cache/uv`, `.venv` | ✅ Merged |
+| **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv`, `.venv` | ✅ Merged |
+| **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `pip.conf` | `.cache/pip`, `.venv` | ✅ Merged |
+
+#### Python Package Manager Details
+
+**Poetry**: Modifies or creates Poetry's project-local `poetry.toml` file
+and enables in-project virtualenvs so `.venv` can be restored across steps.
+
+```toml
+cache-dir = ".cache/poetry"
+virtualenvs.in-project = true
+```
+
+**uv**: Modifies `uv.toml` when it exists; otherwise it adds the setting to
+`[tool.uv]` in `pyproject.toml`. If neither file exists, it creates `uv.toml`.
+
+```toml
+[tool.uv]
+cache-dir = ".cache/uv"
+```
+
+**Pipenv**: Uses `PIPENV_CACHE_DIR` when the build already sets it. Otherwise
+it records the repo-local path in `.env`. Pipenv reads that variable at
+process start, so later install steps should also set
+`PIPENV_CACHE_DIR=.cache/pipenv`.
+
+```dotenv
+PIPENV_CACHE_DIR=.cache/pipenv
+```
+
+**pip**: Writes `pip.conf` and caches `.cache/pip`. pip does not load a
+repository-local file automatically, so later install steps should set
+`PIP_CONFIG_FILE=pip.conf` or `PIP_CACHE_DIR=.cache/pip`. Detection files
+are `requirements.txt`, `constraints.txt`, and `pyproject.toml` (when no
+Poetry/uv/Pipenv lock is present).
+
+```ini
+[global]
+cache-dir = .cache/pip
+```
+
+**venv**: Every Python tool also caches project-local `.venv` and `venv`
+directories.
+
+#### Example: Python Project with Poetry
+
+For projects using Poetry (`poetry.lock`), the plugin will:
+1. Automatically detect `poetry.lock`
+2. Modify `poetry.toml` to set Poetry cache to `.cache/poetry`
+3. Cache and restore `.cache/poetry` across builds
+
+No explicit mount configuration needed - just add the cache steps to your pipeline.
+
 ## Example Usage of drone-cache
 
 The following example configuration file (`.drone.yml`) shows the most common use of drone-cache.
