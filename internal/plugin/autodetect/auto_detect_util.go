@@ -171,24 +171,28 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 		// entries rather than a second probe list: hashFileOrNested already
 		// tries the glob and one directory deeper.
 		{
-			globToDetect: "Package.resolved",
-			tool:         "spm",
-			preparer:     newSPMPreparer(),
+			globToDetect:        "Package.resolved",
+			tool:                "spm",
+			preparer:            newSPMPreparer(),
+			additionalCacheDirs: spmCacheDirs,
 		},
 		{
-			globToDetect: filepath.Join("*.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
-			tool:         "spm",
-			preparer:     newSPMPreparer(),
+			globToDetect:        filepath.Join("*.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
+			tool:                "spm",
+			preparer:            newSPMPreparer(),
+			additionalCacheDirs: spmCacheDirs,
 		},
 		{
-			globToDetect: filepath.Join("*.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
-			tool:         "spm",
-			preparer:     newSPMPreparer(),
+			globToDetect:        filepath.Join("*.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
+			tool:                "spm",
+			preparer:            newSPMPreparer(),
+			additionalCacheDirs: spmCacheDirs,
 		},
 		{
-			globToDetect: "Package.swift",
-			tool:         "spm",
-			preparer:     newSPMPreparer(),
+			globToDetect:        "Package.swift",
+			tool:                "spm",
+			preparer:            newSPMPreparer(),
+			additionalCacheDirs: spmCacheDirs,
 		},
 		// Gemfile.lock before Gemfile. Fastlane matches are further limited to
 		// directories that also hold an iOS project marker; see

@@ -15,66 +15,55 @@ func withGOOS(t *testing.T, value string) {
 	t.Cleanup(func() { goos = orig })
 }
 
-func TestSPMPreparerDarwin(t *testing.T) {
+// PrepareRepo must return a workspace-relative path so the injected Save/Restore
+// Cache plugin (which runs with HOME=/) can reach it on the shared /harness
+// volume. The path must not depend on $HOME on any platform (CI-23961).
+func TestSPMPreparerReturnsWorkspaceCheckouts(t *testing.T) {
+	for _, osName := range []string{"linux", "darwin"} {
+		t.Run(osName, func(t *testing.T) {
+			withGOOS(t, osName)
+
+			path, err := newSPMPreparer().PrepareRepo("/some/dir")
+			test.Ok(t, err)
+			test.Equals(t, filepath.Join("/some/dir", ".build", "checkouts"), path)
+			test.Assert(t, filepath.IsAbs(path), "expected absolute path, got %q", path)
+		})
+	}
+}
+
+// On Linux the extra dependency stores are the two remaining workspace-relative
+// .build directories only; the $HOME-based global cache is deliberately dropped
+// because the cache plugin cannot reach it.
+func TestSPMCacheDirsLinux(t *testing.T) {
+	withGOOS(t, "linux")
+
+	dirs, err := spmCacheDirs("/some/dir")
+	test.Ok(t, err)
+	test.Equals(t, []string{
+		filepath.Join("/some/dir", ".build", "repositories"),
+		filepath.Join("/some/dir", ".build", "artifacts"),
+	}, dirs)
+}
+
+// On macOS the shared repository cache is reachable (builds run on the host, not
+// in a container), so it is added after the workspace-relative directories.
+func TestSPMCacheDirsDarwin(t *testing.T) {
 	withGOOS(t, "darwin")
 
-	origXDG := os.Getenv("XDG_CACHE_HOME")
-	os.Unsetenv("XDG_CACHE_HOME")
-	defer os.Setenv("XDG_CACHE_HOME", origXDG)
-
 	home, err := os.UserHomeDir()
 	test.Ok(t, err)
 
-	path, err := newSPMPreparer().PrepareRepo("/some/dir")
+	dirs, err := spmCacheDirs("/some/dir")
 	test.Ok(t, err)
-	test.Equals(t, filepath.Join(home, "Library", "Caches", "org.swift.swiftpm"), path)
-}
-
-func TestSPMPreparerLinuxNoXDG(t *testing.T) {
-	withGOOS(t, "linux")
-
-	origXDG := os.Getenv("XDG_CACHE_HOME")
-	os.Unsetenv("XDG_CACHE_HOME")
-	defer os.Setenv("XDG_CACHE_HOME", origXDG)
-
-	home, err := os.UserHomeDir()
-	test.Ok(t, err)
-
-	path, err := newSPMPreparer().PrepareRepo("/some/dir")
-	test.Ok(t, err)
-	test.Equals(t, filepath.Join(home, ".cache", "org.swift.swiftpm"), path)
-}
-
-func TestSPMPreparerLinuxWithXDG(t *testing.T) {
-	withGOOS(t, "linux")
-
-	origXDG := os.Getenv("XDG_CACHE_HOME")
-	os.Setenv("XDG_CACHE_HOME", "/custom/cache")
-	defer os.Setenv("XDG_CACHE_HOME", origXDG)
-
-	path, err := newSPMPreparer().PrepareRepo("/some/dir")
-	test.Ok(t, err)
-	test.Equals(t, filepath.Join("/custom/cache", "org.swift.swiftpm"), path)
-}
-
-// The XDG spec requires absolute paths and says relative values must be treated
-// as invalid; honouring one would hand the cache layer a relative mount point.
-func TestSPMPreparerLinuxIgnoresRelativeXDG(t *testing.T) {
-	withGOOS(t, "linux")
-
-	t.Setenv("XDG_CACHE_HOME", "relative/cache")
-
-	home, err := os.UserHomeDir()
-	test.Ok(t, err)
-
-	path, err := newSPMPreparer().PrepareRepo("/some/dir")
-	test.Ok(t, err)
-	test.Equals(t, filepath.Join(home, ".cache", "org.swift.swiftpm"), path)
-	test.Assert(t, filepath.IsAbs(path), "expected absolute path, got %q", path)
+	test.Equals(t, []string{
+		filepath.Join("/some/dir", ".build", "repositories"),
+		filepath.Join("/some/dir", ".build", "artifacts"),
+		filepath.Join(home, "Library", "Caches", "org.swift.swiftpm"),
+	}, dirs)
 }
 
 func TestSPMPreparerDoesNotModifyRepo(t *testing.T) {
-	withGOOS(t, "darwin")
+	withGOOS(t, "linux")
 
 	dir, err := os.MkdirTemp("", "spm-test-*")
 	test.Ok(t, err)
@@ -85,6 +74,9 @@ func TestSPMPreparerDoesNotModifyRepo(t *testing.T) {
 	test.Equals(t, 0, len(before))
 
 	_, err = newSPMPreparer().PrepareRepo(dir)
+	test.Ok(t, err)
+
+	_, err = spmCacheDirs(dir)
 	test.Ok(t, err)
 
 	after, err := os.ReadDir(dir)

@@ -1071,6 +1071,19 @@ func swiftpmCacheDir(home string) string {
 	return filepath.Join(home, "Library", "Caches", "org.swift.swiftpm")
 }
 
+// spmDarwinDirs is the directory set detection reports for an SPM project rooted
+// at base on macOS: the workspace-relative .build dependency stores (reachable
+// on the shared volume regardless of the cache plugin's HOME, see CI-23961)
+// followed by the shared org.swift.swiftpm repository cache under home.
+func spmDarwinDirs(base, home string) []string {
+	return []string{
+		filepath.Join(base, ".build", "checkouts"),
+		filepath.Join(base, ".build", "repositories"),
+		filepath.Join(base, ".build", "artifacts"),
+		swiftpmCacheDir(home),
+	}
+}
+
 func TestDetectDirectoriesToCacheCocoapodsManifestOnly(t *testing.T) {
 	home := isolateIOSEnv(t)
 	withGOOS(t, "darwin")
@@ -1106,7 +1119,7 @@ func TestDetectDirectoriesToCacheCocoapodsWithLock(t *testing.T) {
 func TestDetectDirectoriesToCacheSPMPackageResolvedAtRoot(t *testing.T) {
 	home := isolateIOSEnv(t)
 	withGOOS(t, "darwin")
-	inTempRepo(t)
+	root := inTempRepo(t)
 
 	writeRepoFile(t, "Package.swift", testFileContent)
 	writeRepoFile(t, "Package.resolved", testFileContent2)
@@ -1115,7 +1128,7 @@ func TestDetectDirectoriesToCacheSPMPackageResolvedAtRoot(t *testing.T) {
 	test.Ok(t, err)
 
 	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{swiftpmCacheDir(home)}, dirs)
+	test.Equals(t, spmDarwinDirs(root, home), dirs)
 	test.Equals(t, hashOfContent2, hashes)
 }
 
@@ -1124,7 +1137,7 @@ func TestDetectDirectoriesToCacheSPMPackageResolvedAtRoot(t *testing.T) {
 func TestDetectDirectoriesToCacheSPMInsideXcodeProject(t *testing.T) {
 	home := isolateIOSEnv(t)
 	withGOOS(t, "darwin")
-	inTempRepo(t)
+	root := inTempRepo(t)
 
 	writeRepoFile(t, filepath.Join(
 		"App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
@@ -1133,15 +1146,16 @@ func TestDetectDirectoriesToCacheSPMInsideXcodeProject(t *testing.T) {
 	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
 
+	base := filepath.Join(root, "App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm")
 	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{swiftpmCacheDir(home)}, dirs)
+	test.Equals(t, spmDarwinDirs(base, home), dirs)
 	test.Equals(t, hashOfContent1, hashes)
 }
 
 func TestDetectDirectoriesToCacheSPMInsideXcodeWorkspace(t *testing.T) {
 	home := isolateIOSEnv(t)
 	withGOOS(t, "darwin")
-	inTempRepo(t)
+	root := inTempRepo(t)
 
 	writeRepoFile(t, filepath.Join(
 		"App.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
@@ -1150,15 +1164,16 @@ func TestDetectDirectoriesToCacheSPMInsideXcodeWorkspace(t *testing.T) {
 	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
 
+	base := filepath.Join(root, "App.xcworkspace", "xcshareddata", "swiftpm")
 	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{swiftpmCacheDir(home)}, dirs)
+	test.Equals(t, spmDarwinDirs(base, home), dirs)
 	test.Equals(t, hashOfContent1, hashes)
 }
 
 func TestDetectDirectoriesToCacheSPMInsideNestedXcodeProject(t *testing.T) {
 	home := isolateIOSEnv(t)
 	withGOOS(t, "darwin")
-	inTempRepo(t)
+	root := inTempRepo(t)
 
 	writeRepoFile(t, filepath.Join(
 		"ios", "App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
@@ -1167,8 +1182,9 @@ func TestDetectDirectoriesToCacheSPMInsideNestedXcodeProject(t *testing.T) {
 	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
 
+	base := filepath.Join(root, "ios", "App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm")
 	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{swiftpmCacheDir(home)}, dirs)
+	test.Equals(t, spmDarwinDirs(base, home), dirs)
 	test.Equals(t, hashOfContent1, hashes)
 }
 
