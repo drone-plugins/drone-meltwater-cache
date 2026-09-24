@@ -250,6 +250,13 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 				continue
 			}
 
+			if isPerProjectIOSTool(supportedTool.tool) {
+				if err := appendPerProjectIOS(supportedTool, skipPrepare, &directoriesToCache, &buildToolsDetected, &hashes); err != nil {
+					return nil, nil, "", err
+				}
+				continue
+			}
+
 			var hash, dir string
 			var err error
 			switch {
