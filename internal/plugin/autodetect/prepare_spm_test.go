@@ -62,6 +62,30 @@ func TestSPMCacheDirsDarwin(t *testing.T) {
 	}, dirs)
 }
 
+func TestSPMCacheDirsXcodeIntegratedOmitsMetadataBuildDir(t *testing.T) {
+	withGOOS(t, "darwin")
+
+	home, err := os.UserHomeDir()
+	test.Ok(t, err)
+
+	manifest := filepath.Join("App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved")
+	_, xcode := classifySPMManifest(manifest)
+	test.Assert(t, xcode, "expected xcode-integrated manifest")
+
+	dirs, err := spmCacheDirsForManifest(manifest)
+	test.Ok(t, err)
+	test.Equals(t, []string{filepath.Join(home, "Library", "Caches", "org.swift.swiftpm")}, dirs)
+}
+
+func TestSPMCacheDirsXcodeIntegratedLinuxHasNoHomePath(t *testing.T) {
+	withGOOS(t, "linux")
+
+	manifest := filepath.Join("App.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved")
+	dirs, err := spmCacheDirsForManifest(manifest)
+	test.Ok(t, err)
+	test.Equals(t, 0, len(dirs))
+}
+
 func TestSPMPreparerDoesNotModifyRepo(t *testing.T) {
 	withGOOS(t, "linux")
 
