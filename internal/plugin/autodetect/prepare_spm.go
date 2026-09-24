@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // goos is a package-level indirection over runtime.GOOS so tests can exercise
@@ -63,4 +64,59 @@ func spmCacheDirs(dir string) ([]string, error) {
 	}
 
 	return dirs, nil
+}
+
+// xcodePackageResolvedSuffix is the path tail Xcode writes for a package
+// resolved through an xcodeproj or xcworkspace. Those files do not own a
+// .build directory; Xcode stores the shared dependency cache under the user
+// Library directory.
+const xcodePackageResolvedSuffix = "xcshareddata/swiftpm/Package.resolved"
+
+// classifySPMManifest reports whether resolvedPath belongs to an Xcode project.
+// Standalone packages return the directory that contains Package.swift.
+func classifySPMManifest(resolvedPath string) (projectDir string, xcodeIntegrated bool) {
+	if strings.HasSuffix(filepath.ToSlash(resolvedPath), xcodePackageResolvedSuffix) {
+		return "", true
+	}
+
+	return filepath.Dir(resolvedPath), false
+}
+
+// spmCacheDirsForManifest returns the dependency directories for one manifest.
+// Standalone packages use the workspace .build inputs. Xcode-integrated
+// resolution uses the macOS shared SwiftPM cache and does not invent a .build
+// tree under xcshareddata/swiftpm.
+func spmCacheDirsForManifest(resolvedPath string) ([]string, error) {
+	projectDir, xcodeIntegrated := classifySPMManifest(resolvedPath)
+	if xcodeIntegrated {
+		if goos() != "darwin" {
+			return nil, nil
+		}
+
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+
+		return []string{filepath.Join(home, "Library", "Caches", "org.swift.swiftpm")}, nil
+	}
+
+	var err error
+	projectDir, err = filepath.Abs(projectDir)
+	if err != nil {
+		return nil, err
+	}
+
+	checkouts, err := newSPMPreparer().PrepareRepo(projectDir)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := []string{checkouts}
+	extra, err := spmCacheDirs(projectDir)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(dirs, extra...), nil
 }
