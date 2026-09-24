@@ -134,6 +134,18 @@ func writeToArchive(tw *tar.Writer, root string, skipSymlinks bool, preserve boo
 	}
 }
 
+// extractTarget maps a tar member name onto dst. relative(dst, name) is for Create
+// only; Rel(dst, ".") left a stray ".." after Go 1.26 cleaned ../../../. to ../../..
+func extractTarget(dst, name string) (string, error) {
+	cleaned := filepath.Clean(filepath.FromSlash(name))
+	sep := string(os.PathSeparator)
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+sep) {
+		return "", fmt.Errorf("extract %s: invalid path", name)
+	}
+
+	return filepath.Join(dst, cleaned), nil
+}
+
 func relative(parent string, path string) (string, error) {
 	name := filepath.Base(path)
 
@@ -248,12 +260,10 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 				target = h.Name
 			}
 		} else {
-			name, err := relative(dst, h.Name)
+			target, err = extractTarget(dst, h.Name)
 			if err != nil {
-				return 0, fmt.Errorf("relative name, %w", err)
+				return 0, err
 			}
-
-			target = filepath.Join(dst, name)
 		}
 
 		level.Debug(a.logger).Log("msg", "extracting archive", "path", target) //nolint: errcheck
