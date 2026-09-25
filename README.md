@@ -70,7 +70,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 |------------|----------------|----------------|-----------------|-----------------|
 | **Maven** | `pom.xml` | `.mvn/maven.config` | `.m2/repository` | ✅ Appended |
 | **Gradle** | `build.gradle[.kts]` | `gradle.properties` | `.gradle` | ✅ Appended |
-| **Node.js** | `package.json` | `npm` cache dir | `.npm` | ✅ Via npm config |
+| **Node.js** | `package-lock.json` | existing `npm_config_cache` / `.npmrc` `cache`, or `~/.npm` when that path is already inside the workspace | `.npm` | ✅ Read-only. Does not write `.npmrc` |
 | **Yarn** | `yarn.lock` | `.yarnrc` | `.yarn/cache` | ✅ Appended |
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
 | **.NET** | `*.csproj/*.vbproj/.fsproj` | Per-project dirs | `bin/obj` | ✅ Native |
