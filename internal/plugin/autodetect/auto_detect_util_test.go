@@ -365,10 +365,14 @@ func TestDetectDirectoriesToCacheDotnetMixedProjectTypes(t *testing.T) {
 
 // npm exports npm_config_* to child processes, so these are often already set
 // in real shells and CI. Left alone, they would decide the assertions for us.
+// HOME is pinned outside the workspace so the default ~/.npm is not treated as
+// a workspace cache; the HOME=/workspace case has its own test.
 func isolateNpmEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("npm_config_cache", "")
 	t.Setenv("NPM_CONFIG_CACHE", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HARNESS_WORKSPACE", "")
 }
 
 func TestDetectDirectoriesToCacheNodeUsesPackageLock(t *testing.T) {
@@ -382,18 +386,13 @@ func TestDetectDirectoriesToCacheNodeUsesPackageLock(t *testing.T) {
 
 	workspace, err := filepath.Abs(".")
 	test.Ok(t, err)
-	// Both have to be inside the workspace, the only shared volume.
-	test.Equals(t, directoriesToCache, []string{
-		filepath.Join(workspace, "node_modules"),
-		filepath.Join(workspace, npmCacheDirName),
-	})
+	// No cache= and HOME is outside the workspace, so only node_modules is shared.
+	test.Equals(t, directoriesToCache, []string{filepath.Join(workspace, "node_modules")})
 	test.Equals(t, buildToolsDetected, []string{toolNode})
 	test.Equals(t, hash, "baab6c16d9143523b7865d46896e4596")
 
-	// npm has to be told, or it keeps writing to ~/.npm.
-	npmrc, err := os.ReadFile(npmrcFile)
-	test.Ok(t, err)
-	test.Equals(t, string(npmrc), "cache="+filepath.Join(workspace, npmCacheDirName)+"\n")
+	_, err = os.Stat(npmrcFile)
+	test.Assert(t, os.IsNotExist(err), "detecting a lockfile must not create .npmrc")
 }
 
 func TestDetectDirectoriesToCacheNodeModulesBesideNestedPackageLock(t *testing.T) {
@@ -407,12 +406,10 @@ func TestDetectDirectoriesToCacheNodeModulesBesideNestedPackageLock(t *testing.T
 
 	nested, err := filepath.Abs(nestedDirectory)
 	test.Ok(t, err)
-	test.Equals(t, directoriesToCache, []string{
-		filepath.Join(nested, "node_modules"),
-		filepath.Join(nested, npmCacheDirName),
-	})
+	test.Equals(t, directoriesToCache, []string{filepath.Join(nested, "node_modules")})
 	test.Equals(t, buildToolsDetected, []string{toolNode})
-	test.Exists(t, filepath.Join(nestedDirectory, npmrcFile))
+	_, err = os.Stat(filepath.Join(nestedDirectory, npmrcFile))
+	test.Assert(t, os.IsNotExist(err), "nested lockfile detection must not create .npmrc")
 }
 
 func TestDetectDirectoriesToCacheNodeFallsBackToPackageJSON(t *testing.T) {
@@ -446,10 +443,7 @@ func TestDetectDirectoriesToCacheNodePrefersPackageLock(t *testing.T) {
 
 	workspace, err := filepath.Abs(".")
 	test.Ok(t, err)
-	test.Equals(t, directoriesToCache, []string{
-		filepath.Join(workspace, "node_modules"),
-		filepath.Join(workspace, npmCacheDirName),
-	})
+	test.Equals(t, directoriesToCache, []string{filepath.Join(workspace, "node_modules")})
 	test.Equals(t, buildToolsDetected, []string{toolNode})
 	test.Equals(t, hash, md5Hex(t, testFileContent))
 }
@@ -548,26 +542,21 @@ func TestDetectDirectoriesToCacheNodeLockfileChangeInvalidatesKey(t *testing.T) 
 	test.Assert(t, firstHash != secondHash, "expected package-lock.json change to invalidate cache key")
 }
 
-// Restore and save both run detection in the same workspace, so the second run
-// has to land on the same path without appending a duplicate entry.
+// Restore and save both run detection in the same workspace. Neither run may
+// create or rewrite .npmrc.
 func TestDetectDirectoriesToCacheNodeIsIdempotentAcrossSteps(t *testing.T) {
 	isolateNpmEnv(t)
 	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))
 	defer os.Remove(packageLockFile)
-	defer os.Remove(npmrcFile)
 
 	firstDirs, _, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
-	firstNpmrc, err := os.ReadFile(npmrcFile)
-	test.Ok(t, err)
-
 	secondDirs, _, _, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-	secondNpmrc, err := os.ReadFile(npmrcFile)
 	test.Ok(t, err)
 
 	test.Equals(t, firstDirs, secondDirs)
-	test.Equals(t, string(firstNpmrc), string(secondNpmrc))
+	_, err = os.Stat(npmrcFile)
+	test.Assert(t, os.IsNotExist(err), "repeated detection must not create .npmrc")
 }
 
 // Appending our own entry would silently move the user's cache, so theirs wins.
@@ -613,23 +602,54 @@ func TestDetectDirectoriesToCacheNodeHonoursNpmConfigCacheEnv(t *testing.T) {
 	test.Assert(t, os.IsNotExist(err), "expected no .npmrc to be written when npm_config_cache is set")
 }
 
-// Appending must not run into the last line of a user's file (CI-24154).
-func TestDetectDirectoriesToCacheNodeAppendsToNpmrcWithoutTrailingNewline(t *testing.T) {
+// A tracked project .npmrc with no cache= must be left byte-for-byte alone.
+// Appending cache=/harness/.npm makes `npm version` fail its clean-tree check.
+func TestDetectDirectoriesToCacheNodeDoesNotMutateTrackedNpmrc(t *testing.T) {
 	isolateNpmEnv(t)
-	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))
-	defer os.Remove(packageLockFile)
-	test.Ok(t, os.WriteFile(npmrcFile, []byte("registry=https://example.com"), 0644))
-	defer os.Remove(npmrcFile)
+	dir := t.TempDir()
+	t.Chdir(dir)
 
-	_, _, _, err := DetectDirectoriesToCache(false)
+	const original = "registry=https://example.com/npm/\n//example.com/npm/:_authToken=${TOKEN}\nca=null\n"
+	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))
+	test.Ok(t, os.WriteFile(npmrcFile, []byte(original), 0644))
+
+	directoriesToCache, _, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
 
 	workspace, err := filepath.Abs(".")
 	test.Ok(t, err)
+	test.Equals(t, directoriesToCache, []string{filepath.Join(workspace, "node_modules")})
+
 	npmrc, err := os.ReadFile(npmrcFile)
 	test.Ok(t, err)
-	test.Equals(t, string(npmrc),
-		"registry=https://example.com\ncache="+filepath.Join(workspace, npmCacheDirName)+"\n")
+	test.Equals(t, string(npmrc), original)
+}
+
+// When HOME is the checkout, npm already uses <workspace>/.npm. Cache that
+// directory, but do not write the setting into the tracked .npmrc.
+func TestDetectDirectoriesToCacheNodeHomeEqualsWorkspaceDoesNotMutateNpmrc(t *testing.T) {
+	isolateNpmEnv(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HOME", dir)
+
+	const original = "registry=https://example.com/npm/\n//example.com/npm/:_authToken=${TOKEN}\nca=null\n"
+	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))
+	test.Ok(t, os.WriteFile(npmrcFile, []byte(original), 0644))
+
+	directoriesToCache, _, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	workspace, err := filepath.Abs(".")
+	test.Ok(t, err)
+	test.Equals(t, directoriesToCache, []string{
+		filepath.Join(workspace, "node_modules"),
+		filepath.Join(workspace, npmCacheDirName),
+	})
+
+	npmrc, err := os.ReadFile(npmrcFile)
+	test.Ok(t, err)
+	test.Equals(t, string(npmrc), original)
 }
 
 // .npmrc is sometimes a read-only mounted secret. Losing the tarball cache is

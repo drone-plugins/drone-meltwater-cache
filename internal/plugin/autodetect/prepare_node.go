@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// npmCacheDirName is the workspace directory for relocated npm tarball cache.
+// npmCacheDirName is npm's default cache directory name (~/.npm).
 const npmCacheDirName = ".npm"
 
 const npmrcFileName = ".npmrc"
@@ -20,9 +20,10 @@ func newNodePreparer() *nodePreparer {
 }
 
 func (*nodePreparer) PrepareRepo(dir string) (string, error) {
-	// Best-effort configuration of .npmrc.
-	_ = prepareNpmrc(dir)
-
+	// node_modules lives on the shared workspace volume, so later npm commands
+	// pick it up with no config change. Do not write .npmrc: on Harness the
+	// checkout root is /harness, and appending cache=/harness/.npm dirties a
+	// tracked project config. `npm version` then fails its clean-tree check.
 	return filepath.Join(dir, "node_modules"), nil
 }
 
@@ -36,27 +37,15 @@ func (*nodeFallbackPreparer) PrepareRepo(dir string) (string, error) {
 	return filepath.Join(dir, "node_modules"), nil
 }
 
-// npmCacheDirs resolves the effective npm cache directory.
+// npmCacheDirs resolves the npm tarball cache when npm is already pointed at
+// one. It never creates or rewrites an npmrc.
 func npmCacheDirs(dir string) ([]string, error) {
-	if envCache := npmCacheFromEnv(); envCache != "" {
-		absPath, err := filepath.Abs(envCache)
-		if err != nil {
-			return nil, err
-		}
-
-		return []string{filepath.Clean(absPath)}, nil
+	cacheDir, err := effectiveNpmCacheDir(dir)
+	if err != nil || cacheDir == "" {
+		return nil, err
 	}
 
-	configured, err := npmCacheFromNpmrc(filepath.Join(dir, npmrcFileName))
-	if err != nil || configured == "" {
-		return nil, nil
-	}
-
-	if filepath.IsAbs(configured) {
-		return []string{filepath.Clean(configured)}, nil
-	}
-
-	return []string{filepath.Join(dir, configured)}, nil
+	return []string{cacheDir}, nil
 }
 
 // nodeModulesDirs resolves the node_modules path.
@@ -64,55 +53,75 @@ func nodeModulesDirs(dir string) ([]string, error) {
 	return []string{filepath.Join(dir, "node_modules")}, nil
 }
 
-// prepareNpmrc appends cache=<dir>/.npm to .npmrc if not already configured.
-func prepareNpmrc(dir string) error {
-	if npmCacheFromEnv() != "" {
-		return nil
+// effectiveNpmCacheDir follows npm's precedence for the cache location:
+// environment, then the project .npmrc, then the built-in ~/.npm default.
+// The default is included only when it already sits on the shared workspace
+// (HOME is the checkout). Relocating ~/.npm by writing .npmrc is intentionally
+// not done.
+func effectiveNpmCacheDir(dir string) (string, error) {
+	if envCache := npmCacheFromEnv(); envCache != "" {
+		absPath, err := filepath.Abs(envCache)
+		if err != nil {
+			return "", err
+		}
+
+		return filepath.Clean(absPath), nil
 	}
 
-	fileName := filepath.Join(dir, npmrcFileName)
-
-	configured, err := npmCacheFromNpmrc(fileName)
+	configured, err := npmCacheFromNpmrc(filepath.Join(dir, npmrcFileName))
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if configured != "" {
-		return nil
+		if filepath.IsAbs(configured) {
+			return filepath.Clean(configured), nil
+		}
+
+		return filepath.Join(dir, configured), nil
 	}
 
-	cacheEntry := "cache=" + filepath.Join(dir, npmCacheDirName) + "\n"
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", nil
+	}
 
-	info, err := os.Stat(fileName)
+	defaultCache := filepath.Clean(filepath.Join(home, npmCacheDirName))
+	root := workspaceRoot(dir)
+	if root == "" || !pathWithin(defaultCache, root) {
+		return "", nil
+	}
+
+	return defaultCache, nil
+}
+
+func workspaceRoot(dir string) string {
+	if ws := strings.TrimSpace(os.Getenv("HARNESS_WORKSPACE")); ws != "" {
+		abs, err := filepath.Abs(ws)
+		if err == nil {
+			return filepath.Clean(abs)
+		}
+	}
+
+	wd, err := os.Getwd()
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-
-		return os.WriteFile(fileName, []byte(cacheEntry), 0644) //nolint:gomnd
+		return filepath.Clean(dir)
 	}
 
-	// Don't run our entry onto the end of an unterminated last line (CI-24154).
-	if info.Size() > 0 {
-		terminated, err := endsWithNewline(fileName, info.Size())
-		if err != nil {
-			return err
-		}
+	return filepath.Clean(wd)
+}
 
-		if !terminated {
-			cacheEntry = "\n" + cacheEntry
-		}
-	}
-
-	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gomnd
+func pathWithin(path, root string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	if err != nil {
-		return err
+		return false
 	}
-	defer f.Close()
 
-	_, err = f.WriteString(cacheEntry)
+	if rel == "." {
+		return true
+	}
 
-	return err
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func npmCacheFromEnv() string {
@@ -160,19 +169,4 @@ func npmCacheFromNpmrc(fileName string) (string, error) {
 	}
 
 	return value, nil
-}
-
-func endsWithNewline(fileName string, size int64) (bool, error) {
-	f, err := os.Open(fileName)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	buf := make([]byte, 1)
-	if _, err := f.ReadAt(buf, size-1); err != nil {
-		return false, err
-	}
-
-	return buf[0] == '\n', nil
 }
