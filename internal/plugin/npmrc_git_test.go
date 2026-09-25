@@ -129,22 +129,27 @@ func newTrackedNpmRepo(t *testing.T, npmrc string) string {
 	// node_modules is ignored in real repos. .npmrc and .npm are not, so a plugin write still shows up.
 	test.Ok(t, os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("node_modules/\n"), 0644))
 
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = repo
-		out, err := cmd.CombinedOutput()
-		test.Ok(t, err)
-		if len(out) > 0 && !strings.Contains(string(out), "Initialized") {
-			t.Logf("git %s: %s", strings.Join(args, " "), out)
+	// CI images used for go test do not ship git. The byte and extra-path checks
+	// below still cover the customer failure. When git is present, also commit
+	// the fixture so git status --porcelain matches a real checkout.
+	if gitBin, err := exec.LookPath("git"); err == nil {
+		git := func(args ...string) {
+			t.Helper()
+			cmd := exec.Command(gitBin, args...)
+			cmd.Dir = repo
+			out, err := cmd.CombinedOutput()
+			test.Ok(t, err)
+			if len(out) > 0 && !strings.Contains(string(out), "Initialized") {
+				t.Logf("git %s: %s", strings.Join(args, " "), out)
+			}
 		}
-	}
 
-	git("init", "-b", "master")
-	git("config", "user.email", "cache-test@example.com")
-	git("config", "user.name", "cache-test")
-	git("add", ".npmrc", "package.json", "package-lock.json", ".gitignore")
-	git("commit", "-m", "initial")
+		git("init", "-b", "master")
+		git("config", "user.email", "cache-test@example.com")
+		git("config", "user.name", "cache-test")
+		git("add", ".npmrc", "package.json", "package-lock.json", ".gitignore")
+		git("commit", "-m", "initial")
+	}
 	t.Chdir(repo)
 
 	return repo
@@ -163,21 +168,82 @@ func detectNpmDirs(t *testing.T) []string {
 func assertGitClean(t *testing.T, repo, npmrc string) {
 	t.Helper()
 
-	status := gitOutput(t, repo, "status", "--porcelain")
+	assertFile(t, repo, ".npmrc", npmrc)
+	assertFile(t, repo, "package.json", `{"name":"app","version":"1.0.0"}`)
+	assertFile(t, repo, "package-lock.json", `{"name":"app","lockfileVersion":3}`)
+	assertFile(t, repo, ".gitignore", "node_modules/\n")
+	assertNoExtraCheckoutPaths(t, repo)
+
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
+		return
+	}
+
+	status := gitOutput(t, repo, gitBin, "status", "--porcelain")
 	test.Assert(t, status == "", "expected a clean worktree, git status:\n%s", status)
 
-	diff := gitOutput(t, repo, "diff", "HEAD", "--", ".npmrc")
+	diff := gitOutput(t, repo, gitBin, "diff", "HEAD", "--", ".npmrc")
 	test.Assert(t, diff == "", "expected no .npmrc diff, got:\n%s", diff)
-
-	got, err := os.ReadFile(filepath.Join(repo, ".npmrc"))
-	test.Ok(t, err)
-	test.Equals(t, string(got), npmrc)
 }
 
-func gitOutput(t *testing.T, repo string, args ...string) string {
+func assertFile(t *testing.T, repo, name, want string) {
 	t.Helper()
 
-	cmd := exec.Command("git", args...)
+	got, err := os.ReadFile(filepath.Join(repo, name))
+	test.Ok(t, err)
+	test.Equals(t, string(got), want)
+}
+
+func assertNoExtraCheckoutPaths(t *testing.T, repo string) {
+	t.Helper()
+
+	allowed := map[string]struct{}{
+		".npmrc":            {},
+		"package.json":      {},
+		"package-lock.json": {},
+		".gitignore":        {},
+	}
+
+	err := filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == repo {
+			return nil
+		}
+
+		rel, err := filepath.Rel(repo, path)
+		if err != nil {
+			return err
+		}
+		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
+			if d.IsDir() && rel == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if rel == "node_modules" || strings.HasPrefix(rel, "node_modules"+string(filepath.Separator)) {
+			if d.IsDir() && rel == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if _, ok := allowed[rel]; !ok {
+			t.Errorf("unexpected path in checkout: %s", rel)
+		}
+
+		return nil
+	})
+	test.Ok(t, err)
+}
+
+func gitOutput(t *testing.T, repo, gitBin string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command(gitBin, args...)
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	test.Ok(t, err)
