@@ -1196,3 +1196,132 @@ func containsCacheDir(dirs []string, name string) bool {
 	}
 	return false
 }
+
+// --- iOS auto-detection (CocoaPods / SPM / Fastlane) ---
+
+const (
+	hashOfContent1 = "baab6c16d9143523b7865d46896e4596" // md5(testFileContent)
+	hashOfContent2 = "1eb00e74bffac0c4fa2d6dbfd8c26cb7" // md5(testFileContent2)
+)
+
+// inTempRepo runs detection inside an empty temporary directory with a private
+// HOME, and returns the directory's resolved absolute path. Older tests in this
+// file write fixtures into the package directory itself.
+func inTempRepo(t *testing.T) (root, home string) {
+	t.Helper()
+
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	orig, err := os.Getwd()
+	test.Ok(t, err)
+
+	dir := t.TempDir()
+	test.Ok(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	// t.TempDir() sits under /var on macOS, a symlink to /private/var, while
+	// detection reports resolved absolute paths.
+	root, err = filepath.EvalSymlinks(dir)
+	test.Ok(t, err)
+
+	return root, home
+}
+
+func writeRepoFile(t *testing.T, path, contents string) {
+	t.Helper()
+	test.Ok(t, os.WriteFile(path, []byte(contents), 0644))
+}
+
+func TestDetectDirectoriesToCacheIOSTools(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		manifest string
+		lock     string
+		tool     string
+		dirs     func(root, home, goos string) []string
+	}{
+		{
+			name:     "fastlane",
+			manifest: "Gemfile",
+			lock:     "Gemfile.lock",
+			tool:     "fastlane",
+			dirs: func(root, _, _ string) []string {
+				return []string{filepath.Join(root, "vendor", "bundle")}
+			},
+		},
+		{
+			name:     "cocoapods",
+			manifest: "Podfile",
+			lock:     "Podfile.lock",
+			tool:     "cocoapods",
+			dirs: func(root, home, goos string) []string {
+				dirs := []string{filepath.Join(root, "Pods")}
+				if goos == "darwin" {
+					dirs = append(dirs, filepath.Join(home, "Library", "Caches", "CocoaPods"))
+				}
+				return dirs
+			},
+		},
+		{
+			name:     "spm",
+			manifest: "Package.swift",
+			lock:     "Package.resolved",
+			tool:     "spm",
+			dirs: func(root, home, goos string) []string {
+				dirs := []string{
+					filepath.Join(root, ".build", "checkouts"),
+					filepath.Join(root, ".build", "repositories"),
+				}
+				if goos == "darwin" {
+					dirs = append(dirs, filepath.Join(home, "Library", "Caches", "org.swift.swiftpm"))
+				}
+				return dirs
+			},
+		},
+	} {
+		for _, osName := range []string{"linux", "darwin"} {
+			t.Run(tc.name+"/"+osName, func(t *testing.T) {
+				withGOOS(t, osName)
+				root, home := inTempRepo(t)
+
+				writeRepoFile(t, tc.manifest, testFileContent)
+
+				dirs, tools, key, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Equals(t, []string{tc.tool}, tools)
+				test.Equals(t, tc.dirs(root, home, osName), dirs)
+				test.Equals(t, hashOfContent1, key)
+
+				writeRepoFile(t, tc.lock, testFileContent2)
+
+				_, _, keyWithLock, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Equals(t, hashOfContent2+hashOfContent1, keyWithLock)
+
+				writeRepoFile(t, tc.lock, testFileContent)
+
+				_, _, keyWithChangedLock, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Assert(t, keyWithChangedLock != keyWithLock, "expected key to change with %s", tc.lock)
+			})
+		}
+	}
+}
+
+// A lockfile alone does not turn detection on; the manifest is the trigger.
+func TestDetectDirectoriesToCacheIOSLockWithoutManifest(t *testing.T) {
+	for _, lock := range []string{"Gemfile.lock", "Podfile.lock", "Package.resolved"} {
+		t.Run(lock, func(t *testing.T) {
+			inTempRepo(t)
+
+			writeRepoFile(t, lock, testFileContent)
+
+			dirs, tools, _, err := DetectDirectoriesToCache(false)
+			test.Ok(t, err)
+			test.Equals(t, 0, len(tools))
+			test.Equals(t, 0, len(dirs))
+		})
+	}
+}
