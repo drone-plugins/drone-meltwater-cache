@@ -27,16 +27,11 @@ func newFastlanePreparer() *fastlanePreparer {
 	return &fastlanePreparer{}
 }
 
-// PrepareRepo redirects Bundler's gem install path to vendor/bundle so it can be
-// cached, and reports the directory Bundler will actually install into.
-//
-// Bundler resolves settings in the order local config -> environment -> global
-// config -> default, so the repo's own .bundle/config wins over BUNDLE_PATH.
-// This is the opposite of NuGet/NUGET_PACKAGES in prepare_dotnet.go; mirroring
-// that env-var-first shape here would make us cache a directory Bundler never
-// installs into whenever a repo sets both.
+// PrepareRepo points Bundler's gem install path at vendor/bundle through the
+// repo's .bundle/config so it can be cached. A BUNDLE_PATH the repo already
+// sets there is kept, and that directory is cached instead.
 func (*fastlanePreparer) PrepareRepo(dir string) (string, error) {
-	configPath := bundleConfigPath(dir)
+	configPath := filepath.Join(dir, bundleConfigDir, bundleConfigFile)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -47,61 +42,11 @@ func (*fastlanePreparer) PrepareRepo(dir string) (string, error) {
 		return resolveBundlePath(dir, existing)
 	}
 
-	if envPath := os.Getenv("BUNDLE_PATH"); envPath != "" {
-		return resolveBundlePath(dir, envPath)
-	}
-
-	globalPath, ok, err := globalBundlePath()
-	if err != nil {
-		return "", err
-	}
-
-	if ok {
-		return resolveBundlePath(dir, globalPath)
-	}
-
 	if err := appendBundlePath(configPath, data); err != nil {
 		return "", err
 	}
 
 	return filepath.Join(dir, "vendor", "bundle"), nil
-}
-
-// bundleConfigPath returns the file Bundler reads local settings from.
-// BUNDLE_APP_CONFIG relocates that file (Bundler expands it relative to the
-// bundle root), so writing to .bundle/config when it is set would silently have
-// no effect on the build.
-func bundleConfigPath(dir string) string {
-	appConfig := os.Getenv("BUNDLE_APP_CONFIG")
-	if appConfig == "" {
-		return filepath.Join(dir, bundleConfigDir, bundleConfigFile)
-	}
-
-	if !filepath.IsAbs(appConfig) {
-		appConfig = filepath.Join(dir, appConfig)
-	}
-
-	return filepath.Join(appConfig, bundleConfigFile)
-}
-
-func globalBundlePath() (string, bool, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", false, err
-	}
-
-	data, err := os.ReadFile(filepath.Join(home, bundleConfigDir, bundleConfigFile))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", false, nil
-	}
-
-	if err != nil {
-		return "", false, err
-	}
-
-	value, ok := findBundlePath(data)
-
-	return value, ok, nil
 }
 
 // findBundlePath reports the configured BUNDLE_PATH, if any. Only this one key

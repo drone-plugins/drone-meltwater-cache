@@ -1032,11 +1032,15 @@ const (
 	hashOfContent2 = "1eb00e74bffac0c4fa2d6dbfd8c26cb7" // md5(testFileContent2)
 )
 
-// inTempRepo runs detection inside an empty temporary directory and returns its
-// resolved absolute path. Older tests in this file write fixtures into the
-// package directory itself.
-func inTempRepo(t *testing.T) string {
+// inTempRepo runs detection inside an empty temporary directory with a private
+// HOME, and returns the directory's resolved absolute path. Older tests in this
+// file write fixtures into the package directory itself.
+func inTempRepo(t *testing.T) (root, home string) {
 	t.Helper()
+
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	orig, err := os.Getwd()
 	test.Ok(t, err)
@@ -1047,424 +1051,105 @@ func inTempRepo(t *testing.T) string {
 
 	// t.TempDir() sits under /var on macOS, a symlink to /private/var, while
 	// detection reports resolved absolute paths.
-	resolved, err := filepath.EvalSymlinks(dir)
+	root, err = filepath.EvalSymlinks(dir)
 	test.Ok(t, err)
 
-	return resolved
-}
-
-// isolateIOSEnv gives the test a private HOME and clears the iOS preparers' env vars.
-func isolateIOSEnv(t *testing.T) string {
-	t.Helper()
-
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	for _, key := range []string{
-		"CP_CACHE_DIR", "CP_HOME_DIR",
-		"BUNDLE_PATH", "BUNDLE_APP_CONFIG",
-		"XDG_CACHE_HOME", "NUGET_PACKAGES",
-	} {
-		t.Setenv(key, "")
-		os.Unsetenv(key)
-	}
-
-	return home
+	return root, home
 }
 
 func writeRepoFile(t *testing.T, path, contents string) {
 	t.Helper()
-
-	if parent := filepath.Dir(path); parent != "." {
-		test.Ok(t, os.MkdirAll(parent, 0755))
-	}
-
 	test.Ok(t, os.WriteFile(path, []byte(contents), 0644))
 }
 
-func podsCacheDir(home string) string {
-	return filepath.Join(home, "Library", "Caches", "CocoaPods")
-}
+func TestDetectDirectoriesToCacheIOSTools(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		manifest string
+		lock     string
+		tool     string
+		dirs     func(root, home, goos string) []string
+	}{
+		{
+			name:     "fastlane",
+			manifest: "Gemfile",
+			lock:     "Gemfile.lock",
+			tool:     "fastlane",
+			dirs: func(root, _, _ string) []string {
+				return []string{filepath.Join(root, "vendor", "bundle")}
+			},
+		},
+		{
+			name:     "cocoapods",
+			manifest: "Podfile",
+			lock:     "Podfile.lock",
+			tool:     "cocoapods",
+			dirs: func(root, home, goos string) []string {
+				dirs := []string{filepath.Join(root, "Pods")}
+				if goos == "darwin" {
+					dirs = append(dirs, filepath.Join(home, "Library", "Caches", "CocoaPods"))
+				}
+				return dirs
+			},
+		},
+		{
+			name:     "spm",
+			manifest: "Package.swift",
+			lock:     "Package.resolved",
+			tool:     "spm",
+			dirs: func(root, home, goos string) []string {
+				dirs := []string{
+					filepath.Join(root, ".build", "checkouts"),
+					filepath.Join(root, ".build", "repositories"),
+				}
+				if goos == "darwin" {
+					dirs = append(dirs, filepath.Join(home, "Library", "Caches", "org.swift.swiftpm"))
+				}
+				return dirs
+			},
+		},
+	} {
+		for _, osName := range []string{"linux", "darwin"} {
+			t.Run(tc.name+"/"+osName, func(t *testing.T) {
+				withGOOS(t, osName)
+				root, home := inTempRepo(t)
 
-func swiftpmCacheDir(home string) string {
-	return filepath.Join(home, "Library", "Caches", "org.swift.swiftpm")
-}
+				writeRepoFile(t, tc.manifest, testFileContent)
 
-// spmDarwinDirs is the directory set detection reports for an SPM project rooted
-// at base on macOS: the workspace-relative .build dependency stores (reachable
-// on the shared volume regardless of the cache plugin's HOME, see CI-23961)
-// followed by the shared org.swift.swiftpm repository cache under home.
-func spmDarwinDirs(base, home string) []string {
-	return []string{
-		filepath.Join(base, ".build", "checkouts"),
-		filepath.Join(base, ".build", "repositories"),
-		filepath.Join(base, ".build", "artifacts"),
-		swiftpmCacheDir(home),
+				dirs, tools, key, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Equals(t, []string{tc.tool}, tools)
+				test.Equals(t, tc.dirs(root, home, osName), dirs)
+				test.Equals(t, hashOfContent1, key)
+
+				writeRepoFile(t, tc.lock, testFileContent2)
+
+				_, _, keyWithLock, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Equals(t, hashOfContent2+hashOfContent1, keyWithLock)
+
+				writeRepoFile(t, tc.lock, testFileContent)
+
+				_, _, keyWithChangedLock, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Assert(t, keyWithChangedLock != keyWithLock, "expected key to change with %s", tc.lock)
+			})
+		}
 	}
 }
 
-func TestDetectDirectoriesToCacheCocoapodsManifestOnly(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Podfile", testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods"}, tools)
-	test.Equals(t, []string{filepath.Join(root, "Pods"), podsCacheDir(home)}, dirs)
-	test.Equals(t, hashOfContent1, hashes)
-}
-
-func TestDetectDirectoriesToCacheCocoapodsWithLock(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Podfile", testFileContent)
-	writeRepoFile(t, "Podfile.lock", testFileContent2)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods"}, tools)
-	test.Equals(t, []string{filepath.Join(root, "Pods"), podsCacheDir(home)}, dirs)
-	// Podfile.lock is registered first, so the key comes from the lock file.
-	test.Equals(t, hashOfContent2, hashes)
-}
-
-func TestDetectDirectoriesToCacheSPMPackageResolvedAtRoot(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Package.swift", testFileContent)
-	writeRepoFile(t, "Package.resolved", testFileContent2)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, spmDarwinDirs(root, home), dirs)
-	test.Equals(t, hashOfContent2, hashes)
-}
-
-// An Xcode app that adopts SPM via the UI keeps Package.resolved four levels
-// down, with no root Package.swift. The root-plus-one-level probe misses that.
-func TestDetectDirectoriesToCacheSPMInsideXcodeProject(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join(
-		"App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
-		testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{swiftpmCacheDir(home)}, dirs)
-	test.Equals(t, hashOfContent1, hashes)
-}
-
-func TestDetectDirectoriesToCacheSPMInsideXcodeWorkspace(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join(
-		"App.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
-		testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{swiftpmCacheDir(home)}, dirs)
-	test.Equals(t, hashOfContent1, hashes)
-}
-
-func TestDetectDirectoriesToCacheSPMInsideNestedXcodeProject(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join(
-		"ios", "App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved"),
-		testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{swiftpmCacheDir(home)}, dirs)
-	test.Equals(t, hashOfContent1, hashes)
-}
-
-func TestDetectDirectoriesToCacheSPMStandalonePlusXcode(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Package.resolved", testFileContent2)
-	xcodeResolved := filepath.Join(
-		"App.xcodeproj", "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved")
-	writeRepoFile(t, xcodeResolved, testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	wantHash, _, err := calculateMd5FromAllFilesPerProject([]string{"Package.resolved", xcodeResolved})
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, spmDarwinDirs(root, home), dirs)
-	test.Equals(t, wantHash, hashes)
-}
-
-func TestDetectDirectoriesToCacheGemfileWithoutIOSMarkerIsIgnored(t *testing.T) {
-	isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	inTempRepo(t)
-
-	writeRepoFile(t, "Gemfile", testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Assert(t, len(tools) == 0, "expected no tools detected, got %v", tools)
-	test.Assert(t, len(dirs) == 0, "expected no cache dirs, got %v", dirs)
-	test.Equals(t, "", hashes)
-
-	_, err = os.Stat(filepath.Join(".bundle", "config"))
-	test.Assert(t, os.IsNotExist(err), "expected no .bundle/config, got err=%v", err)
-}
-
-func TestDetectDirectoriesToCacheGemfileWithIOSMarkerInSameDir(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Gemfile", testFileContent)
-	writeRepoFile(t, "Podfile", testFileContent2)
-
-	dirs, tools, _, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods", "fastlane"}, tools)
-	test.Equals(t, []string{
-		filepath.Join(root, "Pods"),
-		podsCacheDir(home),
-		filepath.Join(root, "vendor", "bundle"),
-	}, dirs)
-
-	data, err := os.ReadFile(filepath.Join(".bundle", "config"))
-	test.Ok(t, err)
-	test.Equals(t, "---\nBUNDLE_PATH: \"vendor/bundle\"\n", string(data))
-}
-
-// An ios/Podfile must not switch on Fastlane for an unrelated backend Gemfile
-// at the root, which would rewrite that project's Bundler config.
-func TestDetectDirectoriesToCacheGemfileMonorepoDoesNotHijackBackend(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Gemfile", testFileContent)
-	writeRepoFile(t, filepath.Join("ios", "Podfile"), testFileContent2)
-
-	dirs, tools, _, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods"}, tools)
-	test.Equals(t, []string{filepath.Join(root, "ios", "Pods"), podsCacheDir(home)}, dirs)
-
-	_, err = os.Stat(filepath.Join(".bundle", "config"))
-	test.Assert(t, os.IsNotExist(err), "backend Bundler config must be untouched, got err=%v", err)
-}
-
-func TestDetectDirectoriesToCacheGemfileNestedIOSApp(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join("ios", "Gemfile"), testFileContent)
-	writeRepoFile(t, filepath.Join("ios", "Podfile"), testFileContent2)
-
-	dirs, tools, _, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods", "fastlane"}, tools)
-	test.Equals(t, []string{
-		filepath.Join(root, "ios", "Pods"),
-		podsCacheDir(home),
-		filepath.Join(root, "ios", "vendor", "bundle"),
-	}, dirs)
-
-	_, err = os.Stat(filepath.Join("ios", ".bundle", "config"))
-	test.Ok(t, err)
-}
-
-func TestDetectDirectoriesToCacheGemfileLockPrecedence(t *testing.T) {
-	isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	inTempRepo(t)
-
-	writeRepoFile(t, "Gemfile", testFileContent)
-	writeRepoFile(t, "Gemfile.lock", testFileContent2)
-	test.Ok(t, os.MkdirAll("App.xcworkspace", 0755))
-
-	_, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	// App.xcworkspace is the iOS marker but has no Package.resolved, so spm stays undetected.
-	test.Equals(t, []string{"fastlane"}, tools)
-	// Gemfile.lock is registered before Gemfile, so it supplies the key.
-	test.Equals(t, hashOfContent2, hashes)
-}
-
-func TestDetectDirectoriesToCacheCocoapodsDeepNested(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join("apps", "ios", "Podfile"), testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods"}, tools)
-	test.Equals(t, []string{filepath.Join(root, "apps", "ios", "Pods"), podsCacheDir(home)}, dirs)
-	test.Equals(t, hashOfContent1, hashes)
-}
-
-func TestDetectDirectoriesToCacheCocoapodsMultiProject(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join("ios", "App", "Podfile.lock"), testFileContent)
-	writeRepoFile(t, filepath.Join("ios", "App", "Podfile"), testFileContent2)
-	writeRepoFile(t, filepath.Join("ios", "Widget", "Podfile"), testFileContent2)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	wantHash, _, err := calculateMd5FromAllFilesPerProject([]string{
-		filepath.Join("ios", "App", "Podfile.lock"),
-		filepath.Join("ios", "Widget", "Podfile"),
-	})
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods"}, tools)
-	test.Equals(t, []string{
-		filepath.Join(root, "ios", "App", "Pods"),
-		filepath.Join(root, "ios", "Widget", "Pods"),
-		podsCacheDir(home),
-	}, dirs)
-	test.Equals(t, wantHash, hashes)
-}
-
-func TestDetectDirectoriesToCacheCocoapodsRespectsCPCacheDir(t *testing.T) {
-	isolateIOSEnv(t)
-	withGOOS(t, "linux")
-	root := inTempRepo(t)
-	t.Setenv("CP_CACHE_DIR", "/shared/pods")
-
-	writeRepoFile(t, filepath.Join("apps", "ios", "Podfile.lock"), testFileContent)
-	writeRepoFile(t, filepath.Join("ios", "Widget", "Podfile.lock"), testFileContent2)
-
-	dirs, tools, _, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods"}, tools)
-	test.Equals(t, []string{
-		filepath.Join(root, "apps", "ios", "Pods"),
-		filepath.Join(root, "ios", "Widget", "Pods"),
-		"/shared/pods",
-	}, dirs)
-}
-
-func TestDetectDirectoriesToCacheCocoapodsLinuxOmitsHomeCache(t *testing.T) {
-	isolateIOSEnv(t)
-	withGOOS(t, "linux")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Podfile.lock", testFileContent2)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods"}, tools)
-	test.Equals(t, []string{filepath.Join(root, "Pods")}, dirs)
-	test.Equals(t, hashOfContent2, hashes)
-}
-
-func TestDetectDirectoriesToCacheSPMLinux(t *testing.T) {
-	isolateIOSEnv(t)
-	withGOOS(t, "linux")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, "Package.swift", testFileContent)
-
-	dirs, tools, hashes, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"spm"}, tools)
-	test.Equals(t, []string{
-		filepath.Join(root, ".build", "checkouts"),
-		filepath.Join(root, ".build", "repositories"),
-		filepath.Join(root, ".build", "artifacts"),
-	}, dirs)
-	test.Equals(t, hashOfContent1, hashes)
-}
-
-func TestDetectDirectoriesToCacheFastlaneMultiIOSApps(t *testing.T) {
-	home := isolateIOSEnv(t)
-	withGOOS(t, "darwin")
-	root := inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join("ios", "App", "Gemfile"), testFileContent)
-	writeRepoFile(t, filepath.Join("ios", "App", "Podfile"), testFileContent2)
-	writeRepoFile(t, filepath.Join("ios", "Widget", "Gemfile.lock"), testFileContent2)
-	writeRepoFile(t, filepath.Join("ios", "Widget", "Package.swift"), testFileContent)
-
-	dirs, tools, _, err := DetectDirectoriesToCache(false)
-	test.Ok(t, err)
-
-	test.Equals(t, []string{"cocoapods", "spm", "fastlane"}, tools)
-	test.Equals(t, []string{
-		filepath.Join(root, "ios", "App", "Pods"),
-		podsCacheDir(home),
-		filepath.Join(root, "ios", "Widget", ".build", "checkouts"),
-		filepath.Join(root, "ios", "Widget", ".build", "repositories"),
-		filepath.Join(root, "ios", "Widget", ".build", "artifacts"),
-		swiftpmCacheDir(home),
-		filepath.Join(root, "ios", "App", "vendor", "bundle"),
-		filepath.Join(root, "ios", "Widget", "vendor", "bundle"),
-	}, dirs)
-
-	_, err = os.Stat(".bundle")
-	test.Assert(t, os.IsNotExist(err), "root Bundler config must stay absent, got err=%v", err)
-}
-
-func TestDirSatisfiesRequires(t *testing.T) {
-	inTempRepo(t)
-
-	writeRepoFile(t, filepath.Join("ios", "Podfile"), "")
-	writeRepoFile(t, filepath.Join("ios", "Gemfile"), "")
-	writeRepoFile(t, "Gemfile", "")
-
-	requires := []string{"Podfile", "Package.swift", "*.xcodeproj", "*.xcworkspace"}
-
-	test.Assert(t, dirSatisfiesRequires(filepath.Join("ios", "Gemfile"), requires),
-		"ios/Gemfile sits next to ios/Podfile")
-	test.Assert(t, !dirSatisfiesRequires("Gemfile", requires),
-		"root Gemfile has no marker in its own directory")
-	test.Assert(t, dirSatisfiesRequires("Gemfile", nil),
-		"no requires means always satisfied")
+// A lockfile alone does not turn detection on; the manifest is the trigger.
+func TestDetectDirectoriesToCacheIOSLockWithoutManifest(t *testing.T) {
+	for _, lock := range []string{"Gemfile.lock", "Podfile.lock", "Package.resolved"} {
+		t.Run(lock, func(t *testing.T) {
+			inTempRepo(t)
+
+			writeRepoFile(t, lock, testFileContent)
+
+			dirs, tools, _, err := DetectDirectoriesToCache(false)
+			test.Ok(t, err)
+			test.Equals(t, 0, len(tools))
+			test.Equals(t, 0, len(dirs))
+		})
+	}
 }

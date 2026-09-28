@@ -79,6 +79,41 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **uv** | `uv.lock` | `uv.toml` or `pyproject.toml` | `.cache/uv`, `.venv` | ✅ Merged |
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv`, `.venv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `pip.conf` | `.cache/pip`, `.venv` | ✅ Merged |
+| **Fastlane** | `Gemfile` (key adds `Gemfile.lock`) | `.bundle/config` `BUNDLE_PATH` | `vendor/bundle` | ✅ Appended. An existing `BUNDLE_PATH` is kept |
+| **CocoaPods** | `Podfile` (key adds `Podfile.lock`) | None | `Pods`, plus `~/Library/Caches/CocoaPods` on macOS | ✅ Read-only |
+| **Swift PM** | `Package.swift` (key adds `Package.resolved`) | None | `.build/checkouts`, `.build/repositories`, plus `~/Library/Caches/org.swift.swiftpm` on macOS | ✅ Read-only |
+
+#### iOS Build Tool Details
+
+The detected tool names are `fastlane`, `cocoapods` and `spm`. The cache key is
+the checksum of the manifest plus the checksum of its lockfile, so it changes
+when resolved versions change. Commit the lockfile: if the build rewrites it
+between restore and save (for example `bundle update`), the saved cache gets a
+different key and the next restore misses.
+
+On Linux only the workspace directories are cached. The shared `$HOME` caches
+are added on macOS, where the build and the cache step share the same `HOME`.
+Missing directories are skipped without failing the build. In Harness CI,
+enabling Cache Intelligence on the stage turns this on without extra steps.
+
+```yaml
+steps:
+  - name: restore-cache
+    image: meltwater/drone-cache
+    settings:
+      restore: true
+      auto_cache: true
+  - name: build
+    image: ruby:3.2
+    commands:
+      - bundle install # installs into vendor/bundle via .bundle/config
+      - bundle exec fastlane ios build
+  - name: rebuild-cache
+    image: meltwater/drone-cache
+    settings:
+      rebuild: true
+      auto_cache: true
+```
 
 #### Python Package Manager Details
 
