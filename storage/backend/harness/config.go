@@ -5,6 +5,10 @@ type Config struct {
 	AccountID     string
 	Token         string
 	ServerBaseURL string
+	OrgID         string
+	ProjectID     string
+	PipelineID    string
+	StageID       string
 	// CacheType selects unified cache-type aware APIs when non-empty (e.g., "step").
 	CacheType              string
 	MultipartChunkSize     int

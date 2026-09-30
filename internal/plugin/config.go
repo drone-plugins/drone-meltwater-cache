@@ -33,6 +33,7 @@ type Config struct {
 	PreserveMetadata           bool
 	Override                   bool
 	FailRestoreIfKeyNotPresent bool
+	IgnoreMissingPaths         bool
 	CompressionLevel           int
 	StorageOperationTimeout    time.Duration
 	EnableCacheKeySeparator    bool

@@ -485,3 +485,21 @@ func TestConvertHarnessPath(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractTarget(t *testing.T) {
+	dst := filepath.Join("testdata", "extracted", "out")
+
+	got, err := extractTarget(dst, "root.testfile")
+	test.Ok(t, err)
+	test.Equals(t, filepath.Join(dst, "root.testfile"), got)
+
+	got, err = extractTarget(dst, "nested/dir/file")
+	test.Ok(t, err)
+	test.Equals(t, filepath.Join(dst, "nested", "dir", "file"), got)
+
+	_, err = extractTarget(dst, "../escape")
+	test.NotOk(t, err)
+
+	_, err = extractTarget(dst, "foo/../../outside")
+	test.NotOk(t, err)
+}

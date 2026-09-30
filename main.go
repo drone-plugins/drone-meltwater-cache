@@ -338,6 +338,12 @@ func main() {
 			EnvVars: []string{"PLUGIN_FAIL_RESTORE_IF_KEY_NOT_PRESENT"},
 		},
 		&cli.BoolFlag{
+			Name:    "ignore-missing-paths",
+			Usage:   "skip missing source paths while saving available paths",
+			Value:   false,
+			EnvVars: []string{"PLUGIN_IGNORE_MISSING_PATHS"},
+		},
+		&cli.BoolFlag{
 			Name:    "enable-cache-key-separator",
 			Usage:   "Enable adding of / as the cache key suffix. (defaults to false)",
 			Value:   false,
@@ -606,6 +612,26 @@ func main() {
 			Usage:   "cache service base url",
 			EnvVars: []string{"PLUGIN_CACHE_SERVICE_BASE_URL"},
 		},
+		&cli.StringFlag{
+			Name:    "org-id",
+			Usage:   "Harness organization identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_ORG_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "project-id",
+			Usage:   "Harness project identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_PROJECT_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "pipeline-id",
+			Usage:   "Harness pipeline identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_PIPELINE_ID"},
+		},
+		&cli.StringFlag{
+			Name:    "stage-id",
+			Usage:   "Harness stage identifier for cache-service request context",
+			EnvVars: []string{"HARNESS_STAGE_ID"},
+		},
 
 		&cli.Int64Flag{
 			Name:    "multipart.chunk.size",
@@ -719,6 +745,7 @@ func run(c *cli.Context) error {
 		LocalRoot:                  c.String("local-root"),
 		Override:                   c.Bool("override"),
 		FailRestoreIfKeyNotPresent: c.Bool("fail-restore-if-key-not-present"),
+		IgnoreMissingPaths:         c.Bool("ignore-missing-paths"),
 		EnableCacheKeySeparator:    c.Bool("enable-cache-key-separator"),
 		StrictKeyMatching:          c.Bool("strict-key-matching"),
 
@@ -790,6 +817,10 @@ func run(c *cli.Context) error {
 			AccountID:              c.String("account-id"),
 			Token:                  c.String("cache-service-token"),
 			ServerBaseURL:          c.String("cache-service-baseurl"),
+			OrgID:                  c.String("org-id"),
+			ProjectID:              c.String("project-id"),
+			PipelineID:             c.String("pipeline-id"),
+			StageID:                c.String("stage-id"),
 			CacheType:              c.String("cache-type"),
 			MultipartChunkSize:     c.Int("multipart.chunk.size"),
 			MultipartMaxUploadSize: c.Int("multipart.max.size"),

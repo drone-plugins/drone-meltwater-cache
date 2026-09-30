@@ -62,6 +62,10 @@ type HTTPClient struct {
 	Endpoint    string
 	AccountID   string
 	BearerToken string
+	OrgID       string
+	ProjectID   string
+	PipelineID  string
+	StageID     string
 	Logger      log.Logger
 }
 
@@ -135,8 +139,7 @@ func (c *HTTPClient) GetEntriesList(ctx context.Context, prefix string) ([]commo
 	path := c.buildEndpointPath(ListEntriesEndpoint, prefix)
 	fullURL := c.Endpoint + path
 
-	// Add backend query parameter based on environment variable
-	fullURL = c.addBackendParameter(fullURL)
+	fullURL = c.addRequestParameters(fullURL)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
@@ -202,8 +205,7 @@ func (c *HTTPClient) GetEntriesListForType(ctx context.Context, cacheType string
 	q.Set("cacheType", cacheType)
 	fullURL := c.appendQuery(baseURL, q)
 
-	// Add backend query parameter based on environment variable
-	fullURL = c.addBackendParameter(fullURL)
+	fullURL = c.addRequestParameters(fullURL)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
@@ -232,8 +234,7 @@ func (c *HTTPClient) GetEntriesListForType(ctx context.Context, cacheType string
 }
 
 func (c *HTTPClient) getLink(ctx context.Context, path string) (string, error) {
-	// Add backend query parameter based on environment variable
-	path = c.addBackendParameter(path)
+	path = c.addRequestParameters(path)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", path, nil)
 	if err != nil {
@@ -284,6 +285,25 @@ func (c *HTTPClient) addBackendParameter(urlStr string) string {
 		}
 	}
 	return urlStr
+}
+
+func (c *HTTPClient) addRequestParameters(urlStr string) string {
+	urlStr = c.addBackendParameter(urlStr)
+
+	context := url.Values{}
+	if c.OrgID != "" {
+		context.Set("orgId", c.OrgID)
+	}
+	if c.ProjectID != "" {
+		context.Set("projectId", c.ProjectID)
+	}
+	if c.PipelineID != "" {
+		context.Set("pipelineId", c.PipelineID)
+	}
+	if c.StageID != "" {
+		context.Set("stageId", c.StageID)
+	}
+	return c.appendQuery(urlStr, context)
 }
 
 // appendQuery appends the provided query values to the given URL string.
