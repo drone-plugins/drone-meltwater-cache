@@ -120,7 +120,9 @@ func (r rebuilder) Rebuild(srcs []string) error {
 			defer wg.Done()
 
 			if err := r.rebuild(src, dst); err != nil {
-				errs.Add(fmt.Errorf("upload from <%s> to <%s>, %w", src, dst, err))
+				wrapped := fmt.Errorf("upload from <%s> to <%s>, %w", src, dst, err)
+				level.Error(r.logger).Log("msg", "failed to rebuild cache for directory", "local", src, "remote", dst, "err", err)
+				errs.Add(wrapped)
 			} else {
 				successCount++
 			}
@@ -134,6 +136,12 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	if successCount > 0 {
 		level.Info(r.logger).Log("msg", "cache built", "took", time.Since(now),
 			"status", fmt.Sprintf("%d/%d directories cached", successCount, totalDirectories))
+		if successCount < totalDirectories {
+			if err := errs.Err(); err != nil {
+				level.Error(r.logger).Log("msg", "one or more directories failed to rebuild",
+					"cached", successCount, "total", totalDirectories, "err", err)
+			}
+		}
 		return nil
 	}
 
