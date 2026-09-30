@@ -110,40 +110,34 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			usePerProject: true,
 		},
 		{
-			globToDetect:        "poetry.lock",
-			tool:                "python",
-			preparer:            newPythonPreparer(),
-			additionalCacheDirs: pythonVenvDirs,
+			globToDetect: "poetry.lock",
+			tool:         "python-poetry",
+			preparer:     newPoetryPreparer(),
 		},
 		{
-			globToDetect:        "uv.lock",
-			tool:                "python",
-			preparer:            newUvPreparer(),
-			additionalCacheDirs: pythonVenvDirs,
+			globToDetect: "uv.lock",
+			tool:         "python-uv",
+			preparer:     newUvPreparer(),
 		},
 		{
-			globToDetect:        "Pipfile.lock",
-			tool:                "python",
-			preparer:            newPythonPreparer(),
-			additionalCacheDirs: pythonVenvDirs,
+			globToDetect: "Pipfile.lock",
+			tool:         "python-pipenv",
+			preparer:     newPipenvPreparer(),
 		},
 		{
-			globToDetect:        "requirements.txt",
-			tool:                "python",
-			preparer:            newPipPreparer(),
-			additionalCacheDirs: pythonVenvDirs,
+			globToDetect: "requirements.txt",
+			tool:         "python-pip",
+			preparer:     newPipPreparer(),
 		},
 		{
-			globToDetect:        "constraints.txt",
-			tool:                "python",
-			preparer:            newPipPreparer(),
-			additionalCacheDirs: pythonVenvDirs,
+			globToDetect: "constraints.txt",
+			tool:         "python-pip",
+			preparer:     newPipPreparer(),
 		},
 		{
-			globToDetect:        "pyproject.toml",
-			tool:                "python",
-			preparer:            newPipPreparer(),
-			additionalCacheDirs: pythonVenvDirs,
+			globToDetect: "pyproject.toml",
+			tool:         "python-pip",
+			preparer:     newPipPreparer(),
 			excludeIfExist: []string{
 				"poetry.lock",
 				"uv.lock",
@@ -161,7 +155,8 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 	for _, supportedTool := range buildToolInfoMapping {
 		// Skip if this tool type was already detected
 		// This prevents running both bazelPreparer and bzlmodPreparer
-		// when a project has both WORKSPACE and MODULE.bazel
+		// when a project has both WORKSPACE and MODULE.bazel, and
+		// skips duplicate globs for the same manager (e.g. requirements.txt and constraints.txt).
 		if containsTool(buildToolsDetected, supportedTool.tool) {
 			continue
 		}
