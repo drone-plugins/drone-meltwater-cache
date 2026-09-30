@@ -144,6 +144,26 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 				"Pipfile.lock",
 			},
 		},
+		{
+			globToDetect:       "Gemfile",
+			tool:               "fastlane",
+			preparer:           newFastlanePreparer(),
+			additionalHashGlob: "Gemfile.lock",
+		},
+		{
+			globToDetect:        "Podfile",
+			tool:                "cocoapods",
+			preparer:            newCocoapodsPreparer(),
+			additionalCacheDirs: cocoapodsCacheDirs,
+			additionalHashGlob:  "Podfile.lock",
+		},
+		{
+			globToDetect:        "Package.swift",
+			tool:                "spm",
+			preparer:            newSPMPreparer(),
+			additionalCacheDirs: spmCacheDirs,
+			additionalHashGlob:  "Package.resolved",
+		},
 	}
 
 	var directoriesToCache []string
