@@ -1,5 +1,13 @@
 # escape=`
+FROM mcr.microsoft.com/windows/servercore:ltsc2022 as roots
+COPY docker/windows/ C:/roots-src/
+RUN powershell -NoProfile -ExecutionPolicy Bypass -File C:\roots-src\export-roots.ps1
+
 FROM plugins/base:windows-ltsc2022-amd64@sha256:0f90d5bceb432f1ee6f93cf44eed6a38c322834edd55df8a6648c9e6f15131f4
+USER ContainerAdministrator
+SHELL ["cmd", "/S", "/C"]
+COPY --from=roots /roots/ /roots/
+RUN for %f in (C:\roots\*.reg) do @(reg import "%f" || exit 1)
 USER ContainerUser
 
 ENV GODEBUG=netdns=go
