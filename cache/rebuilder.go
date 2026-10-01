@@ -179,6 +179,8 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	for result := range results {
 		if result.Err != nil {
 			summary.Failed++
+			level.Error(r.logger).Log("msg", "failed to rebuild cache for directory",
+				"local", result.Source, "remote", result.Target, "err", result.Err)
 			errs.Add(fmt.Errorf("upload from <%s> to <%s>, %w", result.Source, result.Target, result.Err))
 			continue
 		}

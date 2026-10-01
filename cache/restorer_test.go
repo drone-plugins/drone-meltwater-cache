@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -970,5 +972,71 @@ func TestExportRestoreMetrics_ConcurrentWrites(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
 	if len(lines) != numGoroutines {
 		t.Errorf("Expected %d lines, got %d", numGoroutines, len(lines))
+	}
+}
+
+// TestRestorePartialFailureLogsError verifies that when one of multiple mount
+// paths fails to restore, the step still succeeds (partial restore) but the
+// failure reason is logged so operators can diagnose which directory failed.
+func TestRestorePartialFailureLogsError(t *testing.T) {
+	const (
+		okPath  = "/ok/dir"
+		badPath = "/tmp/external"
+		failMsg = "simulated storage get failure"
+	)
+
+	var logBuf bytes.Buffer
+	logger := log.NewLogfmtLogger(&logBuf)
+
+	mockStorage := &MockStorage{
+		GetFunc: func(p string, w io.Writer) error {
+			if strings.Contains(p, "tmp/external") || strings.HasSuffix(p, badPath) || strings.Contains(p, "external") {
+				return fmt.Errorf("%s", failMsg)
+			}
+			_, err := w.Write([]byte("ok-archive-bytes"))
+			return err
+		},
+	}
+
+	mockArchive := &MockArchive{
+		ExtractFunc: func(dst string, r io.Reader) (int64, error) {
+			if _, err := io.Copy(io.Discard, r); err != nil {
+				return 0, err
+			}
+			return 16, nil
+		},
+	}
+
+	r := restorer{
+		logger:    logger,
+		s:         mockStorage,
+		a:         mockArchive,
+		g:         generator.NewStatic("test-key"),
+		namespace: "ns",
+	}
+
+	err := r.Restore([]string{okPath, badPath}, t.TempDir()+"/cache-meta.json")
+	if err != nil {
+		t.Fatalf("partial restore should not fail the step, got: %v", err)
+	}
+
+	// Allow async download goroutine logs to flush
+	time.Sleep(50 * time.Millisecond)
+
+	logs := logBuf.String()
+	if !strings.Contains(logs, "failed to restore directory") {
+		t.Fatalf("expected per-directory failure log, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, badPath) {
+		t.Fatalf("expected failed local path %q in logs, got:\n%s", badPath, logs)
+	}
+	if !strings.Contains(logs, failMsg) && !strings.Contains(logs, "failed to download") && !strings.Contains(logs, "failed to extract") {
+		t.Fatalf("expected underlying failure reason in logs, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "one or more directories failed to restore") {
+		t.Fatalf("expected partial-restore summary error log, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "partially restored") {
+		t.Fatalf("expected partially restored status log, got:\n%s", logs)
 	}
 }
