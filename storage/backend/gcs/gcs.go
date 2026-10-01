@@ -3,6 +3,7 @@ package gcs
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -176,7 +177,7 @@ func (b *Backend) Exists(ctx context.Context, p string) (bool, error) {
 		}
 
 		attrs, err := obj.Attrs(ctx)
-		if err != nil && err != gcstorage.ErrObjectNotExist {
+		if err != nil && !errors.Is(err, gcstorage.ErrObjectNotExist) {
 			resCh <- &result{err: fmt.Errorf("get the object attrs, %w", err)}
 			return
 		}
