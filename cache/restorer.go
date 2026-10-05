@@ -79,6 +79,7 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	if err != nil {
 		return fmt.Errorf("generate key, %w", err)
 	}
+	level.Info(r.logger).Log("msg", "cache restore using key", "key", key)
 
 	var (
 		wg               sync.WaitGroup
@@ -246,8 +247,8 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 			src = filepath.Join(namespace, key, normalizeDockerPath(dst))
 		}
 
-		level.Info(r.logger).Log("msg", "restoring directory", "local", dst, "remote", src)
-		level.Debug(r.logger).Log("msg", "restoring directory", "remote", src)
+		level.Info(r.logger).Log("msg", "restoring directory", "key", key, "local", dst, "remote", src)
+		level.Debug(r.logger).Log("msg", "restoring directory", "key", key, "remote", src)
 
 		wg.Add(1)
 

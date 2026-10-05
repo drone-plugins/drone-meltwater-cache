@@ -110,6 +110,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	if err != nil {
 		return fmt.Errorf("generate key, %w", err)
 	}
+	level.Info(r.logger).Log("msg", "cache save using key", "key", key)
 
 	namespace := filepath.ToSlash(filepath.Clean(r.namespace))
 	scheduled := make([]scheduledUpload, 0, len(srcs))
@@ -139,8 +140,8 @@ func (r rebuilder) Rebuild(srcs []string) error {
 			}
 		}
 
-		level.Info(r.logger).Log("msg", "rebuilding cache for source path", "local", src)
-		level.Debug(r.logger).Log("msg", "rebuilding cache for source path", "remote", dst)
+		level.Info(r.logger).Log("msg", "rebuilding cache for source path", "key", key, "local", src, "remote", dst)
+		level.Debug(r.logger).Log("msg", "rebuilding cache for source path", "key", key, "remote", dst)
 
 		summary.Scheduled++
 		scheduled = append(scheduled, scheduledUpload{src: src, dst: dst})
@@ -167,7 +168,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 			results <- uploadResult{
 				Source: src,
 				Target: dst,
-				Err:    r.rebuild(src, dst),
+				Err:    r.rebuild(src, dst, key),
 			}
 		}(item.dst, item.src)
 	}
@@ -238,7 +239,7 @@ func (r rebuilder) logRebuildComplete(summary rebuildSummary, started time.Time)
 }
 
 // rebuild pushes the archived file to the cache.
-func (r rebuilder) rebuild(src, dst string) (err error) {
+func (r rebuilder) rebuild(src, dst, cacheKey string) (err error) {
 	isRelativePath := strings.HasPrefix(src, "./")
 	level.Debug(r.logger).Log("msg", "rebuild", "src", src, "relativePath", isRelativePath) //nolint: errcheck
 	src = filepath.Clean(src)
@@ -284,7 +285,7 @@ func (r rebuilder) rebuild(src, dst string) (err error) {
 		return err
 	}
 
-	level.Info(r.logger).Log("msg", "uploaded cache", "src", src, "size before compression", humanize.Bytes(uint64(sw.written)), "size after compression", humanize.Bytes(uint64(written)))
+	level.Info(r.logger).Log("msg", "uploaded cache", "key", cacheKey, "remote", dst, "src", src, "size before compression", humanize.Bytes(uint64(sw.written)), "size after compression", humanize.Bytes(uint64(written)))
 
 	level.Debug(r.logger).Log(
 		"msg", "archive created",
