@@ -80,7 +80,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Fastlane** | `Gemfile` (key adds `Gemfile.lock`) | `.bundle/config` `BUNDLE_PATH` | `vendor/bundle` | ✅ Appended. An existing `BUNDLE_PATH` is kept |
-| **CocoaPods** | `Podfile` (key adds `Podfile.lock`) | None | `Pods`, plus `~/Library/Caches/CocoaPods` on macOS | ✅ Read-only |
+| **CocoaPods** | `Podfile` (key adds `Podfile.lock`) | `CP_CACHE_DIR` / `CP_HOME_DIR` | `Pods`, plus `~/Library/Caches/CocoaPods` and `~/.cocoapods/cache` on macOS | ✅ Read-only |
 | **Swift PM** | `Package.swift` (key adds `Package.resolved`) | None | `.build/checkouts`, `.build/repositories`, plus `~/Library/Caches/org.swift.swiftpm` on macOS | ✅ Read-only |
 
 #### iOS Build Tool Details
@@ -91,7 +91,10 @@ when resolved versions change. Commit the lockfile: if the build rewrites it
 between restore and save (for example `bundle update`), the saved cache gets a
 different key and the next restore misses.
 
-On Linux only the workspace directories are cached. The shared `$HOME` caches
+On Linux only the workspace directories are cached by default. CocoaPods download
+cache can be redirected to the workspace (e.g. `/harness/.cocoapods-cache`) on
+Linux or macOS by exporting `CP_CACHE_DIR` or `CP_HOME_DIR`. The shared `$HOME` caches
+(`~/Library/Caches/CocoaPods` and `~/.cocoapods/cache` for CocoaPods; `~/Library/Caches/org.swift.swiftpm` for SPM)
 are added on macOS, where the build and the cache step share the same `HOME`.
 Missing directories are skipped without failing the build. In Harness CI,
 enabling Cache Intelligence on the stage turns this on without extra steps.

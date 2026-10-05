@@ -1213,6 +1213,8 @@ func inTempRepo(t *testing.T) (root, home string) {
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("CP_CACHE_DIR", "")
+	t.Setenv("CP_HOME_DIR", "")
 
 	orig, err := os.Getwd()
 	test.Ok(t, err)
@@ -1259,7 +1261,10 @@ func TestDetectDirectoriesToCacheIOSTools(t *testing.T) {
 			dirs: func(root, home, goos string) []string {
 				dirs := []string{filepath.Join(root, "Pods")}
 				if goos == "darwin" {
-					dirs = append(dirs, filepath.Join(home, "Library", "Caches", "CocoaPods"))
+					dirs = append(dirs,
+						filepath.Join(home, "Library", "Caches", "CocoaPods"),
+						filepath.Join(home, ".cocoapods", "cache"),
+					)
 				}
 				return dirs
 			},
@@ -1322,6 +1327,36 @@ func TestDetectDirectoriesToCacheIOSLockWithoutManifest(t *testing.T) {
 			test.Ok(t, err)
 			test.Equals(t, 0, len(tools))
 			test.Equals(t, 0, len(dirs))
+		})
+	}
+}
+
+func TestDetectDirectoriesToCacheCocoapodsCPCacheDir(t *testing.T) {
+	for _, osName := range []string{"linux", "darwin"} {
+		t.Run(osName, func(t *testing.T) {
+			withGOOS(t, osName)
+			root, _ := inTempRepo(t)
+
+			customCache := filepath.Join(root, "custom-cp-cache")
+			t.Setenv("CP_CACHE_DIR", customCache)
+
+			writeRepoFile(t, "Podfile", testFileContent)
+
+			dirs, tools, _, err := DetectDirectoriesToCache(false)
+			test.Ok(t, err)
+			test.Equals(t, []string{"cocoapods"}, tools)
+
+			var foundPods, foundCustom bool
+			for _, d := range dirs {
+				if d == filepath.Join(root, "Pods") {
+					foundPods = true
+				}
+				if d == customCache {
+					foundCustom = true
+				}
+			}
+			test.Assert(t, foundPods, "expected Pods/ in %v", dirs)
+			test.Assert(t, foundCustom, "expected customCache %q in %v", customCache, dirs)
 		})
 	}
 }
