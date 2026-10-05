@@ -2,12 +2,19 @@
 
 FROM mcr.microsoft.com/windows/servercore:ltsc2019 as core
 
+FROM mcr.microsoft.com/windows/servercore:ltsc2019 as roots
+COPY docker/windows/ C:/roots-src/
+RUN powershell -NoProfile -ExecutionPolicy Bypass -File C:\roots-src\export-roots.ps1
+
 
 FROM mcr.microsoft.com/windows/nanoserver:1809
 USER ContainerAdministrator
+SHELL ["cmd", "/S", "/C"]
 
 ENV GODEBUG=netdns=go
 COPY --from=core /windows/system32/netapi32.dll /windows/system32/netapi32.dll
+COPY --from=roots /roots/ /roots/
+RUN for %f in (C:\roots\*.reg) do @(reg import "%f" || exit 1)
 
 ADD release/windows/amd64/drone-cache.exe C:/drone-cache.exe
 ENTRYPOINT [ "C:\\drone-cache.exe" ]
