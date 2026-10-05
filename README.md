@@ -79,6 +79,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **uv** | `uv.lock` | `UV_CACHE_DIR` / `uv.toml` or `pyproject.toml` | `.cache/uv` | ✅ Merged |
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
+| **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
 
 #### Python Package Manager Details
 
@@ -148,6 +149,25 @@ For projects using Poetry (`poetry.lock`), the plugin will:
 3. Cache and restore that directory across builds
 
 No explicit mount configuration needed - just add the cache steps to your pipeline.
+
+#### Composer (PHP) Details
+
+Composer manages dependencies for PHP projects. The plugin prioritizes caching
+the repository-local `vendor/` directory, which allows `composer install` in the
+build container to immediately verify installed dependencies and skip network downloads.
+
+- **Detection**: Automatically detects `composer.lock` (primary) or `composer.json`
+  (fallback for libraries that do not commit a lockfile). When `composer.lock` is
+  present, it takes precedence and determines the cache key.
+- **Vendor Directory**: Defaults to `vendor/` in the project directory. If
+  `COMPOSER_VENDOR_DIR` is set or `config.vendor-dir` is configured in `composer.json`,
+  that directory is cached instead.
+- **Download Cache**: If `COMPOSER_CACHE_DIR` or `config.cache-dir` in `composer.json`
+  is configured to a workspace path, it is also cached as an additional directory.
+- **Read-Only / Zero Mutation**: The plugin never modifies `composer.json` or writes
+  to the repository. Tracked files remain clean for downstream git and release steps.
+- **Security**: The global `$COMPOSER_HOME` directory (which may contain `auth.json`
+  with private tokens) is never cached.
 
 ## Example Usage of drone-cache
 

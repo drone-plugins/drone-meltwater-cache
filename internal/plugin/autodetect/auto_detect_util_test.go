@@ -384,7 +384,6 @@ func isolatePythonEnv(t *testing.T) {
 	t.Setenv("UV_CACHE_DIR", "")
 }
 
-
 func TestDetectDirectoriesToCacheNodeUsesPackageLock(t *testing.T) {
 	isolateNpmEnv(t)
 	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))
@@ -1195,4 +1194,66 @@ func containsCacheDir(dirs []string, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestDetectDirectoriesToCacheComposerWithLock(t *testing.T) {
+	isolateComposerEnv(t)
+	test.Ok(t, os.WriteFile("composer.lock", []byte(testFileContent), 0644))
+	defer os.Remove("composer.lock")
+
+	directoriesToCache, buildToolsDetected, hash, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"composer"}, buildToolsDetected)
+	test.Assert(t, hash != "", "expected non-empty hash for composer.lock")
+
+	wd, err := os.Getwd()
+	test.Ok(t, err)
+	expectedVendor, err := filepath.Abs(filepath.Join(wd, "vendor"))
+	test.Ok(t, err)
+
+	test.Equals(t, []string{expectedVendor}, directoriesToCache)
+}
+
+func TestDetectDirectoriesToCacheComposerWithJsonOnly(t *testing.T) {
+	isolateComposerEnv(t)
+	test.Ok(t, os.WriteFile("composer.json", []byte(`{"name": "test/library"}`), 0644))
+	defer os.Remove("composer.json")
+
+	directoriesToCache, buildToolsDetected, hash, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"composer"}, buildToolsDetected)
+	test.Assert(t, hash != "", "expected non-empty hash for composer.json fallback")
+
+	wd, err := os.Getwd()
+	test.Ok(t, err)
+	expectedVendor, err := filepath.Abs(filepath.Join(wd, "vendor"))
+	test.Ok(t, err)
+
+	test.Equals(t, []string{expectedVendor}, directoriesToCache)
+}
+
+func TestDetectDirectoriesToCacheComposerLockPreferredOverJson(t *testing.T) {
+	isolateComposerEnv(t)
+	test.Ok(t, os.WriteFile("composer.lock", []byte(`{"_readme": ["lockfile v1"], "packages": []}`), 0644))
+	defer os.Remove("composer.lock")
+	test.Ok(t, os.WriteFile("composer.json", []byte(`{"name": "test/app"}`), 0644))
+	defer os.Remove("composer.json")
+
+	directoriesToCache, buildToolsDetected, hash, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"composer"}, buildToolsDetected)
+
+	// Hash should match composer.lock only, not concatenated with composer.json
+	expectedHash := md5.Sum([]byte(`{"_readme": ["lockfile v1"], "packages": []}`))
+	test.Equals(t, hex.EncodeToString(expectedHash[:]), hash)
+
+	wd, err := os.Getwd()
+	test.Ok(t, err)
+	expectedVendor, err := filepath.Abs(filepath.Join(wd, "vendor"))
+	test.Ok(t, err)
+
+	test.Equals(t, []string{expectedVendor}, directoriesToCache)
 }
