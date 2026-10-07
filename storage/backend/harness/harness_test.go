@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -286,6 +287,7 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 	partUploads := make(map[int][]byte)
 	var uploadedChecksum string
 	requestCount := 0
+	var mu sync.Mutex
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// All requests should be PUT or GET
@@ -316,7 +318,9 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 				UploadID: uploadID,
 			}
 			xml.NewEncoder(w).Encode(initResponse)
+			mu.Lock()
 			requestCount++
+			mu.Unlock()
 
 		case r.Method == "PUT" && query.Has("partNumber") && query.Get("uploadId") == uploadID:
 			t.Logf("Processing part upload request for part %s", query.Get("partNumber"))
@@ -334,13 +338,15 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 			partNumber := 0
 			fmt.Sscanf(partNum, "%d", &partNumber)
 
-			// Store part data
+			// Store part data (multipart uploads are concurrent)
+			mu.Lock()
 			partUploads[partNumber] = partData
+			requestCount++
+			mu.Unlock()
 
 			// Return ETag
 			w.Header().Set("ETag", fmt.Sprintf("\"etag-part-%d\"", partNumber))
 			w.WriteHeader(http.StatusOK)
-			requestCount++
 
 		case r.Method == "PUT" && query.Has("uploadId") && query.Get("uploadId") == uploadID && !query.Has("partNumber"):
 			// Parse completion request
@@ -351,6 +357,7 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 				return
 			}
 
+			mu.Lock()
 			// Store the uploaded checksum for verification
 			uploadedChecksum = completeReq.Checksum
 
@@ -364,9 +371,10 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 					t.Errorf("Expected ETag %s for part %d, got %s", expectedETag, part.PartNumber, part.ETag)
 				}
 			}
+			requestCount++
+			mu.Unlock()
 
 			w.WriteHeader(http.StatusOK)
-			requestCount++
 
 		// Download Requests
 		case r.Method == "GET" && strings.Contains(key, ".part"):
@@ -378,7 +386,10 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 				return
 			}
 
+			mu.Lock()
 			partData, ok := partUploads[partNum]
+			requestCount++
+			mu.Unlock()
 			if !ok {
 				t.Errorf("Part %d not found", partNum)
 				w.WriteHeader(http.StatusNotFound)
@@ -389,9 +400,9 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(partData)))
 			w.WriteHeader(http.StatusOK)
 			w.Write(partData)
-			requestCount++
 
 		case r.Method == "GET":
+			mu.Lock()
 			// Return the completion XML for the main file
 			var parts []CompletedPartElement
 			for i := 1; i <= len(partUploads); i++ {
@@ -406,10 +417,11 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 				Parts:    parts,
 				Checksum: uploadedChecksum,
 			}
+			requestCount++
+			mu.Unlock()
 
 			w.Header().Set("Content-Type", "application/xml")
 			xml.NewEncoder(w).Encode(completeReq)
-			requestCount++
 
 		default:
 			t.Errorf("Unexpected request. Method: %s, Path: %s, Query: %v", r.Method, r.URL.Path, query)
@@ -498,8 +510,11 @@ func TestParallelMultipartUploadDownload(t *testing.T) {
 	expectedRequests := expectedParts + 2 // initiate + parts + complete
 	expectedRequests += expectedParts + 1 // download parts + metadata
 
-	if requestCount != int(expectedRequests) {
-		t.Errorf("Expected %d requests, got %d", expectedRequests, requestCount)
+	mu.Lock()
+	gotRequestCount := requestCount
+	mu.Unlock()
+	if gotRequestCount != int(expectedRequests) {
+		t.Errorf("Expected %d requests, got %d", expectedRequests, gotRequestCount)
 	}
 
 	t.Log("Test completed successfully")
