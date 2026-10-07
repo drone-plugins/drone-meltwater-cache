@@ -11,6 +11,7 @@ import (
 
 // TestUvPreparerBasic verifies uv configuration injection in pyproject.toml
 func TestUvPreparerBasic(t *testing.T) {
+	t.Setenv("UV_CACHE_DIR", "")
 	tempDir := t.TempDir()
 
 	// Create uv.lock and pyproject.toml
@@ -42,6 +43,7 @@ func TestUvPreparerBasic(t *testing.T) {
 
 // TestUvPreparerExistingToolUv verifies uv appends to existing [tool.uv] section
 func TestUvPreparerExistingToolUv(t *testing.T) {
+	t.Setenv("UV_CACHE_DIR", "")
 	tempDir := t.TempDir()
 
 	// Create uv.lock and pyproject.toml with existing [tool.uv]
@@ -74,6 +76,7 @@ func TestUvPreparerExistingToolUv(t *testing.T) {
 
 // TestUvPreparerWithoutPyproject verifies standalone uv projects use uv.toml.
 func TestUvPreparerWithoutPyproject(t *testing.T) {
+	t.Setenv("UV_CACHE_DIR", "")
 	tempDir := t.TempDir()
 
 	uvLock := filepath.Join(tempDir, "uv.lock")
@@ -94,6 +97,7 @@ func TestUvPreparerWithoutPyproject(t *testing.T) {
 }
 
 func TestUvPreparerUsesUvTomlWhenPresent(t *testing.T) {
+	t.Setenv("UV_CACHE_DIR", "")
 	tempDir := t.TempDir()
 	uvConfigPath := filepath.Join(tempDir, "uv.toml")
 	test.Ok(t, os.WriteFile(uvConfigPath, []byte("offline = true\ncache-dir = \"/old\"\n"), 0644))
@@ -121,7 +125,28 @@ func TestUvPreparerUsesUvTomlWhenPresent(t *testing.T) {
 	test.Equals(t, pyproject, string(unchangedPyproject))
 }
 
+// TestUvPreparerUsesEnvOverride verifies UV_CACHE_DIR wins over both config files.
+func TestUvPreparerUsesEnvOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	pyprojectPath := filepath.Join(tempDir, "pyproject.toml")
+	pyproject := "[project]\nname = \"test\"\n"
+	test.Ok(t, os.WriteFile(pyprojectPath, []byte(pyproject), 0644))
+	custom := filepath.Join(tempDir, "custom-uv")
+	t.Setenv("UV_CACHE_DIR", custom)
+
+	cacheDir, err := newUvPreparer().PrepareRepo(tempDir)
+	test.Ok(t, err)
+	test.Equals(t, custom, cacheDir)
+
+	unchangedPyproject, err := os.ReadFile(pyprojectPath)
+	test.Ok(t, err)
+	test.Equals(t, pyproject, string(unchangedPyproject))
+	test.Assert(t, !fileExists(filepath.Join(tempDir, "uv.toml")),
+		"expected no uv.toml when UV_CACHE_DIR wins")
+}
+
 func TestUvPreparerScopesCacheDirToToolUv(t *testing.T) {
+	t.Setenv("UV_CACHE_DIR", "")
 	tempDir := t.TempDir()
 	pyprojectPath := filepath.Join(tempDir, "pyproject.toml")
 	pyproject := "[tool.other]\ncache-dir = \"/other\"\n\n[tool.uv]\noffline = true\n"

@@ -375,6 +375,16 @@ func isolateNpmEnv(t *testing.T) {
 	t.Setenv("HARNESS_WORKSPACE", "")
 }
 
+// they don't decide these tests' assertions for us.
+func isolatePythonEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("PIP_CACHE_DIR", "")
+	t.Setenv("PIPENV_CACHE_DIR", "")
+	t.Setenv("POETRY_CACHE_DIR", "")
+	t.Setenv("UV_CACHE_DIR", "")
+}
+
+
 func TestDetectDirectoriesToCacheNodeUsesPackageLock(t *testing.T) {
 	isolateNpmEnv(t)
 	test.Ok(t, os.WriteFile(packageLockFile, []byte(testFileContent), 0644))
@@ -760,6 +770,7 @@ func TestDetectDirectoriesToCacheYarnStillCachesNodeModules(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCachePythonPoetry(t *testing.T) {
+	isolatePythonEnv(t)
 	f, err := os.Create("poetry.lock")
 	test.Ok(t, err)
 	defer f.Close()
@@ -781,7 +792,7 @@ func TestDetectDirectoriesToCachePythonPoetry(t *testing.T) {
 
 	// Should detect python tool
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-poetry"), "expected python-poetry in detected tools, got %v", buildToolsDetected)
 	test.Equals(t, len(directoriesToCache) > 0, true)
 	// Find the poetry cache dir
 	var poetryCacheFound bool
@@ -795,6 +806,7 @@ func TestDetectDirectoriesToCachePythonPoetry(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCachePythonPipfile(t *testing.T) {
+	isolatePythonEnv(t)
 	f, err := os.Create("Pipfile.lock")
 	test.Ok(t, err)
 	defer f.Close()
@@ -808,7 +820,7 @@ func TestDetectDirectoriesToCachePythonPipfile(t *testing.T) {
 
 	// Python should be detected
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-pipenv"), "expected python-pipenv in detected tools, got %v", buildToolsDetected)
 	test.Equals(t, len(directoriesToCache) > 0, true)
 	// Find the pipenv cache dir
 	var pipenvCacheFound bool
@@ -822,7 +834,7 @@ func TestDetectDirectoriesToCachePythonPipfile(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
-	t.Setenv("PIP_CACHE_DIR", "")
+	isolatePythonEnv(t)
 	f, err := os.Create("requirements.txt")
 	test.Ok(t, err)
 	defer f.Close()
@@ -836,7 +848,7 @@ func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
 
 	// Python should be detected
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-pip"), "expected python-pip in detected tools, got %v", buildToolsDetected)
 	test.Equals(t, len(directoriesToCache) > 0, true)
 	// Find the pip cache dir
 	var pipCacheFound bool
@@ -850,29 +862,26 @@ func TestDetectDirectoriesToCachePythonRequirements(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCachePythonRequirementsWithoutEnv(t *testing.T) {
-	t.Setenv("PIP_CACHE_DIR", "")
+	isolatePythonEnv(t)
 	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent), 0644))
 	defer os.Remove("requirements.txt")
 	defer os.Remove("pip.conf")
 
 	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
-	test.Assert(t, containsTool(buildToolsDetected, "python"),
-		"expected pip detection without PIP_CACHE_DIR, got %v", buildToolsDetected)
-	var pipCacheFound, venvFound bool
+	test.Assert(t, containsTool(buildToolsDetected, "python-pip"),
+		"expected python-pip detection without PIP_CACHE_DIR, got %v", buildToolsDetected)
+	var pipCacheFound bool
 	for _, dir := range directoriesToCache {
 		if filepath.Base(dir) == "pip" {
 			pipCacheFound = true
 		}
-		if filepath.Base(dir) == ".venv" {
-			venvFound = true
-		}
 	}
 	test.Assert(t, pipCacheFound, "expected pip cache dir in %v", directoriesToCache)
-	test.Assert(t, venvFound, "expected .venv cache dir in %v", directoriesToCache)
 }
 
 func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
+	isolatePythonEnv(t)
 	// Create both poetry.lock and requirements.txt
 	f1, err := os.Create("poetry.lock")
 	test.Ok(t, err)
@@ -903,8 +912,9 @@ func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
 
 	// Should detect python tool
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
-	// Should prefer poetry over pip - find poetry cache dir
+	test.Assert(t, containsTool(buildToolsDetected, "python-poetry"), "expected python-poetry in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-pip"), "expected python-pip in detected tools, got %v", buildToolsDetected)
+	// Should find poetry cache dir
 	var poetryCacheFound bool
 	for _, dir := range directoriesToCache {
 		if filepath.Base(dir) == "poetry" {
@@ -912,10 +922,11 @@ func TestDetectDirectoriesToCachePythonPoetryPriority(t *testing.T) {
 			break
 		}
 	}
-	test.Assert(t, poetryCacheFound, "expected poetry cache dir (should take priority over pip), got %v", directoriesToCache)
+	test.Assert(t, poetryCacheFound, "expected poetry cache dir, got %v", directoriesToCache)
 }
 
 func TestDetectDirectoriesToCacheUv(t *testing.T) {
+	isolatePythonEnv(t)
 	// Create uv.lock and pyproject.toml
 	f, err := os.Create("uv.lock")
 	test.Ok(t, err)
@@ -936,7 +947,7 @@ func TestDetectDirectoriesToCacheUv(t *testing.T) {
 
 	// uv should be detected as python tool
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-uv"), "expected python-uv in detected tools, got %v", buildToolsDetected)
 	test.Equals(t, len(directoriesToCache) > 0, true)
 	// Find the uv cache dir
 	var uvCacheFound bool
@@ -950,7 +961,8 @@ func TestDetectDirectoriesToCacheUv(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCacheUvPriority(t *testing.T) {
-	// Create uv.lock and Pipfile.lock - uv should take priority
+	isolatePythonEnv(t)
+	// Create uv.lock and Pipfile.lock - both should be detected
 	f1, err := os.Create("uv.lock")
 	test.Ok(t, err)
 	defer f1.Close()
@@ -975,10 +987,11 @@ func TestDetectDirectoriesToCacheUvPriority(t *testing.T) {
 	test.Ok(t, os.RemoveAll("pyproject.toml"))
 	test.Ok(t, os.RemoveAll("Pipfile.lock"))
 
-	// Should detect python tool
+	// Should detect both python tools
 	test.Assert(t, len(buildToolsDetected) > 0, "expected at least one tool detected")
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
-	// Should prefer uv over pipenv - find uv cache dir
+	test.Assert(t, containsTool(buildToolsDetected, "python-uv"), "expected python-uv in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-pipenv"), "expected python-pipenv in detected tools, got %v", buildToolsDetected)
+	// Find uv cache dir
 	var uvCacheFound bool
 	for _, dir := range directoriesToCache {
 		if filepath.Base(dir) == "uv" {
@@ -986,18 +999,136 @@ func TestDetectDirectoriesToCacheUvPriority(t *testing.T) {
 			break
 		}
 	}
-	test.Assert(t, uvCacheFound, "expected uv cache dir (should take priority over pipenv), got %v", directoriesToCache)
+	test.Assert(t, uvCacheFound, "expected uv cache dir, got %v", directoriesToCache)
+}
+
+// cacheDirNames reduces absolute cache paths to their leaf names so assertions
+// can name the managers involved instead of full temp paths.
+func cacheDirNames(dirs []string) []string {
+	names := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		names = append(names, filepath.Base(dir))
+	}
+	return names
+}
+
+func assertCachesManagers(t *testing.T, dirs []string, want ...string) {
+	t.Helper()
+	names := cacheDirNames(dirs)
+	for _, manager := range want {
+		test.Assert(t, containsTool(names, manager),
+			"expected %s cache dir, got %v", manager, names)
+	}
+}
+
+// A repo migrating to uv keeps requirements.txt around, so both caches are needed.
+func TestDetectDirectoriesToCachePythonUvAndRequirementsCoexist(t *testing.T) {
+	isolatePythonEnv(t)
+	test.Ok(t, os.WriteFile("uv.lock", []byte(testFileContent), 0644))
+	defer os.Remove("uv.lock")
+	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent2), 0644))
+	defer os.Remove("requirements.txt")
+	defer os.Remove("pip.conf")
+	defer os.Remove("uv.toml")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"python-uv", "python-pip"}, buildToolsDetected)
+	assertCachesManagers(t, directoriesToCache, "uv", "pip")
+}
+
+func TestDetectDirectoriesToCachePythonPoetryAndRequirementsCoexist(t *testing.T) {
+	isolatePythonEnv(t)
+	test.Ok(t, os.WriteFile("poetry.lock", []byte(testFileContent), 0644))
+	defer os.Remove("poetry.lock")
+	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent2), 0644))
+	defer os.Remove("requirements.txt")
+	defer os.Remove("pip.conf")
+	defer os.Remove("poetry.toml")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"python-poetry", "python-pip"}, buildToolsDetected)
+	assertCachesManagers(t, directoriesToCache, "poetry", "pip")
+}
+
+func TestDetectDirectoriesToCachePythonPoetryAndPipenvCoexist(t *testing.T) {
+	isolatePythonEnv(t)
+	test.Ok(t, os.WriteFile("poetry.lock", []byte(testFileContent), 0644))
+	defer os.Remove("poetry.lock")
+	test.Ok(t, os.WriteFile("Pipfile.lock", []byte(testFileContent2), 0644))
+	defer os.Remove("Pipfile.lock")
+	defer os.Remove("poetry.toml")
+	defer os.Remove(".env")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"python-poetry", "python-pipenv"}, buildToolsDetected)
+	assertCachesManagers(t, directoriesToCache, "poetry", "pipenv")
+}
+
+func TestDetectDirectoriesToCachePythonPipenvAndRequirementsCoexist(t *testing.T) {
+	isolatePythonEnv(t)
+	test.Ok(t, os.WriteFile("Pipfile.lock", []byte(testFileContent), 0644))
+	defer os.Remove("Pipfile.lock")
+	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent2), 0644))
+	defer os.Remove("requirements.txt")
+	defer os.Remove("pip.conf")
+	defer os.Remove(".env")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"python-pipenv", "python-pip"}, buildToolsDetected)
+	assertCachesManagers(t, directoriesToCache, "pipenv", "pip")
+}
+
+// requirements.txt and constraints.txt both configure pip, so the shared
+// manager must be prepared once rather than contributing a duplicate entry.
+func TestDetectDirectoriesToCachePythonPipPreparedOncePerRepo(t *testing.T) {
+	isolatePythonEnv(t)
+	test.Ok(t, os.WriteFile("requirements.txt", []byte(testFileContent), 0644))
+	defer os.Remove("requirements.txt")
+	test.Ok(t, os.WriteFile("constraints.txt", []byte(testFileContent2), 0644))
+	defer os.Remove("constraints.txt")
+	defer os.Remove("pip.conf")
+
+	directoriesToCache, _, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	pipPath, err := filepath.Abs(filepath.Join(".cache", "pip"))
+	test.Ok(t, err)
+	test.Equals(t, []string{pipPath}, directoriesToCache)
+}
+
+// MODULE.bazel supersedes WORKSPACE, so the two preparers must not both run.
+func TestDetectDirectoriesToCacheBazelPrefersBzlmod(t *testing.T) {
+	test.Ok(t, os.WriteFile("MODULE.bazel", []byte(testFileContent), 0644))
+	defer os.Remove("MODULE.bazel")
+	test.Ok(t, os.WriteFile("WORKSPACE", []byte(testFileContent2), 0644))
+	defer os.Remove("WORKSPACE")
+	defer os.Remove(".bazelrc")
+	defer os.Remove(".bazelignore")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"bazel"}, buildToolsDetected)
+	test.Equals(t, 1, len(directoriesToCache))
 }
 
 func TestDetectDirectoriesToCachePythonConstraints(t *testing.T) {
-	t.Setenv("PIP_CACHE_DIR", "")
+	isolatePythonEnv(t)
 	test.Ok(t, os.WriteFile("constraints.txt", []byte("requests==2.0.0\n"), 0644))
 	defer os.Remove("constraints.txt")
 	defer os.Remove("pip.conf")
 
 	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-pip"), "expected python-pip in detected tools, got %v", buildToolsDetected)
 	var pipFound bool
 	for _, dir := range directoriesToCache {
 		if filepath.Base(dir) == "pip" {
@@ -1008,14 +1139,14 @@ func TestDetectDirectoriesToCachePythonConstraints(t *testing.T) {
 }
 
 func TestDetectDirectoriesToCachePythonPyproject(t *testing.T) {
-	t.Setenv("PIP_CACHE_DIR", "")
+	isolatePythonEnv(t)
 	test.Ok(t, os.WriteFile("pyproject.toml", []byte("[project]\nname = \"demo\"\n"), 0644))
 	defer os.Remove("pyproject.toml")
 	defer os.Remove("pip.conf")
 
 	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
 	test.Ok(t, err)
-	test.Assert(t, containsTool(buildToolsDetected, "python"), "expected python in detected tools, got %v", buildToolsDetected)
+	test.Assert(t, containsTool(buildToolsDetected, "python-pip"), "expected python-pip in detected tools, got %v", buildToolsDetected)
 	var pipFound bool
 	for _, dir := range directoriesToCache {
 		if filepath.Base(dir) == "pip" {
@@ -1023,4 +1154,209 @@ func TestDetectDirectoriesToCachePythonPyproject(t *testing.T) {
 		}
 	}
 	test.Assert(t, pipFound, "expected pip cache dir for pyproject.toml in %v", directoriesToCache)
+}
+
+func TestDetectDirectoriesToCachePythonPyprojectExcludedWhenPoetryLockExists(t *testing.T) {
+	isolatePythonEnv(t)
+	test.Ok(t, os.WriteFile("pyproject.toml", []byte("[project]\nname = \"demo\"\n"), 0644))
+	defer os.Remove("pyproject.toml")
+	test.Ok(t, os.WriteFile("poetry.lock", []byte(testFileContent), 0644))
+	defer os.Remove("poetry.lock")
+	defer os.Remove("poetry.toml")
+	defer os.Remove("pip.conf")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Equals(t, []string{"python-poetry"}, buildToolsDetected)
+	assertCachesManagers(t, directoriesToCache, "poetry")
+	test.Assert(t, !containsCacheDir(directoriesToCache, "pip"), "expected pip not to be cached when pyproject.toml is superseded by poetry.lock")
+}
+
+func TestDetectDirectoriesToCachePythonPyprojectExcludedWhenUvLockExists(t *testing.T) {
+	isolatePythonEnv(t)
+	test.Ok(t, os.WriteFile("pyproject.toml", []byte("[project]\nname = \"demo\"\n"), 0644))
+	defer os.Remove("pyproject.toml")
+	test.Ok(t, os.WriteFile("uv.lock", []byte(testFileContent), 0644))
+	defer os.Remove("uv.lock")
+	defer os.Remove("uv.toml")
+	defer os.Remove("pip.conf")
+
+	directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Equals(t, []string{"python-uv"}, buildToolsDetected)
+	assertCachesManagers(t, directoriesToCache, "uv")
+	test.Assert(t, !containsCacheDir(directoriesToCache, "pip"), "expected pip not to be cached when pyproject.toml is superseded by uv.lock")
+}
+
+func containsCacheDir(dirs []string, name string) bool {
+	for _, d := range dirs {
+		if filepath.Base(d) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// --- iOS auto-detection (CocoaPods / SPM / Fastlane) ---
+
+const (
+	hashOfContent1 = "baab6c16d9143523b7865d46896e4596" // md5(testFileContent)
+	hashOfContent2 = "1eb00e74bffac0c4fa2d6dbfd8c26cb7" // md5(testFileContent2)
+)
+
+// inTempRepo runs detection inside an empty temporary directory with a private
+// HOME, and returns the directory's resolved absolute path. Older tests in this
+// file write fixtures into the package directory itself.
+func inTempRepo(t *testing.T) (root, home string) {
+	t.Helper()
+
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("CP_CACHE_DIR", "")
+	t.Setenv("CP_HOME_DIR", "")
+
+	orig, err := os.Getwd()
+	test.Ok(t, err)
+
+	dir := t.TempDir()
+	test.Ok(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	// t.TempDir() sits under /var on macOS, a symlink to /private/var, while
+	// detection reports resolved absolute paths.
+	root, err = filepath.EvalSymlinks(dir)
+	test.Ok(t, err)
+
+	return root, home
+}
+
+func writeRepoFile(t *testing.T, path, contents string) {
+	t.Helper()
+	test.Ok(t, os.WriteFile(path, []byte(contents), 0644))
+}
+
+func TestDetectDirectoriesToCacheIOSTools(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		manifest string
+		lock     string
+		tool     string
+		dirs     func(root, home, goos string) []string
+	}{
+		{
+			name:     "fastlane",
+			manifest: "Gemfile",
+			lock:     "Gemfile.lock",
+			tool:     "fastlane",
+			dirs: func(root, _, _ string) []string {
+				return []string{filepath.Join(root, "vendor", "bundle")}
+			},
+		},
+		{
+			name:     "cocoapods",
+			manifest: "Podfile",
+			lock:     "Podfile.lock",
+			tool:     "cocoapods",
+			dirs: func(root, home, goos string) []string {
+				dirs := []string{filepath.Join(root, "Pods")}
+				if goos == "darwin" {
+					dirs = append(dirs,
+						filepath.Join(home, "Library", "Caches", "CocoaPods"),
+						filepath.Join(home, ".cocoapods", "cache"),
+					)
+				}
+				return dirs
+			},
+		},
+		{
+			name:     "spm",
+			manifest: "Package.swift",
+			lock:     "Package.resolved",
+			tool:     "spm",
+			dirs: func(root, home, goos string) []string {
+				dirs := []string{
+					filepath.Join(root, ".build", "checkouts"),
+					filepath.Join(root, ".build", "repositories"),
+				}
+				if goos == "darwin" {
+					dirs = append(dirs, filepath.Join(home, "Library", "Caches", "org.swift.swiftpm"))
+				}
+				return dirs
+			},
+		},
+	} {
+		for _, osName := range []string{"linux", "darwin"} {
+			t.Run(tc.name+"/"+osName, func(t *testing.T) {
+				withGOOS(t, osName)
+				root, home := inTempRepo(t)
+
+				writeRepoFile(t, tc.manifest, testFileContent)
+
+				dirs, tools, key, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Equals(t, []string{tc.tool}, tools)
+				test.Equals(t, tc.dirs(root, home, osName), dirs)
+				test.Equals(t, hashOfContent1, key)
+
+				writeRepoFile(t, tc.lock, testFileContent2)
+
+				_, _, keyWithLock, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Equals(t, hashOfContent2+hashOfContent1, keyWithLock)
+
+				writeRepoFile(t, tc.lock, testFileContent)
+
+				_, _, keyWithChangedLock, err := DetectDirectoriesToCache(false)
+				test.Ok(t, err)
+				test.Assert(t, keyWithChangedLock != keyWithLock, "expected key to change with %s", tc.lock)
+			})
+		}
+	}
+}
+
+// A lockfile alone does not turn detection on; the manifest is the trigger.
+func TestDetectDirectoriesToCacheIOSLockWithoutManifest(t *testing.T) {
+	for _, lock := range []string{"Gemfile.lock", "Podfile.lock", "Package.resolved"} {
+		t.Run(lock, func(t *testing.T) {
+			inTempRepo(t)
+
+			writeRepoFile(t, lock, testFileContent)
+
+			dirs, tools, _, err := DetectDirectoriesToCache(false)
+			test.Ok(t, err)
+			test.Equals(t, 0, len(tools))
+			test.Equals(t, 0, len(dirs))
+		})
+	}
+}
+
+func TestDetectDirectoriesToCacheCocoapodsCPCacheDir(t *testing.T) {
+	for _, osName := range []string{"linux", "darwin"} {
+		t.Run(osName, func(t *testing.T) {
+			withGOOS(t, osName)
+			root, _ := inTempRepo(t)
+
+			customCache := filepath.Join(root, "custom-cp-cache")
+			t.Setenv("CP_CACHE_DIR", customCache)
+
+			writeRepoFile(t, "Podfile", testFileContent)
+
+			dirs, tools, _, err := DetectDirectoriesToCache(false)
+			test.Ok(t, err)
+			test.Equals(t, []string{"cocoapods"}, tools)
+
+			var foundPods, foundCustom bool
+			for _, d := range dirs {
+				if d == filepath.Join(root, "Pods") {
+					foundPods = true
+				}
+				if d == customCache {
+					foundCustom = true
+				}
+			}
+			test.Assert(t, foundPods, "expected Pods/ in %v", dirs)
+			test.Assert(t, foundCustom, "expected customCache %q in %v", customCache, dirs)
+		})
+	}
 }

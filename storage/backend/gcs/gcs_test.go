@@ -56,6 +56,11 @@ func TestRoundTrip(t *testing.T) {
 
 	test.Equals(t, true, exists)
 
+	// A missing object must report (false, nil); newer GCS clients wrap ErrObjectNotExist.
+	exists, err = backend.Exists(context.TODO(), "missing.txt")
+	test.Ok(t, err)
+	test.Equals(t, false, exists)
+
 	entries, err := backend.List(context.TODO(), "")
 	test.Ok(t, err)
 	test.Equals(t, 1, len(entries))

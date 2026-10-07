@@ -7,54 +7,50 @@ import (
 	"strings"
 )
 
-type pythonPreparer struct{}
+type poetryPreparer struct{}
+type pipenvPreparer struct{}
 type pipPreparer struct {
 	cacheDir string
+	fromEnv  bool
 }
 
-func newPythonPreparer() *pythonPreparer {
-	return &pythonPreparer{}
+func newPoetryPreparer() *poetryPreparer {
+	return &poetryPreparer{}
+}
+
+func newPipenvPreparer() *pipenvPreparer {
+	return &pipenvPreparer{}
 }
 
 func newPipPreparer() *pipPreparer {
 	if cacheDir := os.Getenv("PIP_CACHE_DIR"); cacheDir != "" {
-		return &pipPreparer{cacheDir: cacheDir}
+		return &pipPreparer{cacheDir: cacheDir, fromEnv: true}
 	}
 	return &pipPreparer{cacheDir: filepath.Join(".cache", "pip")}
 }
 
-// PrepareRepo injects cache configuration for Poetry or Pipenv.
-// Priority: poetry.lock > Pipfile.lock.
-func (*pythonPreparer) PrepareRepo(dir string) (string, error) {
-	if fileExists(filepath.Join(dir, "poetry.lock")) {
-		return preparePoetry(dir)
-	}
-
-	if fileExists(filepath.Join(dir, "Pipfile.lock")) {
-		return preparePipenv(dir)
-	}
-
-	return "", fmt.Errorf("unsupported Python project in %s", dir)
+func (*poetryPreparer) PrepareRepo(dir string) (string, error) {
+	return preparePoetry(dir)
 }
 
-// PrepareRepo writes pip.conf so later build steps can use PIP_CONFIG_FILE=pip.conf
-// (or PIP_CACHE_DIR). pip does not discover a repo-local config file by itself.
+func (*pipenvPreparer) PrepareRepo(dir string) (string, error) {
+	return preparePipenv(dir)
+}
+
+// PrepareRepo writes pip.conf so later steps can use PIP_CONFIG_FILE=pip.conf.
+// Skipped when PIP_CACHE_DIR is already set, since that env var outranks any config file.
 func (p *pipPreparer) PrepareRepo(dir string) (string, error) {
 	cacheDir, err := resolveRepoPath(dir, p.cacheDir)
 	if err != nil {
 		return "", err
 	}
+	if p.fromEnv {
+		return cacheDir, nil
+	}
 	if err := upsertPipConf(filepath.Join(dir, "pip.conf"), cacheDir); err != nil {
 		return "", err
 	}
 	return cacheDir, nil
-}
-
-func pythonVenvDirs(dir string) ([]string, error) {
-	return []string{
-		filepath.Join(dir, ".venv"),
-		filepath.Join(dir, "venv"),
-	}, nil
 }
 
 func resolveRepoPath(dir, cacheDir string) (string, error) {
@@ -68,15 +64,16 @@ func resolveRepoPath(dir, cacheDir string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-// preparePoetry writes Poetry's project-local application configuration and
-// keeps the virtualenv inside the repo so it can be cached with .venv.
+// preparePoetry writes Poetry's project-local cache-dir config, unless
+// POETRY_CACHE_DIR is already set (it takes precedence over poetry.toml).
 func preparePoetry(dir string) (string, error) {
-	cacheDir := filepath.Join(dir, ".cache", "poetry")
-	configPath := filepath.Join(dir, "poetry.toml")
-	if err := upsertTOMLString(configPath, "", "cache-dir", cacheDir); err != nil {
-		return "", err
+	if envDir := os.Getenv("POETRY_CACHE_DIR"); envDir != "" {
+		return resolveRepoPath(dir, envDir)
 	}
-	if err := upsertTOMLBool(configPath, "", "virtualenvs.in-project", true); err != nil {
+
+	configPath := filepath.Join(dir, "poetry.toml")
+	cacheDir := filepath.Join(dir, ".cache", "poetry")
+	if err := upsertTOMLString(configPath, "", "cache-dir", cacheDir); err != nil {
 		return "", err
 	}
 
