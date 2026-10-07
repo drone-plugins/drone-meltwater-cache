@@ -77,8 +77,10 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 	key, err := r.generateKey()
 	if err != nil {
+		level.Error(r.logger).Log("msg", "failed to generate cache key", "err", err)
 		return fmt.Errorf("generate key, %w", err)
 	}
+	level.Info(r.logger).Log("msg", "using cache key", "key", key)
 
 	var (
 		wg               sync.WaitGroup
@@ -256,7 +258,7 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 
 			if err := r.restore(src, dst, cacheFileName); err != nil {
 				wrapped := fmt.Errorf("download from <%s> to <%s>, %w", src, dst, err)
-				level.Error(r.logger).Log("msg", "failed to restore directory", "local", dst, "remote", src, "err", err)
+				level.Error(r.logger).Log("msg", "failed to restore directory", "key", key, "local", dst, "remote", src, "err", err)
 				errs.Add(wrapped)
 			} else {
 				// Increment success counter if directory is successfully restored
@@ -276,14 +278,14 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 		metrics[metricKeyCacheHit] = metricValueTrue
 		if successCount == totalDirectories {
 			metrics[metricKeyCacheState] = metricValueComplete
-			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now), "status", "all directories successfully restored")
+			level.Info(r.logger).Log("msg", "cache restored", "key", key, "took", time.Since(now), "status", "all directories successfully restored")
 		} else {
 			metrics[metricKeyCacheState] = metricValuePartial
-			level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now),
+			level.Info(r.logger).Log("msg", "cache restored", "key", key, "took", time.Since(now),
 				"status", fmt.Sprintf("partially restored (%d/%d directories)", successCount, totalDirectories))
 			if err := errs.Err(); err != nil {
 				level.Error(r.logger).Log("msg", "one or more directories failed to restore",
-					"restored", successCount, "total", totalDirectories, "err", err)
+					"key", key, "restored", successCount, "total", totalDirectories, "err", err)
 			}
 		}
 		r.exportMetricsIfUnified(metrics)
@@ -291,10 +293,11 @@ func (r restorer) Restore(dsts []string, cacheFileName string) error {
 	}
 	r.exportMetricsIfUnified(metrics)
 	if errs.Err() != nil {
+		level.Error(r.logger).Log("msg", "cache restore failed", "key", key, "err", errs.Err())
 		return fmt.Errorf("restore failed, %w", errs)
 	}
 
-	level.Info(r.logger).Log("msg", "cache restored", "took", time.Since(now))
+	level.Info(r.logger).Log("msg", "cache restored", "key", key, "took", time.Since(now))
 
 	return nil
 }
@@ -360,8 +363,10 @@ func (r restorer) generateKey(parts ...string) (string, error) {
 
 		key, err = r.fg.Generate(parts...)
 		if err == nil {
+			level.Info(r.logger).Log("msg", "using fallback cache key", "key", key)
 			return key, nil
 		}
+		level.Error(r.logger).Log("msg", "fallback cache key generation failed", "err", err)
 	}
 
 	return "", err

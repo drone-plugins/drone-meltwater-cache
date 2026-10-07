@@ -200,22 +200,28 @@ func (p *Plugin) Exec() error { // nolint:funlen
 				}
 			}
 
-			generator = keygen.NewMetadata(p.logger, cfg.AccountID+"/"+cacheKey, p.Metadata)
+			keyTemplate := cfg.AccountID + "/" + cacheKey
+			level.Info(p.logger).Log("msg", "resolved cache key template", "key", keyTemplate, "source", "auto-detect")
+			generator = keygen.NewMetadata(p.logger, keyTemplate, p.Metadata)
 			if err := generator.Check(); err != nil {
+				level.Error(p.logger).Log("msg", "failed to parse cache key template", "key", keyTemplate, "source", "auto-detect", "err", err)
 				return fmt.Errorf("parse failed, falling back to default, %w", err)
 			}
 
 			options = append(options, cache.WithFallbackGenerator(keygen.NewHash(cfg.AccountID+p.Metadata.Commit.Branch)))
 		}
 	case cfg.CacheKeyTemplate != "":
+		level.Info(p.logger).Log("msg", "resolved cache key template", "key", cfg.CacheKeyTemplate, "source", "custom")
 		generator = keygen.NewMetadata(p.logger, cfg.CacheKeyTemplate, p.Metadata)
 		if err := generator.Check(); err != nil {
+			level.Error(p.logger).Log("msg", "failed to parse cache key template", "key", cfg.CacheKeyTemplate, "source", "custom", "err", err)
 			return fmt.Errorf("parse failed, falling back to default, %w", err)
 		}
 
 		options = append(options, cache.WithFallbackGenerator(keygen.NewHash(p.Metadata.Commit.Branch)))
 	default:
 		{
+			level.Info(p.logger).Log("msg", "resolved cache key template", "key", p.Metadata.Commit.Branch, "source", "branch-hash")
 			generator = keygen.NewHash(p.Metadata.Commit.Branch)
 			options = append(options, cache.WithFallbackGenerator(keygen.NewStatic(p.Metadata.Commit.Branch)))
 		}
@@ -266,7 +272,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 	// 5. Select mode
 	if cfg.Rebuild {
 		if err := c.Rebuild(p.Config.Mount); err != nil {
-			level.Debug(p.logger).Log("err", fmt.Sprintf("%+v\n", err))
+			level.Error(p.logger).Log("msg", "cache save step failed", "err", err)
 			return Error(fmt.Sprintf("[IMPORTANT] build cache, %+v\n", err))
 		}
 		if fallbackPlanUsed {
@@ -278,7 +284,7 @@ func (p *Plugin) Exec() error { // nolint:funlen
 
 	if cfg.Restore {
 		if err := c.Restore(p.Config.Mount, p.Config.MetricsFile); err != nil {
-			level.Debug(p.logger).Log("err", fmt.Sprintf("%+v\n", err))
+			level.Error(p.logger).Log("msg", "cache restore step failed", "err", err)
 			return Error(fmt.Sprintf("[IMPORTANT] restore cache, %+v\n", err))
 		}
 	}

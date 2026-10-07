@@ -108,8 +108,10 @@ func (r rebuilder) Rebuild(srcs []string) error {
 
 	key, err := r.generateKey()
 	if err != nil {
+		level.Error(r.logger).Log("msg", "failed to generate cache key", "err", err)
 		return fmt.Errorf("generate key, %w", err)
 	}
+	level.Info(r.logger).Log("msg", "using cache key", "key", key)
 
 	namespace := filepath.ToSlash(filepath.Clean(r.namespace))
 	scheduled := make([]scheduledUpload, 0, len(srcs))
@@ -149,11 +151,11 @@ func (r rebuilder) Rebuild(srcs []string) error {
 	if summary.Scheduled == 0 {
 		if r.missingPathPolicy == MissingPathSkipRequirePresent && summary.Missing == summary.Requested {
 			level.Error(r.logger).Log("msg", "cache save failed: all configured source paths are missing",
-				"requested", summary.Requested, "missing", summary.Missing)
+				"key", key, "requested", summary.Requested, "missing", summary.Missing)
 			return errors.New("cache save failed: all configured source paths are missing")
 		}
 
-		r.logRebuildComplete(summary, now)
+		r.logRebuildComplete(summary, key, now)
 		return nil
 	}
 
@@ -180,7 +182,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 		if result.Err != nil {
 			summary.Failed++
 			level.Error(r.logger).Log("msg", "failed to rebuild cache for directory",
-				"local", result.Source, "remote", result.Target, "err", result.Err)
+				"key", key, "local", result.Source, "remote", result.Target, "err", result.Err)
 			errs.Add(fmt.Errorf("upload from <%s> to <%s>, %w", result.Source, result.Target, result.Err))
 			continue
 		}
@@ -189,6 +191,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 
 	if summary.Failed > 0 {
 		level.Error(r.logger).Log("msg", "cache save failed",
+			"key", key,
 			"requested", summary.Requested,
 			"uploaded", summary.Uploaded,
 			"existing", summary.AlreadyExists,
@@ -199,7 +202,7 @@ func (r rebuilder) Rebuild(srcs []string) error {
 		return fmt.Errorf("rebuild failed, %w", errs)
 	}
 
-	r.logRebuildComplete(summary, now)
+	r.logRebuildComplete(summary, key, now)
 	return nil
 }
 
@@ -228,8 +231,9 @@ func (r rebuilder) handleMissingPath(src string, err error, summary *rebuildSumm
 	}
 }
 
-func (r rebuilder) logRebuildComplete(summary rebuildSummary, started time.Time) {
+func (r rebuilder) logRebuildComplete(summary rebuildSummary, key string, started time.Time) {
 	level.Info(r.logger).Log("msg", "cache save complete",
+		"key", key,
 		"requested", summary.Requested,
 		"uploaded", summary.Uploaded,
 		"existing", summary.AlreadyExists,
@@ -313,8 +317,10 @@ func (r rebuilder) generateKey(parts ...string) (string, error) {
 
 		key, err = r.fg.Generate(parts...)
 		if err == nil {
+			level.Info(r.logger).Log("msg", "using fallback cache key", "key", key)
 			return key, nil
 		}
+		level.Error(r.logger).Log("msg", "fallback cache key generation failed", "err", err)
 	}
 
 	return "", err
