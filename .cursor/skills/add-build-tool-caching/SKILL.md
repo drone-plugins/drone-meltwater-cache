@@ -1,6 +1,6 @@
 ---
 name: add-build-tool-caching
-description: Research, design, create, test, diagnose, and validate Cache Intelligence support through a command-based workflow for any language, package manager, or build tool. Use when adding or changing detection, cache paths, keys, repository preparation, restore/save behavior, plugin images, or local and Harness environment validation in drone-cache.
+description: Research, design, create, test, diagnose, and validate Cache Intelligence (autodetect / auto cache) support through a command-based workflow for any language, package manager, or build tool (npm, pnpm, yarn, bun, pip, uv, poetry, cargo, go, maven, gradle, nuget, bundler, cocoapods, swiftpm, composer, bazel, ccache, and others). Use when adding a new build tool, researching how a tool caches, or changing detection, cache paths, cache keys, repository preparation, restore/save behavior, plugin images, or local and Harness environment validation in drone-cache.
 ---
 
 # Add Build Tool Caching
@@ -61,6 +61,24 @@ Select the narrowest matching command. Do not turn `research`, `test`, or `statu
 
 For remote work, use the Harness MCP server associated with the requested environment. Establish account/org/project scope, verify dependencies, preview writes, use MCP approval for mutations, monitor executions to completion, and diagnose failures. Never substitute another scope or environment merely because a lookup fails.
 
+## Reference files
+
+- [COMMANDS.md](COMMANDS.md): command routing, state, and the report template.
+- [ENGINE.md](ENGINE.md): how this repository's detection, keys, preparers, and plugin integration actually behave; local lifecycle and image build recipes. Read before `design` or `create`.
+- [TOOL-PATTERNS.md](TOOL-PATTERNS.md): cache-type taxonomy, key strategies, starting points for common ecosystems, cross-cutting pitfalls, and the value check. Read during `research`.
+
+## Triage
+
+Before any other phase, decide which kind of work this is. It determines how much of the procedure applies.
+
+1. **Check existing support.** Search `buildToolInfoMapping` and `prepare_*.go` for the tool and its lockfiles. Read the matching tests and README section.
+2. **Classify the request:**
+   - **Extend existing support** (new lockfile variant, env var, config location, or path correction): characterize current behavior first, then run a narrow research → create → test cycle plus compatibility tests for that tool.
+   - **New tool within engine capabilities** (root or one-level detection, one primary path plus extras, lockfile-based key): run the full procedure.
+   - **New tool requiring an engine change** (deeper discovery, several projects per tool, multi-file or runtime-version keys, new restore/save coordination): design the engine change as its own increment and get user approval before implementation, since it can alter keys for existing tools.
+   - **Research only**: produce the requirements record, path classification, and recommendation; do not edit code.
+3. State the classification and the commands you plan to run.
+
 ## Operating principles
 
 1. **Evidence before design**: inspect official tool behavior and real projects before choosing paths.
@@ -87,6 +105,8 @@ Before editing code, determine:
 - manifest and lockfile names;
 - native cache configuration mechanisms and precedence;
 - expected cache path with and without user configuration;
+- cache type of each candidate path (download cache, installed tree, build output, toolchain, metadata);
+- whether the design fits current engine capabilities (`ENGINE.md`);
 - dependency install command;
 - target validation environment, pipeline type, connector, and image;
 - compatibility requirements for existing tools and pipelines;
@@ -141,7 +161,7 @@ Open questions:
 
 ### 2. Research the build tool
 
-Use authoritative documentation and direct commands from the tool where possible. Verify:
+Start from the matching row and cache-type guidance in [TOOL-PATTERNS.md](TOOL-PATTERNS.md), then confirm each fact for the targeted versions. Use authoritative documentation and direct commands from the tool where possible. Verify:
 
 - the native command that prints its cache directory;
 - relevant environment variables;
@@ -163,26 +183,31 @@ Classify every candidate path:
 
 ```text
 Path:
+Type: download cache / installed tree / build output / toolchain / metadata
 Purpose:
 Reusable across runs:
-Portable across images:
-Safe to archive:
-Expected size:
+Portable across images, OS, architecture, runtime versions:
+Safe to archive (credentials, symlinks, permissions, absolute paths):
+Expected size and growth:
 Created before save:
+Estimated time saved vs. restore/save overhead:
 Decision: cache / exclude / investigate
 ```
 
-Do not cache an environment or output merely because it improves one warm run. For example, Python `.venv` and `venv` directories embed interpreter paths and should be rebuilt from the package-download cache.
+Do not cache an environment or output merely because it improves one warm run. For example, Python `.venv` and `venv` directories embed interpreter paths and should be rebuilt from the package-download cache. Default to download caches; treat installed trees, build outputs, and toolchains as separate, explicitly justified decisions.
+
+Apply the value check in `TOOL-PATTERNS.md`. Recommending that a path *not* be cached is a valid research outcome.
 
 **Gate:** Select only paths with a documented reason and known invalidation behavior.
 
 ### 3. Design detection, paths, and keys
 
-Define the design before coding:
+Define the design before coding. Map every decision onto the engine described in [ENGINE.md](ENGINE.md); flag anything it cannot express as an engine change.
 
 1. **Detection**
    - Prefer lockfiles over broad manifests.
-   - Specify root and nested-project behavior.
+   - Specify root and nested-project behavior. The current engine checks the root and exactly one directory level, and prepares only the shortest match unless `usePerProject` is set.
+   - Place the new mapping entry deliberately: order is precedence among entries sharing a tool identifier, and it fixes the hash order in composite keys.
    - Avoid duplicate detection when multiple patterns represent one manager.
    - For new ecosystems, use bounded deterministic discovery; exclude `.git`, dependency caches, virtual environments, generated output, and vendored trees.
    - Do not follow symlink cycles or silently change legacy monorepo discovery semantics.
@@ -197,12 +222,14 @@ Define the design before coding:
 
 4. **Cache path**
    - Honor explicit environment configuration first.
-   - Otherwise configure a repository-local path through the tool's native mechanism.
+   - Choose a strategy for each path: **relocate** (write native project-local config pointing at `<project>/.cache/<tool>`) or **follow only** (cache only a path that the environment or existing config already selects, or a default already inside the workspace). Relocate only when later build steps discover the config without extra wiring, or document the required wiring.
    - Merge with existing configuration; never replace unrelated settings.
    - Return the path the tool will actually use.
+   - Confirm the in-repo cache directory is ignored by the tool's own source discovery and does not break clean-tree checks.
 
 5. **Cache key**
-   - Include lockfile content and other dependency inputs required for correctness.
+   - Include lockfile content and other dependency inputs required for correctness. For manifest-only tools, list every dependency-declaring file; for ABI-coupled content, include runtime/toolchain version and OS/architecture (see `TOOL-PATTERNS.md`).
+   - Keep each contribution a 32-character lowercase hex digest; the fallback plan validator depends on that shape.
    - Ensure dependency changes invalidate the key.
    - Avoid unstable machine-specific values.
    - Encode file boundaries and normalized project-relative identities so concatenated content cannot collide.
@@ -219,7 +246,8 @@ Write a small scenario matrix before implementation:
 ```text
 Scenario | Detected tools | Cached paths | Key inputs | Expected result
 single tool
-nested project
+nested project (one level)
+nested project (two+ levels, multiple projects)
 manifest without lockfile
 two lockfiles
 tool plus generic manifest
@@ -229,6 +257,7 @@ missing cache directory
 changed lockfile
 lockfile generated after restore
 mixed legacy and new tools
+custom key and/or custom path (PLUGIN_MOUNT)
 platform/runtime boundary
 ```
 
@@ -245,6 +274,8 @@ Typical implementation areas:
 - resolve relative paths to clean absolute workspace paths;
 - deduplicate paths and tool identifiers;
 - add special handling only when the generic detector cannot express the requirement.
+
+Reuse the helpers listed in `ENGINE.md` (`resolveRepoPath`, `workspaceRoot`, `pathWithin`, `upsertTOMLString`, `upsertEnv`, `readOptionalFile`) instead of duplicating path or config-merging logic. Use `filepath` throughout; the plugin also ships Windows images.
 
 Keep preparation idempotent: running detection twice must not duplicate configuration or change the result.
 
@@ -296,7 +327,7 @@ go vet ./...
 go build ./...
 ```
 
-Run formatter/linter and build-tagged integration suites required by the repository. Check service readiness and which tests actually ran. Do not use a successful wrapper command as evidence when its recipes can ignore failures. If a suite requires external credentials, separate environment failures from code failures and report passed, failed, and skipped commands precisely.
+Run formatter/linter and build-tagged integration suites required by the repository. Check service readiness and which tests actually ran. Do not use a successful wrapper command as evidence when its recipes can ignore failures; the `Makefile` test targets do (see `ENGINE.md`). If a suite requires external credentials, separate environment failures from code failures and report passed, failed, and skipped commands precisely.
 
 Add compatibility tests where affected:
 
@@ -312,7 +343,7 @@ Add compatibility tests where affected:
 
 ### 6. Validate locally with restore/save/restore
 
-Exercise the actual cache lifecycle, not only autodetection:
+Exercise the actual cache lifecycle, not only autodetection. Start from the local lifecycle recipe in `ENGINE.md`. The existing `scripts/*-cache-smoke.sh` scripts populate dummy files and prove plumbing only; extend them with a real install when reusing them.
 
 1. Start with an empty backend namespace or unique key.
 2. Run restore and confirm the miss is non-fatal.
@@ -344,7 +375,7 @@ Capture:
 - restore/save overhead and transferred bytes.
 
 ### 7. Build and pin a candidate image
-Build and publish the candidate plugin image using the repository's established process.
+Build and publish the candidate plugin image using the repository's established process (`docker/Dockerfile.*` with a prebuilt `release/<os>/<arch>/` binary; see `ENGINE.md`).
 
 Requirements:
 
@@ -423,7 +454,7 @@ Repeat until no unexplained differences remain.
 
 ### 10. Finalize
 
-Update user-facing documentation with:
+Update the "Auto-Detection and Configuration" section of `README.md` (and `CHANGELOG.md` when applicable) with:
 
 - supported tool and detection files;
 - configuration precedence;
@@ -436,7 +467,7 @@ Update user-facing documentation with:
 - supported OS/runtime/tool versions and configuration side effects;
 - migration effects, including expected cold starts when keys or paths change.
 
-Use the `report` format in [COMMANDS.md](COMMANDS.md). Include starting/ending revisions, changed behavior, commands passed/failed/skipped, local and Harness evidence, measured reuse and overhead, compatibility and migration effects, feedback incorporated, unresolved limitations, and staged rollout/rollback guidance.
+Produce the final report with the template under `report` in [COMMANDS.md](COMMANDS.md).
 
 ## Failure and rollback rules
 
@@ -454,6 +485,14 @@ Use the `report` format in [COMMANDS.md](COMMANDS.md). Include starting/ending r
 ### New support: Cargo
 
 Confirm workspace and lockfile behavior; cache verified dependency subsets such as registry indexes/packages and Git databases. Exclude `target`, toolchains, credentials, and the whole Cargo home. Prove registry and Git dependencies work after a clean restore in the same cross-container topology used by Harness.
+
+### Build-output cache: Gradle build cache or ccache
+
+Treat as a separate opt-in from dependency caching. The content is toolchain-coupled and grows without bound, so key on toolchain version plus dependency inputs rather than source files, and confirm the tool validates entries itself. Check mtime and absolute-path sensitivity after restore, set a size limit or pruning step, and run the value check; recommend against caching if overhead approaches savings.
+
+### Engine-limited request: deeply nested monorepo
+
+If projects live two or more levels deep, or several projects use the same tool, the current engine cannot detect them all. Report this during `design`, propose the engine change as a separate increment with key-migration effects, and do not work around it inside a single preparer.
 
 ### Existing support: Python virtual environments
 

@@ -113,7 +113,7 @@ Do not inspect or mutate code or remote resources for `help`.
 
 Inspect available local and remote evidence without changing it. Report:
 
-- selected tool and intended support;
+- selected tool, whether it is already supported (`buildToolInfoMapping`), and the triage classification from `SKILL.md`;
 - baseline and candidate identities;
 - completed commands and their outcomes;
 - local test status;
@@ -125,14 +125,16 @@ Use Harness read tools when execution state may have changed.
 
 ## `research`
 
-Follow `SKILL.md` sections 1 and 2.
+Follow `SKILL.md` triage and sections 1 and 2, using `TOOL-PATTERNS.md` as the starting checklist.
 
 Outputs:
 
+- triage classification and existing-support findings;
 - requirements record;
-- primary documentation findings;
+- primary documentation findings, with the tool versions they apply to;
 - detection and key candidates;
-- cache-path classification;
+- cache-path classification with cache type and value estimate;
+- engine fit: what `ENGINE.md` capabilities cover, and what would need an engine change;
 - runtime/container-sharing constraints;
 - security and portability exclusions;
 - unanswered questions requiring user feedback.
@@ -145,8 +147,9 @@ Follow `SKILL.md` section 3.
 
 Outputs:
 
-- tool identity and detection rules;
+- tool identity, detection rules, and mapping-entry placement;
 - root/nested/workspace discovery behavior;
+- relocate vs. follow-only strategy for each path;
 - coexistence and ambiguity rules;
 - path/configuration precedence;
 - key inputs and migration effects;
@@ -184,7 +187,7 @@ Follow `SKILL.md` sections 5 and 6.
 Modes:
 
 - `test --local`: focused and full repository tests;
-- `test --lifecycle`: local restore/install/save/clean/restore/install;
+- `test --lifecycle`: local restore/install/save/clean/restore/install, using the recipe in `ENGINE.md`;
 - `test --compatibility`: baseline/candidate keys, side effects, and archive interoperability;
 - `test --all`: all applicable local modes.
 
@@ -195,7 +198,7 @@ Use direct commands with propagated exit codes. Report every required command as
 Actions:
 
 1. verify local gates required before image creation;
-2. build supported binary/container targets using repository conventions;
+2. build supported binary/container targets using repository conventions (`ENGINE.md`, "Building a candidate image");
 3. smoke-test the candidate locally;
 4. tag with branch/commit identity;
 5. publish only when requested or required for an approved remote test;
@@ -282,14 +285,50 @@ Never claim all-platform, zero-regression, or end-to-end support from unit tests
 
 ## `report`
 
-Use the final report structure in `SKILL.md`. Include links for Harness executions and other remote resources. Separate:
+Include links for Harness executions and other remote resources. Omit sections that do not apply rather than padding them. Use this template:
 
-- implemented behavior;
-- measured evidence;
-- compatibility/migration effects;
-- environment limitations;
-- unresolved decisions;
-- staged rollout and rollback guidance.
+```markdown
+# Cache Intelligence: <tool>
+
+## Summary
+<One paragraph: what is now supported, the triage classification, and overall validation status.>
+
+## Revisions
+- Starting: <branch> @ <sha>
+- Ending: <branch> @ <sha>
+- Candidate image: <tag> (<digest>)
+- Baseline image: <tag>
+
+## Behavior
+- Detection files and precedence:
+- Cached paths, with strategy (relocate / follow only) and cache type:
+- Key inputs:
+- Configuration precedence and files written to the repository:
+- Wiring required in later build steps:
+- Deliberately excluded paths and why:
+
+## Evidence
+| Check | Result | Evidence |
+|-------|--------|----------|
+| Unit / scenario tests | PASS/FAIL/SKIPPED | command and summary |
+| Full test, race, vet, build | | |
+| Local cold / warm / invalidation | | key, sizes, durations |
+| Package manager consumed restore | | offline/instrumented proof |
+| Harness cold / warm / invalidation | | execution links |
+| Compatibility (legacy keys, archives, overrides) | | |
+
+## Measurements
+- Cold vs. warm install time:
+- Archive size and restore/save overhead:
+
+## Compatibility and migration
+<Key or path changes for existing users, and the expected first cold run.>
+
+## Limitations and open decisions
+
+## Rollout and rollback
+<Staged rollout steps, known-good image, and what rollback does or does not restore.>
+```
 
 Do not convert an unverified candidate path into a supported-tool claim.
 
