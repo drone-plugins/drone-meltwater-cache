@@ -29,23 +29,7 @@ Treat the first argument as a workflow command:
 
 Natural-language equivalents are valid. Read [COMMANDS.md](COMMANDS.md) before executing a command.
 
-Available commands:
-
-```text
-help          Show command usage and examples
-status        Report current evidence, blockers, and next command
-research      Gather requirements and verify tool behavior
-design        Define detection, paths, keys, compatibility, and tests
-create        Implement one complete code-and-test increment
-test          Run local tests and restore/save/restore validation
-build         Build and identify the candidate binary/image
-remote-setup  Discover or prepare Harness validation resources
-remote-test   Run cold/warm/invalidation tests through Harness MCP
-diagnose      Investigate local or remote failures
-validate      Evaluate acceptance and compatibility gates
-report        Produce evidence and rollout documentation
-all           Execute the complete workflow in dependency order
-```
+Commands and routing rules are defined in [COMMANDS.md](COMMANDS.md).
 
 Examples:
 
@@ -57,13 +41,14 @@ Examples:
 /add-build-tool-caching all --tool pnpm --env qa0
 ```
 
-Select the narrowest matching command. Do not turn `research`, `test`, or `status` into implementation or remote mutation. For `all`, update command state and apply feedback after every phase.
+Select the narrowest matching explicit command. A natural-language request to **add**, **implement**, or **support** a tool is an implementation request: autonomously run through local validation and reporting, not merely research. Do not turn explicit `research`, `test`, or `status` requests into implementation or remote mutation.
 
 For remote work, use the Harness MCP server associated with the requested environment. Establish account/org/project scope, verify dependencies, preview writes, use MCP approval for mutations, monitor executions to completion, and diagnose failures. Never substitute another scope or environment merely because a lookup fails.
 
 ## Reference files
 
 - [COMMANDS.md](COMMANDS.md): command routing, state, and the report template.
+- [AUTONOMY.md](AUTONOMY.md): conservative defaults, interruption policy, terminal states, durable task state, and parallel-agent coordination. Read for implementation requests and whenever multiple agents may work concurrently.
 - [ENGINE.md](ENGINE.md): how this repository's detection, keys, preparers, and plugin integration actually behave; local lifecycle and image build recipes. Read before `design` or `create`.
 - [TOOL-PATTERNS.md](TOOL-PATTERNS.md): cache-type taxonomy, key strategies, starting points for common ecosystems, cross-cutting pitfalls, and the value check. Read during `research`.
 
@@ -75,7 +60,7 @@ Before any other phase, decide which kind of work this is. It determines how muc
 2. **Classify the request:**
    - **Extend existing support** (new lockfile variant, env var, config location, or path correction): characterize current behavior first, then run a narrow research → create → test cycle plus compatibility tests for that tool.
    - **New tool within engine capabilities** (root or one-level detection, one primary path plus extras, lockfile-based key): run the full procedure.
-   - **New tool requiring an engine change** (deeper discovery, several projects per tool, multi-file or runtime-version keys, new restore/save coordination): design the engine change as its own increment and get user approval before implementation, since it can alter keys for existing tools.
+   - **New tool requiring an engine change** (recursive discovery beyond one level, key inputs the mapping cannot express, or new restore/save coordination): design the engine change as its own increment and get user approval before implementation, since it can alter keys for existing tools. Multiple projects at supported depth may fit `usePerProject`; characterize its key/path effects before deciding.
    - **Research only**: produce the requirements record, path classification, and recommendation; do not edit code.
 3. State the classification and the commands you plan to run.
 
@@ -112,7 +97,7 @@ Before editing code, determine:
 - compatibility requirements for existing tools and pipelines;
 - success criteria, including correctness and expected performance evidence.
 
-If any item materially changes the design and cannot be inferred, ask the user. Otherwise, state the assumptions and continue.
+Infer missing values using the conservative defaults in `AUTONOMY.md`, state the assumptions, and continue. Ask only when the interruption policy classifies the decision as user-owned.
 
 ## Scope and safety
 Before implementation:
@@ -232,7 +217,7 @@ Define the design before coding. Map every decision onto the engine described in
    - Keep each contribution a 32-character lowercase hex digest; the fallback plan validator depends on that shape.
    - Ensure dependency changes invalidate the key.
    - Avoid unstable machine-specific values.
-   - Encode file boundaries and normalized project-relative identities so concatenated content cannot collide.
+   - For a new key algorithm or approved engine change, encode file boundaries and normalized project-relative identities so concatenated content cannot collide. The legacy engine concatenates fixed-width content digests without path identities; preserve that contract unless a migration is explicitly approved.
    - Do not include absolute checkout paths, secrets, or cache-directory existence.
    - Preserve legacy key order/algorithm unless an explicit migration is designed.
 
@@ -261,7 +246,7 @@ custom key and/or custom path (PLUGIN_MOUNT)
 platform/runtime boundary
 ```
 
-**Feedback checkpoint:** Present meaningful precedence or portability trade-offs to the user before locking the design.
+**Decision checkpoint:** Apply the conservative defaults in `AUTONOMY.md`. Batch and present only user-owned decisions before locking the design; record autonomous decisions in the evidence ledger.
 
 ### 4. Implement the smallest complete slice
 Follow existing repository patterns rather than creating a parallel framework.
@@ -281,7 +266,7 @@ Keep preparation idempotent: running detection twice must not duplicate configur
 
 Do not combine unrelated managers in one preparer merely because they share a language.
 
-The plugin may run in a minimal image without the package manager. Infer paths from documented configuration; use the real CLI only in tests. If repository mutation is necessary, make it minimal, format-aware, idempotent, and atomic. Preserve comments, unrelated settings, authentication, permissions, and newline conventions. Fail clearly on malformed or read-only files instead of silently changing dependency behavior.
+The plugin may run in a minimal image without the package manager. Infer paths from documented configuration; use the real CLI only in tests. If repository mutation is necessary, make it minimal, format-aware, and idempotent; prefer atomic replacement for new writers. Existing shared helpers preserve selected formatting but are not all atomic, so characterize their actual behavior and do not claim guarantees they lack. Preserve comments, unrelated settings, authentication, permissions, and newline conventions. Fail clearly on malformed or read-only files instead of silently changing dependency behavior.
 
 Do not assume an environment variable set inside the cache plugin reaches a later build container, or that one exported in a build script was visible to an earlier restore step.
 
@@ -375,7 +360,7 @@ Capture:
 - restore/save overhead and transferred bytes.
 
 ### 7. Build and pin a candidate image
-Build and publish the candidate plugin image using the repository's established process (`docker/Dockerfile.*` with a prebuilt `release/<os>/<arch>/` binary; see `ENGINE.md`).
+Build the candidate plugin image using the repository's established process (`docker/Dockerfile.*` with a prebuilt `release/<os>/<arch>/` binary; see `ENGINE.md`). Publish only with explicit publication authorization; authorization to run a remote test does not itself authorize publication.
 
 Requirements:
 
@@ -442,13 +427,7 @@ After each local or environment run:
 5. Make the smallest correction.
 6. Rerun focused tests, local lifecycle tests, then affected environment cases.
 
-Ask for user feedback when:
-
-- two valid cache-path strategies have different portability or performance;
-- coexistence rules may change existing behavior;
-- environment evidence contradicts documented tool behavior;
-- rollout requires changing shared templates or default images;
-- a limitation must be accepted rather than fixed.
+Apply the interruption policy in `AUTONOMY.md`. Continue autonomously for reversible, additive decisions. Batch questions when a decision changes existing keys/paths, broadens engine behavior, risks credentials or compatibility, mutates shared resources, or requires accepting a material limitation.
 
 Repeat until no unexplained differences remain.
 
@@ -480,34 +459,16 @@ Produce the final report with the template under `report` in [COMMANDS.md](COMMA
 - If a new design changes existing cache keys or paths, document that the first run after rollout will be cold; image rollback alone does not prove stored-cache compatibility.
 - Keep risky or compatibility-breaking support default-off until the migration decision is approved.
 
-## Examples
-
-### New support: Cargo
-
-Confirm workspace and lockfile behavior; cache verified dependency subsets such as registry indexes/packages and Git databases. Exclude `target`, toolchains, credentials, and the whole Cargo home. Prove registry and Git dependencies work after a clean restore in the same cross-container topology used by Harness.
-
-### Build-output cache: Gradle build cache or ccache
-
-Treat as a separate opt-in from dependency caching. The content is toolchain-coupled and grows without bound, so key on toolchain version plus dependency inputs rather than source files, and confirm the tool validates entries itself. Check mtime and absolute-path sensitivity after restore, set a size limit or pruning step, and run the value check; recommend against caching if overhead approaches savings.
-
-### Engine-limited request: deeply nested monorepo
-
-If projects live two or more levels deep, or several projects use the same tool, the current engine cannot detect them all. Report this during `design`, propose the engine change as a separate increment with key-migration effects, and do not work around it inside a single preparer.
-
-### Existing support: Python virtual environments
-
-Characterize the old `.venv`/`venv` path and archive behavior; retain manager download caches; remove non-portable environments; prove baseline/candidate migration behavior; and verify the candidate no longer produces predictable missing-path partial results.
-
 ## Completion criteria
 
-The work is complete only when:
+Classify completion using the terminal states in `AUTONOMY.md`. Use `LOCAL_COMPLETE` when remote validation was not requested or is not applicable, `REMOTE_BLOCKED` when requested remote work has an external blocker, and `REMOTE_VALIDATED` after target-environment evidence:
 
 - requirements and design decisions are recorded;
 - detection and cache paths are precise and idempotent;
 - keys invalidate on dependency changes;
 - focused tests pass;
 - local cold/warm lifecycle succeeds;
-- the exact pinned image succeeds in the target environment;
+- the exact pinned image succeeds in the target environment, or the selected terminal state records why that gate is not applicable or is externally blocked with an exact owner/action;
 - warm restoration is proven by logs or file evidence;
 - the real package manager is proven to consume restored data;
 - legacy behavior and archive interoperability are verified or an explicit migration is approved;

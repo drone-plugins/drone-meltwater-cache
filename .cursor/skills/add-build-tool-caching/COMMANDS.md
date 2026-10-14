@@ -31,10 +31,12 @@ Infer arguments from conversation, repository, saved command state, and environm
 --baseline <tag|sha>    Baseline revision or image
 --mode <v0|v1>          Pipeline generation/runtime mode
 --from <command>        Resume from a named command
+--local                  Complete through local lifecycle without remote work
+--worker-id <id>         Stable coordinator-assigned ID for parallel work
 --dry-run                Produce design/payloads without writes
 ```
 
-Ask only for a missing value that materially blocks or changes the selected operation. Harness write operations require known organization and project scope unless the resource is intentionally account-scoped.
+Infer missing values with `AUTONOMY.md`. Ask only for a user-owned decision under its interruption policy. Harness write operations require known organization and project scope unless the resource is intentionally account-scoped.
 
 ## Command routing
 
@@ -47,6 +49,7 @@ Supported commands:
 - `create`: implement the smallest complete code-and-test increment.
 - `test`: run local unit, scenario, regression, and cache-lifecycle tests.
 - `build`: build the candidate binary/image and record immutable identity.
+- `finalize`: update user documentation, changelog, migration notes, and evidence handoff.
 - `remote-setup`: discover or create Harness validation resources.
 - `remote-test`: execute cold, warm, invalidation, and compatibility runs.
 - `diagnose`: investigate a local or Harness test failure.
@@ -56,10 +59,11 @@ Supported commands:
 
 If no command is supplied:
 
-1. infer the narrowest command from the request;
+1. route "add", "implement", or "support" requests through research, design, create, local tests, lifecycle validation, finalize, validate, and report;
 2. use `status` when asked what remains;
-3. use `all` only when the user clearly requests end-to-end implementation;
-4. state the selected command before performing material work.
+3. infer the narrowest command for explanation, research, diagnosis, or test-only requests;
+4. include build and remote phases only when their prerequisites and authorization are available;
+5. state the selected route before performing material work.
 
 Commands may be combined:
 
@@ -70,31 +74,13 @@ build + remote-test
 validate + report
 ```
 
-Do not expand a narrow command into `all`.
+Do not expand an explicit narrow command into implementation or remote mutation.
 
 ## Command state
 
-Maintain this state in the conversation or a user-requested implementation log:
+Persist state after every phase using `AUTONOMY.md`, not only in conversation. A standalone agent uses worker ID `local`; parallel workers use the coordinator-assigned ID.
 
-```text
-language:
-tool:
-starting_sha:
-baseline_image:
-candidate_sha:
-candidate_image:
-fixture_repo:
-local_results:
-harness_scope:
-pipeline:
-cold_execution:
-warm_execution:
-invalidation_execution:
-compatibility_results:
-decisions:
-blockers:
-next_command:
-```
+`AUTONOMY.md` defines the single canonical, versioned task-state schema and status enum. `status`, worker handoffs, validation, and reports must read from that schema rather than maintaining parallel field names.
 
 Do not invent missing state. Verify mutable remote state before using it.
 
@@ -114,6 +100,7 @@ Do not inspect or mutate code or remote resources for `help`.
 Inspect available local and remote evidence without changing it. Report:
 
 - selected tool, whether it is already supported (`buildToolInfoMapping`), and the triage classification from `SKILL.md`;
+- current terminal state from `AUTONOMY.md`;
 - baseline and candidate identities;
 - completed commands and their outcomes;
 - local test status;
@@ -137,9 +124,10 @@ Outputs:
 - engine fit: what `ENGINE.md` capabilities cover, and what would need an engine change;
 - runtime/container-sharing constraints;
 - security and portability exclusions;
-- unanswered questions requiring user feedback.
+- assumptions resolved by autonomous defaults;
+- only unresolved user-owned decisions.
 
-Research must distinguish documented behavior, observed behavior, and assumptions. Do not edit production code.
+Research must populate the evidence ledger in `AUTONOMY.md`, distinguishing documented behavior, observed behavior, and assumptions. Do not edit production code.
 
 ## `design`
 
@@ -157,7 +145,7 @@ Outputs:
 - scenario and compatibility matrices;
 - local and remote validation plan.
 
-Stop for feedback when valid alternatives affect backward compatibility, portability, security, or rollout.
+Apply autonomous defaults first. Stop only when the remaining choice meets the `AUTONOMY.md` interruption policy; batch all current user-owned decisions.
 
 ## `create`
 
@@ -175,10 +163,11 @@ Actions:
 2. add unit, scenario, and regression tests with the code;
 3. preserve unrelated changes;
 4. format changed files;
-5. run focused tests;
+5. run focused tests for changed packages;
 6. return changed files, behavior, tests, and remaining work.
 
 `create` does not publish an image or mutate Harness resources unless combined with the corresponding command.
+Full repository, race, compatibility, and lifecycle gates belong to `test`; do not duplicate them merely because `create` follows the testing guidance for test design.
 
 ## `test`
 
@@ -201,7 +190,7 @@ Actions:
 2. build supported binary/container targets using repository conventions (`ENGINE.md`, "Building a candidate image");
 3. smoke-test the candidate locally;
 4. tag with branch/commit identity;
-5. publish only when requested or required for an approved remote test;
+5. publish only with explicit publication authorization; remote-test authorization alone is not publication authorization;
 6. record tag and digest;
 7. preserve the known-good baseline identity.
 
@@ -248,6 +237,8 @@ Required sequence:
 
 Do not clear or delete shared caches. Use unique keys/namespaces for cold tests unless explicit deletion is approved. A green execution, optimization label, or restored dummy file does not prove the package manager consumed cached data.
 
+If publication, scope, credentials, entitlement, or infrastructure is unavailable, preserve all local evidence and finish as `REMOTE_BLOCKED` with the exact dependency, owner, and action. Do not repeatedly ask for alternate scope.
+
 ## `diagnose`
 
 For local failures:
@@ -255,18 +246,31 @@ For local failures:
 1. reproduce with the narrowest direct command;
 2. classify code regression, fixture issue, environment dependency, or pre-existing failure;
 3. inspect relevant logs and code;
-4. add a regression test before fixing an implementation defect;
-5. rerun the narrow test, then affected broader gates.
+4. identify the smallest correction and tests that would prove it;
+5. report the diagnosis without editing production code.
 
 For Harness failures:
 
 1. verify execution, pipeline, image, inputs, and environment;
 2. use `harness_get` and `harness_diagnose`;
 3. distinguish cache miss from permissions, backend, archive, network, infrastructure, and install failures;
-4. correct local code or approved remote configuration;
-5. rerun only affected cases before the full matrix.
+4. identify the local or remote correction and affected rerun cases;
+5. report the diagnosis without mutation.
 
 Do not remediate access-denied, quota, entitlement, or authentication failures by guessing alternate scope.
+Combine `diagnose + create` to implement a code fix, or `diagnose + remote-setup` for an authorized configuration correction.
+
+## `finalize`
+
+Follow `SKILL.md` section 10.
+
+Actions:
+
+1. update README support, precedence, paths, keys, wiring, exclusions, and tested support matrix;
+2. update `CHANGELOG.md` when the change is user-visible;
+3. record compatibility, expected cold starts, limitations, rollout, and rollback;
+4. update durable task state and evidence provenance;
+5. leave coordinator-owned shared docs to the coordinator during parallel work, recording the required content in the worker handoff.
 
 ## `validate`
 
@@ -278,10 +282,11 @@ Return each gate as:
 PASS: evidence
 FAIL: evidence and required correction
 BLOCKED: exact dependency and owner/action
-NOT APPLICABLE: reason
+NOT_APPLICABLE: reason
 ```
 
 Never claim all-platform, zero-regression, or end-to-end support from unit tests alone.
+End with one terminal state from `AUTONOMY.md`.
 
 ## `report`
 
@@ -310,12 +315,22 @@ Include links for Harness executions and other remote resources. Omit sections t
 ## Evidence
 | Check | Result | Evidence |
 |-------|--------|----------|
-| Unit / scenario tests | PASS/FAIL/SKIPPED | command and summary |
+| Unit / scenario tests | PASS/FAIL/SKIPPED/BLOCKED/NOT_APPLICABLE | command and summary |
 | Full test, race, vet, build | | |
 | Local cold / warm / invalidation | | key, sizes, durations |
 | Package manager consumed restore | | offline/instrumented proof |
 | Harness cold / warm / invalidation | | execution links |
 | Compatibility (legacy keys, archives, overrides) | | |
+
+## Evidence provenance
+- Documented claims (source and applicable version):
+- Observed claims (command, environment, artifact/log):
+- Remaining assumptions and confidence:
+
+## Command ledger
+- PASS:
+- FAIL:
+- SKIPPED / BLOCKED / NOT_APPLICABLE, with reason and owner/action:
 
 ## Measurements
 - Cold vs. warm install time:
@@ -325,6 +340,9 @@ Include links for Harness executions and other remote resources. Omit sections t
 <Key or path changes for existing users, and the expected first cold run.>
 
 ## Limitations and open decisions
+
+## Feedback incorporated
+<Failed assumptions, resulting tests, design corrections, and remaining unsupported cases.>
 
 ## Rollout and rollback
 <Staged rollout steps, known-good image, and what rollback does or does not restore.>
@@ -342,6 +360,7 @@ design
 create
 test --all
 build
+finalize
 remote-setup
 remote-test
 validate
@@ -350,12 +369,15 @@ report
 
 Rules:
 
-- stop at a user-owned design decision;
+- when `--local` is set or remote prerequisites are unavailable, stop after local build/validation/report and use `LOCAL_COMPLETE` or `REMOTE_BLOCKED`;
+- apply autonomous defaults and stop only at a user-owned decision defined by `AUTONOMY.md`;
 - retry transient technical failures or use a safe alternative;
 - continue independent work when one external dependency is blocked;
 - do not skip a failed gate;
 - after each command, update state and incorporate feedback;
 - do not perform remote writes, image publication, or deployment unless needed for the requested end-to-end scope and authorized through the relevant approval mechanism.
+
+For parallel work, follow the coordinator/worker ownership and serial integration protocol in `AUTONOMY.md`. Workers do not independently edit coordinator-owned shared surfaces.
 
 ## Harness MCP tool map
 

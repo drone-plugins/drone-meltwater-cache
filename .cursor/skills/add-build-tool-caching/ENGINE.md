@@ -31,15 +31,16 @@ Behavior that designs must account for:
 
 1. **Order is precedence.** Entries are evaluated in slice order. Once a `tool` identifier is detected, later entries with the same identifier are skipped. Put the stronger signal (lockfile) before the weaker one (manifest fallback).
 2. **Discovery depth is root, then exactly one level.** The engine tries `<glob>` and then `**/<glob>`. Go's `filepath.Glob` does not support recursive `**`; it matches one directory segment. Projects two or more levels deep are not detected.
-3. **One project per entry.** Unless `usePerProject` is set, only the shortest matching path is hashed and passed to `PrepareRepo`. Other nested projects of the same tool are ignored.
+3. **One project per entry by default.** Unless `usePerProject` is set, only the shortest matching path is hashed and passed to `PrepareRepo`. `usePerProject` can prepare every match at the supported root/one-level depth, but enabling it changes key/path behavior and requires compatibility characterization.
 4. **Path overrides disable preparation.** When `PLUGIN_MOUNT` is set, `skipPrepare` is true and no tools, paths, or hashes are produced.
 5. **Detection runs in both restore and save steps**, usually in different containers. Both must reach the same key and paths from the workspace alone.
 
-Anything outside these capabilities, such as recursive discovery, multiple projects per entry, or new key inputs, is an engine change. Treat it as a separate increment with its own compatibility characterization, because it can change keys and paths for every existing tool.
+Anything outside these capabilities, such as recursive discovery beyond one level or key inputs the mapping cannot express, is an engine change. Treat it as a separate increment with its own compatibility characterization, because it can change keys and paths for existing tools.
 
 ## Key composition
 
 - Each matched entry contributes the hex MD5 (32 characters) of the matched file. `additionalHashGlob` contributes another 32-character digest immediately before it.
+- `additionalHashGlob` is resolved through the global root/one-level search, not relative to the directory selected by the primary detector. Characterize nested/hybrid repositories before using it; otherwise it can hash a different project's file.
 - Contributions are concatenated in mapping order. The plugin then builds the final key from `PLUGIN_ACCOUNT_ID + "/" + <hashes>` through the metadata key template.
 - `validatePlan` in `auto_key.go` requires the hash string to be a non-empty multiple of 32 lowercase hex characters. New contributions must keep this shape, or the package.json fallback plan breaks for mixed repositories.
 - Consequences:
@@ -74,9 +75,9 @@ Conventions:
 
 ## Plugin integration
 
-`internal/plugin/plugin.go` (the `cfg.AutoDetect` branch) defines the executable contract:
+`internal/plugin/plugin.go` (the `cfg.AutoDetect` branch) defines the executable contract. Characterization tests are authoritative; comments are design clues only:
 
-- The tool/key/path override matrix in the block comment is the baseline for custom key and custom path compatibility tests.
+- The tool/key/path override matrix in the block comment identifies custom key/path cases, but tests must verify the surrounding control flow rather than assuming the comment is exact.
 - Auto-detected paths use `cache.WithGracefulDetect(true)`, so absent auto paths are skipped. User-provided paths are not graceful.
 - With no detected tool and no overrides, the step logs and exits successfully without caching.
 - The package.json fallback plan (`WriteAutoDetectPlan` / `ReadAutoDetectPlan`) stores the restore-time key and path identities under `HARNESS_TMP_PATH`, scoped to the execution and stage. Save then reuses them, because install can create `package-lock.json` and change detection. If a new tool can create or change a detection file during install, extend this mechanism deliberately rather than inventing a parallel one.
@@ -86,15 +87,22 @@ Conventions:
 Build the binary, then run restore, install, save, wipe, and restore against a disposable filesystem backend:
 
 ```bash
-go build -o bin/drone-cache .
+REPO_ROOT="$(pwd)"
+PLUGIN_BIN="$REPO_ROOT/bin/drone-cache"
+go build -o "$PLUGIN_BIN" .
 CACHE_ROOT="$(mktemp -d)"
+TEST_HOME="$(mktemp -d)"
+FIXTURE_ROOT="<absolute-fixture-path>"
+trap 'rm -rf "$CACHE_ROOT" "$TEST_HOME"' EXIT
 common_env=(
+  HOME="$TEST_HOME"
   PLUGIN_AUTO_CACHE=true
   PLUGIN_BACKEND=filesystem
   PLUGIN_FILESYSTEM_CACHE_ROOT="$CACHE_ROOT"
   PLUGIN_ACCOUNT_ID=test-account
   PLUGIN_OVERRIDE=true
   PLUGIN_LOG_LEVEL=debug
+  PLUGIN_DEBUG=false
   DRONE_REPO_NAMESPACE=local
   DRONE_REPO_NAME=<fixture>
   DRONE_COMMIT_BRANCH=main
@@ -102,16 +110,17 @@ common_env=(
 )
 # Clear the tool's own cache variables (e.g. UV_CACHE_DIR="") unless the scenario tests them.
 
-env "${common_env[@]}" PLUGIN_RESTORE=true  PLUGIN_REBUILD=false bin/drone-cache   # cold: expect miss
+cd "$FIXTURE_ROOT"
+env -i "${common_env[@]}" PLUGIN_RESTORE=true  PLUGIN_REBUILD=false "$PLUGIN_BIN"  # cold: expect miss
 <real install command>
-env "${common_env[@]}" PLUGIN_RESTORE=false PLUGIN_REBUILD=true  bin/drone-cache   # save
-find "$CACHE_ROOT" -type f | head                                                  # inspect stored archive
+env -i "${common_env[@]}" PLUGIN_RESTORE=false PLUGIN_REBUILD=true "$PLUGIN_BIN"   # save
+find "$CACHE_ROOT" -type f -print -quit                                             # inspect stored archive
 rm -rf <selected cache paths> <install outputs>
-env "${common_env[@]}" PLUGIN_RESTORE=true  PLUGIN_REBUILD=false bin/drone-cache   # warm: expect hit
+env -i "${common_env[@]}" PLUGIN_RESTORE=true  PLUGIN_REBUILD=false "$PLUGIN_BIN"  # warm: expect hit
 <offline or instrumented install command proving consumption>
 ```
 
-Run the fixture as the working directory. To mirror Harness, run the install inside a container with the real toolchain image, and run the plugin binary separately against the same mounted workspace.
+Use an explicit environment allowlist: `PLUGIN_DEBUG=true` logs every environment variable and must never be used with inherited host credentials. Run the real install in a disposable credential-free container or with its own minimal allowlist. Use a unique disposable backend and fixture copy for each tool/worker. To mirror Harness, run the install inside a container with the real toolchain image, and run the plugin binary separately against the same mounted workspace.
 
 ## Building a candidate image
 
