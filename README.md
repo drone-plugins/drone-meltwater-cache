@@ -80,6 +80,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
+| **Cargo** | `Cargo.lock` / `Cargo.toml` | `CARGO_HOME` | `.cache/cargo/{registry,git}` | ✅ Read-only. Does not write to the repository |
 
 #### Python Package Manager Details
 
@@ -168,6 +169,31 @@ build container to immediately verify installed dependencies and skip network do
   to the repository. Tracked files remain clean for downstream git and release steps.
 - **Security**: The global `$COMPOSER_HOME` directory (which may contain `auth.json`
   with private tokens) is never cached.
+
+#### Cargo (Rust) Details
+
+Cargo stores downloaded dependencies under `$CARGO_HOME` (default `~/.cargo`).
+The plugin caches the portable, checksum-verified download caches under that
+directory so `cargo build`/`cargo fetch` can resolve dependencies without
+re-downloading.
+
+- **Detection**: Automatically detects `Cargo.lock` (primary) or `Cargo.toml`
+  (fallback for libraries that do not commit a lockfile). When `Cargo.lock` is
+  present it takes precedence and determines the cache key.
+- **Cache location**: Cargo resolves its home directory from the `CARGO_HOME`
+  environment variable only; it has no project-local config file for this. When
+  `CARGO_HOME` is set the plugin caches under that path; otherwise it defaults to
+  the repo-local `.cache/cargo` so the cache lives on the shared workspace volume.
+- **Wiring required**: Because the plugin does not write any config file, later
+  build steps must export `CARGO_HOME` to the same path (`.cache/cargo` by
+  default) for Cargo to use the restored cache.
+- **Cached paths**: `registry/cache` (downloaded `.crate` tarballs),
+  `registry/index` (the registry index), and `git/db` (bare clones of git
+  dependencies).
+- **Deliberately excluded**: `registry/src` and `git/checkouts` are re-extracted
+  from the cached archives above and are not stored. The `target/` build output
+  is ABI/toolchain-coupled and excluded. `credentials.toml` and `.package-cache`
+  (tokens and lock files) are never cached.
 
 ## Example Usage of drone-cache
 
