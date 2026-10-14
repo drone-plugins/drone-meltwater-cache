@@ -80,6 +80,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
+| **Cargo** | `Cargo.lock` / `Cargo.toml` | `CARGO_HOME` | `.cache/cargo/registry/{cache,index}`, `.cache/cargo/git/db` | ✅ Read-only. Writes no config |
 
 #### Python Package Manager Details
 
@@ -168,6 +169,33 @@ build container to immediately verify installed dependencies and skip network do
   to the repository. Tracked files remain clean for downstream git and release steps.
 - **Security**: The global `$COMPOSER_HOME` directory (which may contain `auth.json`
   with private tokens) is never cached.
+
+#### Cargo (Rust) Details
+
+Cargo stores everything under `CARGO_HOME` (default `~/.cargo`). The plugin caches
+only the package download and index caches, which Cargo re-validates against the
+checksums in `Cargo.lock`:
+
+- **Detection**: Automatically detects `Cargo.lock` (primary) or `Cargo.toml`
+  (fallback for crates that do not commit a lockfile). When `Cargo.lock` is present
+  it takes precedence and determines the cache key.
+- **Cached paths**: `registry/cache` (downloaded `.crate` tarballs, primary),
+  `registry/index` (the crates.io index), and `git/db` (bare clones of git
+  dependencies), all relative to the resolved `CARGO_HOME`.
+- **Cache location / precedence**: If `CARGO_HOME` is already exported, the plugin
+  follows it as-is (relative values resolve against the project directory).
+  Otherwise it targets a repo-local `.cache/cargo`. Cargo reads `CARGO_HOME` at
+  process start and has no project-local config file that can relocate it, so for
+  the repo-local default to be consumed later build steps must export
+  `CARGO_HOME=.cache/cargo` (relative to the project directory).
+- **Key input**: the MD5 digest of `Cargo.lock` (or `Cargo.toml` for the lockless
+  fallback). Dependency changes invalidate the key.
+- **Read-Only / Zero Mutation**: The plugin never writes any Cargo configuration
+  into the repository, keeping the tracked tree clean for downstream git steps.
+- **Deliberately excluded**: `registry/src` and `git/checkouts` (re-extracted by
+  Cargo from the download caches), the `target/` build directory (toolchain/ABI
+  coupled and large), installed binaries under `bin/`, and `config.toml` /
+  `credentials.toml` (may hold registry tokens).
 
 ## Example Usage of drone-cache
 
