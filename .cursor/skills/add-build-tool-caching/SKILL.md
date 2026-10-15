@@ -29,6 +29,14 @@ Treat the first argument as a workflow command:
 
 Natural-language equivalents are valid. Read [COMMANDS.md](COMMANDS.md) before executing a command.
 
+Run phases through the executable CLI (non-zero exit code = gate failure):
+
+```bash
+./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh all --tool <name> --env qa0
+```
+
+Docker Hub publication is not available inside the `harness-ai-agent` container; the pipeline `Run` step on a Cloud VM runs [scripts/docker-build-push.sh](scripts/docker-build-push.sh) with connector `dockerpat` and secret `docker_pass`.
+
 Commands and routing rules are defined in [COMMANDS.md](COMMANDS.md).
 
 Examples:

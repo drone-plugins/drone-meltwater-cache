@@ -1,6 +1,12 @@
 # Command Reference
 
-Use this file with `SKILL.md`. Commands are workflow selectors, not shell commands. Interpret a request such as:
+Use this file with `SKILL.md`. Commands are workflow selectors; agents and CI should execute them through the repo CLI:
+
+```bash
+./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh <command> --tool <name> [options]
+```
+
+Interpret a natural-language or slash-style request such as:
 
 ```text
 /add-build-tool-caching research --tool uv
