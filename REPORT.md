@@ -4,16 +4,15 @@
 Adds autodetect caching support for **Cargo (Rust)**. Triage classification:
 **new tool within engine capabilities** (root/one-level `Cargo.lock` detection, a
 primary cache path plus extra paths, lockfile-based key). Overall validation
-status: **LOCAL_COMPLETE** — focused unit/scenario tests, full autodetect/plugin
+status: **REMOTE_VALIDATED** — focused unit/scenario tests, full autodetect/plugin
 tests, `go vet`, cross-compiled release build, and a manually executed local
-restore/install/save/wipe/restore lifecycle all pass. Remote (Harness)
-validation is **PENDING** — to be run in the `remote-validate` phase against the
-candidate image the pipeline builds.
+restore/install/save/wipe/restore lifecycle all pass; remote Harness cold and
+warm runs against the candidate image both **PASS**.
 
 ## Revisions
 - Starting: `feat/php-caching-support` @ `2a04bac2a63abda51c0e0f38671c2da0eda70442`
 - Ending: `feat/cargo-caching-w1` @ (this commit)
-- Candidate image: PENDING (built and pushed by the orchestration pipeline between phases)
+- Candidate image: `rahulpx9/drone-cache:cargo-w1-19` (built and pushed by the orchestration pipeline between phases)
 - Baseline image: n/a (local run)
 
 ## Behavior
@@ -50,8 +49,9 @@ candidate image the pipeline builds.
 | Compatibility (scenario) | PASS | `cache-intel.sh test --compatibility` — scenario suite ok |
 | Local cold / warm / invalidation | PASS | Manual lifecycle (below): cold miss non-fatal (exit 0); save uploaded exactly `registry/cache`, `registry/index`, `git/db`; warm restore `all directories successfully restored` (exit 0); `.crate` tarball restored intact; key invalidation covered by `TestScenario_Cargo_KeyInvalidation` |
 | Archive excludes credentials / src | PASS | Save uploaded only the 3 selected paths; `registry/src` and `credentials.toml` absent from all archives (`tar tzf` grep for `cred` found nothing) |
-| Package manager consumed restore | PARTIAL / SIMULATED | cargo is not installable in the agent container; install was simulated by materializing Cargo's real `CARGO_HOME` layout. Native `cargo fetch --locked` consumption is to be proven in the remote phase. |
-| Harness cold / warm / invalidation | PENDING | remote-validate phase |
+| Package manager consumed restore | PASS | Remote warm run: `cargo fetch --locked` found all crates already present in the restored `.cache/cargo` (install `TIMING_install_seconds=0`, no `Downloaded` lines), vs the cold run which downloaded every crate (`TIMING_install_seconds=1`). |
+| Harness cold run | PASS | Execution [LcP_paygRzCzwvUEeRJGnw](https://app.harness.io/ng/account/h61p38AZSV6MzEkpWWBtew/all/orgs/default/projects/qajt/pipelines/ci_intel_cargo_w1/deployments/LcP_paygRzCzwvUEeRJGnw/pipeline) — status `IgnoreFailed` (cold restore miss ignored as designed): restore `CACHE_STATE=cold`, install downloaded crates, `save_candidate` `cache save complete` uploading `registry/cache` + `registry/index` (`git/db` skipped, absent). |
+| Harness warm run | PASS | Execution [A7vizVqFSi20RqlFth3GLQ](https://app.harness.io/ng/account/h61p38AZSV6MzEkpWWBtew/all/orgs/default/projects/qajt/pipelines/ci_intel_cargo_w1/deployments/A7vizVqFSi20RqlFth3GLQ/pipeline) — status `Success`: restore `cache restored`, `CACHE_STATE=warm path=.cache/cargo/registry/cache`, `REMOTE_ASSERT=PASS`; `verify_restore` confirmed the download cache was non-empty. |
 
 ## Evidence provenance
 - **Documented claims** (source / version): Cargo cache layout (`registry/cache`,
@@ -73,12 +73,23 @@ candidate image the pipeline builds.
 - SKIPPED: `cache-intel.sh test --lifecycle` — requires `cargo` on PATH, which
   cannot be installed in this container. Lifecycle was instead run manually per
   ENGINE.md (commands and results recorded in this report).
-- PENDING: `remote-setup`, `remote-test` (cold + warm), `validate --env qa0` —
-  remote-validate phase, after the pipeline builds the candidate image.
+- PASS (remote-validate): `remote-setup`, `remote-test --run cold`,
+  `remote-test --run warm`, `validate --env qa0` → terminal state
+  **REMOTE_VALIDATED**. Pipeline `ci_intel_cargo_w1` in org `default` / project
+  `qajt`; candidate image `rahulpx9/drone-cache:cargo-w1-19`.
 
 ## Measurements
-- Cold vs warm install time: not meaningfully measurable locally (install
-  simulated). To be captured from the remote `install` step timing.
+- Cold vs warm install time (remote, ripgrep 14.1.1, `rust:1-alpine`):
+  cold `cargo fetch --locked` `TIMING_install_seconds=1` (downloads every crate);
+  warm `TIMING_install_seconds=0` (all crates served offline from the restored
+  cache, no network `Downloaded` lines). Fixture is small, so both are near the
+  timer resolution; the signal is cold-downloads vs warm-offline, not the
+  absolute seconds.
+- Remote archive sizes (candidate image, Harness backend, from `save_candidate`
+  logs): `registry/cache` ≈ 15 MB (`size=15096832`); `registry/index` ≈ 3.4 MB
+  (`size=3444736`); `git/db` skipped (source directory absent — ripgrep has no
+  git dependencies). Both archives restored byte-identical on the warm run
+  (`cache restored`).
 - Archive size / overhead (local fixture, filesystem backend): `registry/cache`
   3.1 kB uncompressed → 31 B compressed; `registry/index` 3.6 kB → 8 B; `git/db`
   1.5 kB (empty). Save of all 3 paths took ~645 µs; warm restore ~708 µs. These
