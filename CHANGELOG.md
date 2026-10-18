@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [#142](https://github.com/meltwater/drone-cache/issues/142) backend/s3: Add option to assume AWS IAM role
 ### Added
 
+- Add Cargo (Rust) auto-detection caching. Detects `Cargo.lock` and caches Cargo's reusable download caches (`registry/cache`, `registry/index`, `git/db`) under `CARGO_HOME` (defaulting to a repo-local `.cache/cargo`). Build output (`target/`), re-extractable `registry/src`/`git/checkouts`, and credential files are excluded. Later build steps must export `CARGO_HOME=.cache/cargo` to consume the cache.
 - [#102](https://github.com/meltwater/drone-cache/pull/102) Implement option to disable cache rebuild if it already exists in storage.
 - [#86](https://github.com/meltwater/drone-cache/pull/86) Add backend operation timeout option that cancels request if they take longer than given duration. `BACKEND_OPERATION_TIMEOUT`, `backend.operation-timeot`. Default value is `3 minutes`.
 - [#86](https://github.com/meltwater/drone-cache/pull/86) Customize the cache key in the path. Adds a new `remote_root` option to customize it. Defaults to `repo.name`.

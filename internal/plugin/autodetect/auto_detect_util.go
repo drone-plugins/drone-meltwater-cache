@@ -92,6 +92,12 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:     newGoPreparer(),
 		},
 		{
+			globToDetect:        "Cargo.lock",
+			tool:                "cargo",
+			preparer:            newCargoPreparer(),
+			additionalCacheDirs: cargoCacheDirs,
+		},
+		{
 			globToDetect:  "*.csproj",
 			tool:          "dotnet",
 			preparer:      newDotnetPreparer(),

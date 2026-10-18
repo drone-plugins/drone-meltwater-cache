@@ -80,6 +80,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
+| **Cargo** | `Cargo.lock` | `CARGO_HOME` | `.cache/cargo/registry/{cache,index}` + `.cache/cargo/git/db` | ✅ Read-only. Writes no config file |
 
 #### Python Package Manager Details
 
@@ -168,6 +169,37 @@ build container to immediately verify installed dependencies and skip network do
   to the repository. Tracked files remain clean for downstream git and release steps.
 - **Security**: The global `$COMPOSER_HOME` directory (which may contain `auth.json`
   with private tokens) is never cached.
+
+#### Cargo (Rust) Details
+
+Cargo manages dependencies for Rust projects. The plugin caches Cargo's reusable
+package-download caches, not build output.
+
+- **Detection**: Detects `Cargo.lock` at the repository root or one directory
+  level down. `Cargo.toml` alone is not enough; a committed lockfile is required
+  because it both proves the project resolves deterministically and is the cache
+  key input.
+- **Cache location**: Controlled only by the `CARGO_HOME` environment variable —
+  Cargo has no project-local config file that relocates the cache. When the build
+  already exports `CARGO_HOME`, those sub-paths are cached as-is. Otherwise the
+  plugin targets a repo-local `.cache/cargo`.
+- **Required wiring in later build steps**: Because the location is env-only,
+  the build/install step must export `CARGO_HOME=.cache/cargo` (matching the
+  default) so Cargo reads and writes the cached directory. Without it Cargo falls
+  back to `~/.cargo` and the cache is not consumed.
+- **Cached paths**:
+  - `registry/cache` — downloaded `.crate` tarballs (the primary download cache);
+  - `registry/index` — the registry index metadata;
+  - `git/db` — bare clones of git dependencies (absent and skipped when there are none).
+- **Key input**: `Cargo.lock` content (32-char MD5), so dependency changes
+  invalidate the cache.
+- **Read-Only / Zero Mutation**: The plugin writes no config file into the
+  repository, keeping the tracked tree clean for downstream git/release steps.
+- **Deliberately excluded**: `registry/src` and `git/checkouts` are re-extracted
+  by Cargo from the cached `registry/cache` and `git/db`, so they are not cached;
+  `target/` (build output, toolchain/ABI-coupled) and `bin/` are excluded; and
+  `credentials.toml` under `CARGO_HOME` is never cached to avoid leaking registry
+  tokens.
 
 ## Example Usage of drone-cache
 
