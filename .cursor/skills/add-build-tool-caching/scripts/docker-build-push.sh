@@ -55,8 +55,14 @@ IMAGE="${REGISTRY_USER}/drone-cache:${TAG}"
 
 mkdir -p release/linux/amd64
 if [[ ! -x release/linux/amd64/drone-cache ]]; then
-  echo "=== Cross-compiling release/linux/amd64/drone-cache ==="
-  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o release/linux/amd64/drone-cache .
+  if command -v go >/dev/null 2>&1; then
+    echo "=== Cross-compiling release/linux/amd64/drone-cache ==="
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o release/linux/amd64/drone-cache .
+  else
+    echo "ERROR: release/linux/amd64/drone-cache missing and go is not on PATH." >&2
+    echo "Run the cross-compile step first (or use a single step with go + docker)." >&2
+    exit 1
+  fi
 fi
 
 if [[ -n "${DOCKER_PASSWORD:-}" ]]; then

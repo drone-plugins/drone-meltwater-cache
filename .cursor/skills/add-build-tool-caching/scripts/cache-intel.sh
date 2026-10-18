@@ -2,6 +2,7 @@
 # Cache Intelligence workflow CLI — executes verifiable gates from COMMANDS.md / AUTONOMY.md.
 # Agents must run this script for each phase and treat non-zero exit codes as failures.
 set -euo pipefail
+shopt -u patsub_replacement 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -17,7 +18,19 @@ DRY_RUN=false
 PUBLISH_IMAGE=false
 TEST_MODE="local"
 FROM_COMMAND=""
-IMAGE_TAG=""
+IMAGE_TAG="${CANDIDATE_IMAGE:-}"
+HARNESS_ORG="${HARNESS_ORG:-default}"
+HARNESS_PROJECT="${HARNESS_PROJECT:-qajt}"
+DOCKER_CONNECTOR="${DOCKER_CONNECTOR:-harnesssecurehub}"
+FIXTURE_REPO=""
+FIXTURE_REF=""
+FIXTURE_SUBDIR="."
+INSTALL_IMAGE=""
+INSTALL_CMD=""
+WARM_CHECK=""
+REMOTE_RUN=""
+EXECUTION_URL=""
+REMOTE_RESULT=""
 BASE_BRANCH="${BASE_BRANCH:-$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
 
 STATE_ROOT=""
@@ -42,8 +55,8 @@ Commands:
   test          Local tests (--local | --lifecycle | --compatibility | --all)
   build         Cross-compile binaries; optional --publish for Docker Hub (needs docker)
   finalize      Verify README / CHANGELOG updates
-  remote-setup  Print Harness QA0 scope checklist (MCP writes stay in agent)
-  remote-test   Record remote-test prerequisites; agent runs harness_execute via MCP
+  remote-setup  Render an isolated Harness test pipeline YAML for the candidate image
+  remote-test   Record a remote cold/warm run result (agent executes the pipeline via MCP)
   validate      Evaluate completion gates from task state
   report        Write REPORT.md from task state template
   all           Full local workflow; remote phases when --env set and not --local
@@ -55,15 +68,33 @@ Options:
   --local             Stop after local gates (no remote-test)
   --dry-run           Print planned actions without mutating remote resources
   --publish           With build: push candidate image (needs docker + DOCKER_PASSWORD)
-  --image <tag>       Candidate image tag for remote-test evidence
+  --image <repo:tag>  Candidate image (default: \$CANDIDATE_IMAGE)
   --branch <name>     Base branch name for state metadata
   --from <command>    Resume all from a named command
+
+Remote options (remote-setup / remote-test):
+  --org <id> / --project <id>   Harness scope (default: default / qajt)
+  --docker-connector <id>       Connector used to pull images (default: \$DOCKER_CONNECTOR or harnesssecurehub)
+  --fixture-repo <git URL>      Public fixture repository to clone in the test pipeline
+  --fixture-ref <branch|tag>    Fixture branch or tag (default: repo default branch)
+  --fixture-subdir <dir>        Project directory inside the fixture (default: .)
+  --install-image <image>       Image that has the build tool installed
+  --install-cmd <cmd>           Dependency install command (include any cache env wiring)
+  --warm-check <path>           Path (relative to fixture dir) that must be non-empty after warm restore
+  --run cold|warm               remote-test: which run is being recorded
+  --execution-url <url>         remote-test: Harness execution URL
+  --result PASS|FAIL            remote-test: outcome
 
 Examples:
   $0 research --tool pnpm
   $0 test --tool pnpm --lifecycle
-  $0 build --tool pnpm --publish
-  $0 all --tool pnpm --env qa0 --local
+  $0 build --tool pnpm
+  $0 remote-setup --tool cargo --worker-id w1 --image rahulpx9/drone-cache:cargo-w1-12 \\
+     --fixture-repo https://github.com/BurntSushi/ripgrep --fixture-ref 14.1.1 \\
+     --install-image rust:1-alpine --install-cmd 'CARGO_HOME=.cache/cargo cargo fetch --locked' \\
+     --warm-check .cache/cargo/registry/cache
+  $0 remote-test --tool cargo --worker-id w1 --run warm --execution-url <url> --result PASS
+  $0 validate --tool cargo --worker-id w1 --env qa0
 EOF
 }
 
@@ -158,8 +189,11 @@ cmd_help() {
   cat <<EOF
 
 Skill references: ${SKILL_DIR}/SKILL.md
-Docker Hub: agent image has no docker; pipeline Run step uses scripts/docker-build-push.sh
-  with secret docker_pass and connector dockerpat on Cloud VM.
+Candidate image: the agent container has no docker daemon. The orchestration pipeline
+  cross-compiles release/linux/amd64/drone-cache and pushes it with the native
+  BuildAndPushDockerRegistry step using the docker connector's credentials, then passes
+  the image to the agent as CANDIDATE_IMAGE. scripts/docker-build-push.sh is for local use.
+Step logs: scripts/fetch-step-log.sh '<download_url from harness_get execution_log>'.
 EOF
 }
 
@@ -397,7 +431,7 @@ cmd_build() {
       die "docker-build-push.sh missing"
     fi
   else
-    log "Image not published (no --publish). Pipeline step should run docker-build-push.sh on Cloud VM."
+    log "Image not published (no --publish). In Harness, the orchestration pipeline builds and pushes it."
   fi
 
   record_result build PASS "${image_evidence}; sha=${STARTING_SHA}"
@@ -410,27 +444,83 @@ cmd_finalize() {
   record_result finalize PASS "README/CHANGELOG spot-check"
 }
 
+yaml_dq_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+remote_pipeline_id() {
+  local raw="ci_intel_${TOOL_SLUG}_${WORKER_ID}"
+  raw="$(echo "$raw" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_\n' '_')"
+  echo "${raw:0:120}"
+}
+
 cmd_remote_setup() {
   init_state_paths
+  [[ -n "$IMAGE_TAG" ]] || die "--image <repo:tag> is required (candidate image pushed by the pipeline)"
+  [[ -n "$FIXTURE_REPO" ]] || die "--fixture-repo <public git URL> is required"
+  [[ -n "$INSTALL_IMAGE" ]] || die "--install-image <image with the tool installed> is required"
+  [[ -n "$INSTALL_CMD" ]] || die "--install-cmd <dependency install command> is required"
+  [[ -n "$WARM_CHECK" ]] || die "--warm-check <path relative to fixture that must exist after warm restore> is required"
+
+  local tmpl="$SCRIPT_DIR/remote-pipeline.tmpl.yaml"
+  [[ -f "$tmpl" ]] || die "missing $tmpl"
+
+  local pipeline_id out_dir out
+  pipeline_id="$(remote_pipeline_id)"
+  out_dir="$STATE_ROOT/remote"
+  mkdir -p "$out_dir"
+  out="$out_dir/${pipeline_id}.yaml"
+
+  local body
+  body="$(cat "$tmpl")"
+  body="${body//__PIPELINE_ID__/$pipeline_id}"
+  body="${body//__ORG__/$HARNESS_ORG}"
+  body="${body//__PROJECT__/$HARNESS_PROJECT}"
+  body="${body//__TOOL__/$TOOL_SLUG}"
+  body="${body//__WORKER__/$WORKER_ID}"
+  body="${body//__IMAGE__/$IMAGE_TAG}"
+  body="${body//__DOCKER_CONNECTOR__/$DOCKER_CONNECTOR}"
+  body="${body//__FIXTURE_REPO__/$(yaml_dq_escape "$FIXTURE_REPO")}"
+  body="${body//__FIXTURE_REF__/$(yaml_dq_escape "$FIXTURE_REF")}"
+  body="${body//__FIXTURE_SUBDIR__/$FIXTURE_SUBDIR}"
+  body="${body//__INSTALL_IMAGE__/$INSTALL_IMAGE}"
+  body="${body//__INSTALL_CMD__/$(yaml_dq_escape "$INSTALL_CMD")}"
+  body="${body//__WARM_CHECK__/$(yaml_dq_escape "$WARM_CHECK")}"
+  printf '%s\n' "$body" >"$out"
+
   cat <<EOF
-Remote setup checklist (execute via Harness MCP in org default / project qajt):
-- Verify connectors: drone_meltwater_cache, dockerpat, account.rahulpqamcpconn
-- Verify secrets: docker_pass (Docker Hub), rp-gh-pat (git push in pipeline)
-- Candidate image: rahulpx9/drone-cache:${TOOL_SLUG}-caching-<short-sha> from pipeline build step
-- Update RestoreCache/SaveCache template image refs to candidate tag for validation pipeline
+PIPELINE_ID=${pipeline_id}
+PIPELINE_YAML=${out}
+ORG=${HARNESS_ORG}
+PROJECT=${HARNESS_PROJECT}
+Next (agent, via Harness MCP):
+  1. harness_create (or harness_update if it exists) resource_type=pipeline, org_id=${HARNESS_ORG},
+     project_id=${HARNESS_PROJECT}, body=<contents of ${out}>
+  2. harness_execute action=run, inputs {expect_warm: "false"}  -> cold run, must succeed
+  3. harness_execute action=run, inputs {expect_warm: "true"}   -> warm run, must succeed
+  4. On failure: harness_get resource_type=execution_log (return_download_url=true, stage_id=validate,
+     step_id=<step>) then scripts/fetch-step-log.sh '<download_url>'
+  5. cache-intel.sh remote-test --tool ${TOOL} --worker-id ${WORKER_ID} --run cold|warm --execution-url <url> --result PASS|FAIL
 EOF
-  record_result remote-setup NOT_APPLICABLE "agent+MCP or pipeline-owned"
+  record_result remote-setup PASS "pipeline=${pipeline_id}; image=${IMAGE_TAG}; fixture=${FIXTURE_REPO}@${FIXTURE_REF:-default}; yaml=${out}"
 }
 
 cmd_remote_test() {
   init_state_paths
-  if $LOCAL_ONLY || [[ -z "$ENV_NAME" ]]; then
-    record_result remote-test BLOCKED "set --env qa0 and authorize remote; or pipeline runs Harness tests"
-    log "REMOTE_BLOCKED: local complete; run validation pipeline with candidate image on Cloud VM."
+  if [[ -z "$REMOTE_RUN" ]]; then
+    record_result remote-test BLOCKED "no --run given; run remote-setup, execute the pipeline via MCP, then record each run"
+    log "REMOTE_BLOCKED: record cold and warm runs with --run cold|warm --execution-url <url> --result PASS|FAIL"
     exit 0
   fi
-  log "remote-test for env=${ENV_NAME} — agent must harness_execute validation pipeline and attach URLs to task state."
-  record_result remote-test SKIPPED "requires agent MCP harness_execute; image=${IMAGE_TAG:-<from build step>}"
+  [[ "$REMOTE_RUN" == "cold" || "$REMOTE_RUN" == "warm" ]] || die "--run must be cold or warm"
+  [[ -n "$EXECUTION_URL" ]] || die "--execution-url is required"
+  [[ "$REMOTE_RESULT" == "PASS" || "$REMOTE_RESULT" == "FAIL" ]] || die "--result must be PASS or FAIL"
+  record_result "remote-test --run ${REMOTE_RUN}" "$REMOTE_RESULT" "${EXECUTION_URL}; image=${IMAGE_TAG:-unknown}"
+  log "Recorded remote ${REMOTE_RUN} run: ${REMOTE_RESULT}"
+  [[ "$REMOTE_RESULT" == "PASS" ]] || exit 1
 }
 
 cmd_validate() {
@@ -449,8 +539,12 @@ cmd_validate() {
   if [[ $fail -eq 0 ]]; then
     if $LOCAL_ONLY || [[ -z "$ENV_NAME" ]]; then
       log "Terminal state: LOCAL_COMPLETE"
+    elif grep -A1 -q "command: remote-test --run cold" "$TASK_STATE" \
+      && grep -A1 "command: remote-test --run cold" "$TASK_STATE" | grep -q "result: PASS" \
+      && grep -A1 "command: remote-test --run warm" "$TASK_STATE" | grep -q "result: PASS"; then
+      log "Terminal state: REMOTE_VALIDATED"
     else
-      log "Terminal state: pending REMOTE_VALIDATED (run remote-test via MCP)"
+      log "Terminal state: REMOTE_BLOCKED (record PASS for both --run cold and --run warm via remote-test)"
     fi
     exit 0
   fi
@@ -472,7 +566,7 @@ See task state: \`${TASK_STATE}\`.
 ## Revisions
 - Starting: ${BASE_BRANCH} @ ${STARTING_SHA}
 - Ending: $(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD) @ $(git -C "$REPO_ROOT" rev-parse HEAD)
-- Candidate image: rahulpx9/drone-cache:${TOOL_SLUG}-caching-${STARTING_SHORT_SHA} (build via pipeline \`docker-build-push.sh\`)
+- Candidate image: ${IMAGE_TAG:-not built (local run)}
 
 ## Behavior
 - Detection files and precedence: (see prepare_${TOOL_SLUG}.go and auto_detect_util.go)
@@ -489,7 +583,7 @@ See task state: \`${TASK_STATE}\`.
 See \`${TASK_STATE}\` field command_results.
 
 ## Rollout and rollback
-Publish immutable tag \`${TOOL_SLUG}-caching-<sha>\`; rollback to previous template image tag.
+Ship via a normal plugin release; roll back by reverting the mapping entry and preparer.
 EOF
   log "Wrote ${report}"
   record_result report PASS "$report"
@@ -548,6 +642,18 @@ parse_args() {
       --image) IMAGE_TAG="${2:?}"; shift 2 ;;
       --branch) BASE_BRANCH="${2:?}"; shift 2 ;;
       --from) FROM_COMMAND="${2:?}"; shift 2 ;;
+      --org) HARNESS_ORG="${2:?}"; shift 2 ;;
+      --project) HARNESS_PROJECT="${2:?}"; shift 2 ;;
+      --docker-connector) DOCKER_CONNECTOR="${2:?}"; shift 2 ;;
+      --fixture-repo) FIXTURE_REPO="${2:?}"; shift 2 ;;
+      --fixture-ref) FIXTURE_REF="${2:?}"; shift 2 ;;
+      --fixture-subdir) FIXTURE_SUBDIR="${2:?}"; shift 2 ;;
+      --install-image) INSTALL_IMAGE="${2:?}"; shift 2 ;;
+      --install-cmd) INSTALL_CMD="${2:?}"; shift 2 ;;
+      --warm-check) WARM_CHECK="${2:?}"; shift 2 ;;
+      --run) REMOTE_RUN="${2:?}"; shift 2 ;;
+      --execution-url) EXECUTION_URL="${2:?}"; shift 2 ;;
+      --result) REMOTE_RESULT="${2:?}"; shift 2 ;;
       --local-test) TEST_MODE=local; shift ;;
       --lifecycle) TEST_MODE=lifecycle; shift ;;
       --compatibility) TEST_MODE=compatibility; shift ;;

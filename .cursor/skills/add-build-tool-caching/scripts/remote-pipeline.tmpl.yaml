@@ -1,0 +1,145 @@
+pipeline:
+  name: __PIPELINE_ID__
+  identifier: __PIPELINE_ID__
+  projectIdentifier: __PROJECT__
+  orgIdentifier: __ORG__
+  description: Cache Intelligence remote validation for __TOOL__ (worker __WORKER__) using __IMAGE__
+  tags:
+    cache_intel: ""
+    tool: __TOOL__
+    worker: __WORKER__
+  variables:
+    - name: expect_warm
+      type: String
+      description: Set to true on the second run; fails the run if the cache was not restored.
+      required: false
+      value: <+input>.default(false).allowedValues(true,false)
+  stages:
+    - stage:
+        name: validate
+        identifier: validate
+        type: CI
+        spec:
+          cloneCodebase: false
+          caching:
+            enabled: false
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: fetch_fixture
+                  identifier: fetch_fixture
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: alpine:3.20
+                    shell: Sh
+                    envVariables:
+                      FIXTURE_REPO: "__FIXTURE_REPO__"
+                      FIXTURE_REF: "__FIXTURE_REF__"
+                    command: |-
+                      set -eu
+                      apk add --no-cache git >/dev/null
+                      rm -rf /harness/fixture
+                      if [ -n "$FIXTURE_REF" ]; then
+                        git clone --depth 1 --branch "$FIXTURE_REF" "$FIXTURE_REPO" /harness/fixture
+                      else
+                        git clone --depth 1 "$FIXTURE_REPO" /harness/fixture
+                      fi
+                      echo "FIXTURE_SHA=$(git -C /harness/fixture rev-parse HEAD)"
+              - step:
+                  type: Run
+                  name: restore_candidate
+                  identifier: restore_candidate
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __IMAGE__
+                    shell: Sh
+                    envVariables:
+                      PLUGIN_RESTORE: "true"
+                      PLUGIN_AUTO_CACHE: "true"
+                      PLUGIN_BACKEND: harness
+                      PLUGIN_CACHE_TYPE: step
+                      PLUGIN_ARCHIVE_FORMAT: tar
+                      PLUGIN_FAIL_RESTORE_IF_KEY_NOT_PRESENT: "false"
+                      PLUGIN_EXIT_CODE: "true"
+                    command: |-
+                      export PLUGIN_CACHE_SERVICE_BEARER_TOKEN="$HARNESS_CACHE_SERVICE_TOKEN"
+                      export PLUGIN_CACHE_SERVICE_BASE_URL="$HARNESS_CACHE_SERVICE_ENDPOINT"
+                      export PLUGIN_ACCOUNT_ID="$HARNESS_ACCOUNT_ID"
+                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
+                      /bin/drone-cache
+                  failureStrategies:
+                    - onFailure:
+                        errors:
+                          - AllErrors
+                        action:
+                          type: Ignore
+              - step:
+                  type: Run
+                  name: verify_restore
+                  identifier: verify_restore
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: alpine:3.20
+                    shell: Sh
+                    envVariables:
+                      EXPECT_WARM: <+pipeline.variables.expect_warm>
+                      WARM_CHECK: "__WARM_CHECK__"
+                    command: |-
+                      set -eu
+                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
+                      if [ -e "$WARM_CHECK" ] && [ -n "$(ls -A "$WARM_CHECK" 2>/dev/null)" ]; then
+                        echo "CACHE_STATE=warm path=$WARM_CHECK"
+                        du -sh "$WARM_CHECK" || true
+                      else
+                        echo "CACHE_STATE=cold path=$WARM_CHECK"
+                        if [ "$EXPECT_WARM" = "true" ]; then
+                          echo "REMOTE_ASSERT=FAIL expected warm restore of $WARM_CHECK"
+                          exit 1
+                        fi
+                      fi
+                      echo "REMOTE_ASSERT=PASS"
+              - step:
+                  type: Run
+                  name: install
+                  identifier: install
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __INSTALL_IMAGE__
+                    shell: Sh
+                    envVariables:
+                      INSTALL_CMD: "__INSTALL_CMD__"
+                    command: |-
+                      set -eu
+                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
+                      start=$(date +%s)
+                      sh -c "$INSTALL_CMD"
+                      echo "TIMING_install_seconds=$(( $(date +%s) - start ))"
+              - step:
+                  type: Run
+                  name: save_candidate
+                  identifier: save_candidate
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __IMAGE__
+                    shell: Sh
+                    envVariables:
+                      PLUGIN_REBUILD: "true"
+                      PLUGIN_AUTO_CACHE: "true"
+                      PLUGIN_BACKEND: harness
+                      PLUGIN_CACHE_TYPE: step
+                      PLUGIN_ARCHIVE_FORMAT: tar
+                      PLUGIN_OVERRIDE: "true"
+                      PLUGIN_EXIT_CODE: "true"
+                    command: |-
+                      export PLUGIN_CACHE_SERVICE_BEARER_TOKEN="$HARNESS_CACHE_SERVICE_TOKEN"
+                      export PLUGIN_CACHE_SERVICE_BASE_URL="$HARNESS_CACHE_SERVICE_ENDPOINT"
+                      export PLUGIN_ACCOUNT_ID="$HARNESS_ACCOUNT_ID"
+                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
+                      /bin/drone-cache

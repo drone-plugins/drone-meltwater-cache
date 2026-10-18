@@ -220,6 +220,18 @@ Required sequence:
 
 Prefer a dedicated validation pipeline. Keep baseline and candidate pipelines/runs distinguishable. Do not modify shared production resources without explicit authorization.
 
+In Harness worker runs, render that pipeline with the CLI instead of hand-writing it:
+
+```bash
+./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh remote-setup --tool <tool> --worker-id <id> \
+  --image <repo:tag> --docker-connector <connector> \
+  --fixture-repo <public git URL> --fixture-ref <tag> \
+  --install-image <image> --install-cmd '<install command with cache env wiring>' \
+  --warm-check <path relative to fixture>
+```
+
+The pipeline (`ci_intel_<tool>_<worker>`) clones the fixture, runs the candidate image for restore and save, and runs the install in between. A `verify_restore` step fails the run when `expect_warm=true` and the warm-check path is empty. Stage `caching` stays disabled, and shared `RestoreCacheFromHarness` / `SaveCacheToHarness` templates are never edited. v0 stages with `caching.enabled` run the Harness-managed `plugins/cache` image, not a candidate.
+
 ## `remote-test`
 
 Use Harness MCP for execution and monitoring.
@@ -239,7 +251,8 @@ Required sequence:
 4. Run cold, warm, invalidation, and requested compatibility cases.
 5. Use `harness_diagnose` for completed failures and relevant execution summaries/logs.
 6. Capture execution URLs, statuses, restore/save results, tool-consumption evidence, timing, and bytes.
-7. If MCP cannot access logs, report that limitation and request only the precise log markers needed from the user.
+7. If `harness_diagnose` / `execution_log` return 404 for logs, request `return_download_url: true` and run `scripts/fetch-step-log.sh '<download_url>'`. Only if that also fails, report the limitation and request the precise log markers from the user.
+8. Record each run with `cache-intel.sh remote-test --run cold|warm --execution-url <url> --result PASS|FAIL`; `cache-intel.sh validate --env <env>` reports `REMOTE_VALIDATED` only when both passed.
 
 Do not clear or delete shared caches. Use unique keys/namespaces for cold tests unless explicit deletion is approved. A green execution, optimization label, or restored dummy file does not prove the package manager consumed cached data.
 

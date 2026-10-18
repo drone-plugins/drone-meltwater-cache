@@ -35,7 +35,12 @@ Run phases through the executable CLI (non-zero exit code = gate failure):
 ./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh all --tool <name> --env qa0
 ```
 
-Docker Hub publication is not available inside the `harness-ai-agent` container; the pipeline `Run` step on a Cloud VM runs [scripts/docker-build-push.sh](scripts/docker-build-push.sh) with connector `dockerpat` and secret `docker_pass`.
+Harness worker runs (pipeline `tempai`, agent `cache_intel_worker`) are split into two agent phases:
+
+- `implement`: code, tests, local gates, and a local commit on `feat/<tool>-caching-<worker_id>`.
+- `remote-validate`: test the candidate image that the pipeline built between the phases. The agent container has no Docker daemon. The pipeline pushes the image with the native `BuildAndPushDockerRegistry` step, using the credentials of the `docker_connector` runtime input.
+
+Remote validation never edits shared templates. `cache-intel.sh remote-setup` renders a per-worker pipeline (`ci_intel_<tool>_<worker>`, from [scripts/remote-pipeline.tmpl.yaml](scripts/remote-pipeline.tmpl.yaml)) that runs the candidate image directly. It maps `HARNESS_CACHE_SERVICE_TOKEN` / `HARNESS_CACHE_SERVICE_ENDPOINT` / `HARNESS_ACCOUNT_ID` to the plugin's cache-service settings, so it uses the real Harness cache backend scoped to that pipeline. Read failed step logs with [scripts/fetch-step-log.sh](scripts/fetch-step-log.sh) and the `download_url` from `harness_get(resource_type=execution_log, params={return_download_url: true})`.
 
 Commands and routing rules are defined in [COMMANDS.md](COMMANDS.md).
 
