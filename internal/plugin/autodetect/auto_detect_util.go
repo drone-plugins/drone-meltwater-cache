@@ -87,6 +87,12 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			additionalHashGlob:  "package.json",
 		},
 		{
+			globToDetect:        "Cargo.lock",
+			tool:                "cargo",
+			preparer:            newCargoPreparer(),
+			additionalCacheDirs: cargoCacheDirs,
+		},
+		{
 			globToDetect: "go.mod",
 			tool:         "golang",
 			preparer:     newGoPreparer(),
