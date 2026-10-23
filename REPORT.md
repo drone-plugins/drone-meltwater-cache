@@ -1,12 +1,12 @@
 # Cache Intelligence: cargo
 
 ## Summary
-New tool support within the existing engine: Cargo lockfile autodetection and narrowly scoped dependency caches. Local CLI gates passed; remote validation is PENDING for the next phase. Full-suite and race environment limitations are recorded below, not treated as passes. Evidence: `cache-intel.sh create`, `test --local-test`, `test --compatibility`, `test --lifecycle`, `build`, and `finalize`, all with `--tool cargo --worker-id w2 --branch feat/php-caching-support` (exit 0).
+New tool support within the existing engine: Cargo lockfile autodetection and narrowly scoped dependency caches. Local CLI gates passed; the requested remote cold/warm gates passed for `rahulpx9/drone-cache:cargo-w2-21`. CLI `validate --env qa0 --tool cargo --worker-id w2 --branch feat/php-caching-support` returned `REMOTE_VALIDATED`; this label covers the CLI cold/warm criteria, not unexecuted remote invalidation or interoperability cases. Full-suite and race environment limitations are recorded below, not treated as passes. Evidence: `cache-intel.sh create`, `test --local-test`, `test --compatibility`, `test --lifecycle`, `build`, and `finalize`, all with `--tool cargo --worker-id w2 --branch feat/php-caching-support` (exit 0).
 
 ## Revisions
 - Starting: `feat/php-caching-support` @ `2a04bac2a63abda51c0e0f38671c2da0eda70442` (`git rev-parse HEAD` before implementation).
 - Ending: `feat/cargo-caching-w2`; implementation commit is the commit containing this report (`git log -1` after commit).
-- Candidate image / digest: PENDING, supplied by orchestration after implementation. No Docker command, push or PR was run.
+- Candidate image: `rahulpx9/drone-cache:cargo-w2-21`; pulled digest `sha256:7c003367892683a80d7ed483d508fc54de85d4bd45bbac52fe12c28381112f6d` (cold and warm restore step logs linked below). No local Docker command, git push or PR was run.
 - Baseline image: NOT_APPLICABLE; baseline was the source revision above.
 
 ## Behavior
@@ -35,9 +35,9 @@ Local logs are under `.git/cache-intel/evidence/` (not product files). All CLI i
 | Archive inspection | PASS | Same manual command runs `tar -tf` on both backend archives, asserts no credentials.toml, registry/src, git/checkouts, target or bin; archive listing contains crate archive, sparse index metadata and config.json |
 | Legacy key / overrides characterization | PASS | CLI compatibility gate executes `TestScenario_Cargo_LegacyMixedKey` and key/override cases; existing package tests pass |
 | Baseline/candidate cross-version archive interoperability | PENDING | Not independently exercised. No archive or backend implementation changes; local lifecycle uses candidate both ways, not baseline |
-| Harness cold | PENDING | Not run in implement phase; no execution URL |
-| Harness warm | PENDING | Not run in implement phase; no execution URL |
-| Harness invalidation | PENDING | Not run in implement phase; no execution URL |
+| Harness cold | PASS | [Run 1](https://app.harness.io/ng/account/h61p38AZSV6MzEkpWWBtew/all/orgs/default/projects/qajt/pipelines/ci_intel_cargo_w2/deployments/DybqDZTIRAaTtrxnJol8AA/pipeline): IgnoreFailed only for expected missing-cache restore; verify emits CACHE_STATE=cold / REMOTE_ASSERT=PASS; install and save complete, uploaded=2 missing=1 failed=0 |
+| Harness warm | PASS | [Run 2](https://app.harness.io/ng/account/h61p38AZSV6MzEkpWWBtew/all/orgs/default/projects/qajt/pipelines/ci_intel_cargo_w2/deployments/Hefm3ycnTlmXZpEvlrcTxA/pipeline): Success; registry index/cache restored, CACHE_STATE=warm / REMOTE_ASSERT=PASS before install; no crate downloads in cargo fetch; save uploaded=2 missing=1 failed=0 |
+| Harness invalidation | NOT RUN | Remote phase requests cold/warm only; local invalidation evidence above is not a remote test |
 
 ## Evidence provenance
 - Documentation observed with `curl -fsSL https://doc.rust-lang.org/cargo/guide/cargo-home.html`: Cargo home defaults, CARGO_HOME override, internal-layout instability, and index/cache/git-db CI recommendations. These are current Cargo Book claims, not a claim that all versions were tested.
@@ -51,8 +51,8 @@ Local logs are under `.git/cache-intel/evidence/` (not product files). All CLI i
 - Corrected failure: lifecycle CLI reached successful warm restore but returned 1 from a RETURN trap referencing out-of-scope local variables (`cache_root: unbound variable`). Minimal CLI fix captures temporary paths when installing the cleanup trap; rerun exit 0. Included this supporting harness fix, not an engine behavior change.
 - Corrected experiment: manual install with an empty environment could not reach the registry; retried with normal inherited routing and PLUGIN_DEBUG=false. No proxy settings changed; no environment dumps or credentials recorded.
 - BLOCKED: full tests (sandbox localhost restriction), race (missing C toolchain). Owner: validation environment maintainer; permit local test-server connectivity and provide gcc/CGO, then rerun commands above.
-- PENDING: remote validation and cross-version archive interoperability. Native macOS/Windows validation not performed; cross-compilation alone is not native support evidence.
-- NOT_APPLICABLE: Docker commands, image publication, git push, PR creation, shared Harness resource changes; prohibited in this phase.
+- PENDING: cross-version archive interoperability; remote invalidation was not requested in this phase and was not run. Native macOS/Windows validation not performed; cross-compilation alone is not native support evidence.
+- NOT_APPLICABLE: local Docker commands, image publication, git push, PR creation and shared Harness resource changes; prohibited. Only assigned isolated pipeline `ci_intel_cargo_w2` was created and executed (MCP create/get/run results; execution links below).
 
 ## Measurements
 Latest manual lifecycle command (`cargo-manual.log`):
@@ -86,10 +86,26 @@ Exact inputs for the remote-validate phase:
 - Install command: `CARGO_HOME=.cache/cargo cargo fetch --locked`
 - Warm-check path relative to fixture: `.cache/cargo/registry/cache`
 - Docker connector: `rpdockerhub`
-- Candidate image: PENDING orchestration build; use the exact supplied candidate, never latest.
+- Candidate image used: `rahulpx9/drone-cache:cargo-w2-21` (restore logs in execution links below).
 - Pipeline: use only the identifier printed by CLI remote-setup (expected `ci_intel_cargo_w2`), read rendered YAML before MCP create/update/run.
 
-Do not run this in implement phase. The remote plugin default selection is fixture/.cache/cargo, and the install command explicitly wires Cargo to that same path. Remote correctness, timings and archive sizes are PENDING until actual execution logs exist.
+Do not run this in implement phase. The remote plugin default selection is fixture/.cache/cargo, and the install command explicitly wires Cargo to that same path. Remote cold/warm results, timings and archive sizes are recorded below from actual execution logs.
 
 ## Rollout and rollback
 After orchestration builds the candidate from this commit, run the isolated cold/warm phase and record execution URLs and measured evidence before release. Normal reviewed release only. Roll back by reverting this tool's mapping/preparer changes or returning to the known source baseline above; an image rollback does not reuse newly introduced Cargo composite keys. No baseline image tag was supplied.
+
+
+## Remote validation results (qa0, default/qajt)
+Commands: CLI `remote-setup`, `remote-test --run cold --result PASS`, `remote-test --run warm --result PASS`, and `validate --env qa0`, each with `--tool cargo --worker-id w2 --branch feat/php-caching-support`; all exit 0. The remote-test commands included `--image rahulpx9/drone-cache:cargo-w2-21` and the respective execution URL. `validate` output: `PASS: autodetect tests`, `Terminal state: REMOTE_VALIDATED` (`.git/cache-intel/evidence/remote/validate.log`).
+
+- [Cold execution](https://app.harness.io/ng/account/h61p38AZSV6MzEkpWWBtew/all/orgs/default/projects/qajt/pipelines/ci_intel_cargo_w2/deployments/DybqDZTIRAaTtrxnJol8AA/pipeline) — terminal IgnoreFailed, 91.734s total (MCP execution/diagnose). Restore reports three file-not-found misses; no credential/backend denial. `verify_restore`: `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`. `install`: `TIMING_install_seconds=1`, crate downloads present. `save_candidate`: requested=3 uploaded=2 missing=1 failed=0, took=627.729856ms. This meets the explicit cold criterion allowing IgnoreFailed with successful save.
+- [Warm execution](https://app.harness.io/ng/account/h61p38AZSV6MzEkpWWBtew/all/orgs/default/projects/qajt/pipelines/ci_intel_cargo_w2/deployments/Hefm3ycnTlmXZpEvlrcTxA/pipeline) — terminal Success, 95.402s total (MCP diagnose). Restore: registry/index and registry/cache downloaded, partial 2/3 restoration in 315.826341ms. `verify_restore`: `CACHE_STATE=warm`, 16.4M registry/cache, `REMOTE_ASSERT=PASS` before install. `install`: `TIMING_install_seconds=0`, no Updating/Downloading lines. This supports restored dependency reuse with the exact documented CARGO_HOME wiring, but is not an offline remote test or functional build. `save_candidate`: requested=3 uploaded=2 missing=1 failed=0, took=527.810502ms.
+- Archive bytes, both runs' save logs: registry/index **5,593,088**; registry/cache **17,149,440**; total **22,742,528**. Pipeline uses tar; these are exact upload sizes, not a claimed compression ratio. Same lockfile key in both runs: `28c048236f1d8b1893f68dee2e4ebff1` (restore/save logs).
+- Whole-second install timers are coarse: warm `0` means under timer resolution, not zero work. Rough plugin restore+save overhead is 0.844s on warm run, close to the measured 1s cold fetch. No significant net pipeline speedup is demonstrated: VM/image/setup dominate, and warm total pipeline time was longer. Larger real workloads need separate value measurements.
+- Both restore logs identify candidate digest above; Rust install logs identify `rust:1.85.0-bookworm` digest `sha256:0ff31c9ffa641a62e48d543fb00b4960955ea375f40776f40f585b89e654cc5e`. MCP pipeline get confirmed INLINE v0, Cloud Linux/Amd64, caching disabled, no shared templates, exact fixture tag/install wiring.
+- Expected limitation: optional git/db absent for this registry-only fixture; warm restore is explicitly 2/3, not full hit. Warm restore also logs non-fatal `writeCacheMetadata ... open : no such file or directory`; file restore and consumption succeeded, metadata persistence is not validated. No plugin edits made in this phase.
+- Log retrieval: MCP `harness_get execution_log` signed URLs followed by `fetch-step-log.sh '<url>' 200`. Initial fetch lacked unzip; reran successfully with a disposable Python zipfile-compatible unzip shim on PATH (no repository script changes). Sanitized decoded output retained under `.git/cache-intel/evidence/remote/{cold,warm}-<step>.log` for restore_candidate, verify_restore, install, save_candidate. Those paths are local evidence, not committed product files; execution links are durable report references.
+- MCP warm run call timed out waiting for its response; execution list confirmed run 2 had started, so no duplicate was launched. Diagnosis polled that execution through Success. Both remote runs were recorded only after checking logs; no fixture retries or pipeline updates were needed.
+- Still NOT RUN remotely: lockfile invalidation, offline functional build, native non-Linux platforms, Git dependencies, baseline/candidate archive interchange. Prior local evidence remains scoped as local. CLI terminal state is not a claim that these broader skill scenarios passed.
+
+Remote scope of writes: MCP created only `ci_intel_cargo_w2`; no templates, connectors, secrets, settings or other pipelines modified. Publication was performed upstream by orchestration, not by this worker. Rollout remains a normal reviewed release after considering the documented limitations; this phase validates the supplied candidate, not a production rollout.
