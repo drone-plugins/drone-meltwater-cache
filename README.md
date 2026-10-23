@@ -72,6 +72,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Gradle** | `build.gradle[.kts]` | `gradle.properties` | `.gradle` | ✅ Appended |
 | **Node.js** | `package-lock.json` | existing `npm_config_cache` / `.npmrc` `cache`, or `~/.npm` when that path is already inside the workspace | `.npm` | ✅ Read-only. Does not write `.npmrc` |
 | **Yarn** | `yarn.lock` | `.yarnrc` | `.yarn/cache` | ✅ Appended |
+| **Cargo (Rust)** | `Cargo.lock` | `CARGO_HOME` (explicit build-step wiring) | `registry/cache`, `registry/index`, `git/db` below Cargo home | ✅ Read-only; no credentials or toolchains |
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
 | **.NET** | `*.csproj/*.vbproj/.fsproj` | Per-project dirs | `bin/obj` | ✅ Native |
 | **Bazel** | `WORKSPACE/MODULE.bazel` | `.bazelrc` | `bazel-cache` | ✅ Appended |
@@ -80,6 +81,36 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
+
+#### Cargo (Rust) Details
+
+- **Detection/key**: `Cargo.lock` at the workspace root or one directory level
+  below it. The existing engine selects one shortest match (root preferred),
+  using its content MD5 (32 lowercase hex characters). No `Cargo.toml` fallback;
+  commit the lockfile before restore. Independent managers coexist, with Cargo
+  immediately before Go in mapping order. Mixed Cargo projects get a new cold key;
+  legacy-only keys and ordering are unchanged.
+- **Paths**: only `registry/cache` (crate downloads), `registry/index` (resolution
+  metadata), and `git/db` (bare dependency repositories) are selected. Missing
+  optional directories are skipped on save. Registry-only projects normally have
+  no `git/db` and can report a partial restore.
+- **Precedence/wiring**: explicit `CARGO_HOME` wins; relative values resolve from
+  the command's workspace cwd, including for nested projects. Otherwise use
+  `$HOME/.cargo` only when already inside the workspace, else select
+  `<workspace>/.cache/cargo`. This selection does **not** relocate Cargo: set
+  `CARGO_HOME=.cache/cargo` in dependency install steps, and use the same cwd and
+  effective home for restore/install/save. Set any custom home for all three steps.
+  No `.cargo/config.toml`, global config, or credentials are read or modified.
+- **Excluded**: Cargo home as a whole, credentials/config files, `bin`, rustup
+  toolchains, `target`, `registry/src`, and `git/checkouts`. Sources/checkouts are
+  recreated by Cargo. Only use trusted cache writers; private dependency source
+  and repository metadata still require a suitably isolated backend.
+- **Validation/limits**: Cargo/Rust 1.85.0 on Linux amd64 passed local filesystem
+  restore, offline fetch and offline `cargo check` using the committed synthetic
+  fixture. Windows amd64 cross-compiles, but native Windows/macOS, git-dependency
+  offline consumption and remote Harness validation are not yet proven. See
+  `REPORT.md` for commands, measurements and pending remote evidence. Cache home
+  internals are not stabilized by Cargo, so later versions need revalidation.
 
 #### Python Package Manager Details
 

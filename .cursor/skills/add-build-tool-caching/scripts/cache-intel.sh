@@ -325,7 +325,7 @@ run_lifecycle_fixture() {
   local cache_root test_home
   cache_root="$(mktemp -d)"
   test_home="$(mktemp -d)"
-  trap 'rm -rf "$cache_root" "$test_home"' RETURN
+  trap "rm -rf -- '$cache_root' '$test_home'" RETURN
 
   local -a common_env=(
     "HOME=$test_home"
