@@ -90,13 +90,23 @@ pipeline:
                       mc admin policy add minio userpolicy /tmp/policy.json
               - step:
                   type: Run
+                  name: Prepare patched Go SDK
+                  identifier: build_GoSDK
+                  spec:
+                    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+                    shell: Sh
+                    command: mkdir -p .hhi-go-toolchain && cp -a /usr/lib/go/. .hhi-go-toolchain/
+                    connectorRef: Plugins_Docker_Hub_Connector
+              - step:
+                  type: Run
                   name: build
                   identifier: build
                   spec:
                     connectorRef: Plugins_Docker_Hub_Connector
-                    image: golang:1.26.10-alpine3.23
+                    image: harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1
                     shell: Sh
                     command: |-
+                      export PATH="$PWD/.hhi-go-toolchain/bin:$PATH" GOPATH=/go GOTOOLCHAIN=local
                       apk add --update make git
                       make drone-cache
                     envVariables:
@@ -108,7 +118,7 @@ pipeline:
                   identifier: test
                   spec:
                     connectorRef: Plugins_Docker_Hub_Connector
-                    image: golang:1.26.10-alpine3.23
+                    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
                     shell: Sh
                     command: go test -mod=vendor -short -cover -tags=integration -timeout 20m ./...
                     envVariables:
@@ -324,7 +334,7 @@ pipeline:
                       name: build
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.26.10
+                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
                         shell: Sh
                         command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
                         envVariables:
@@ -337,7 +347,7 @@ pipeline:
                       identifier: Run_2_2
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.26.10
+                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
                         shell: Sh
                         command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
                         envVariables:
@@ -399,7 +409,7 @@ pipeline:
                       identifier: Run_1_1
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.26.10
+                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
                         shell: Sh
                         command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
                         envVariables:
@@ -412,7 +422,7 @@ pipeline:
                       identifier: Run_1_2
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.26.10
+                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
                         shell: Sh
                         command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
                         envVariables:
@@ -483,6 +493,7 @@ pipeline:
                           echo $env:DRONE_SEMVER_SHORT
                           go build -o release/windows/amd64/drone-cache.exe
                         envVariables:
+                          GOTOOLCHAIN: go1.26.10
                           CGO_ENABLED: "0"
                   - step:
                       type: Plugin
@@ -549,6 +560,7 @@ pipeline:
                           echo $env:DRONE_SEMVER_SHORT
                           go build -o release/windows/amd64/drone-cache.exe
                         envVariables:
+                          GOTOOLCHAIN: go1.26.10
                           CGO_ENABLED: "0"
                   - step:
                       type: Plugin
@@ -643,20 +655,30 @@ pipeline:
             steps:
               - step:
                   type: Run
+                  name: Prepare patched Go SDK
+                  identifier: Run_1_GoSDK
+                  spec:
+                    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+                    shell: Sh
+                    command: mkdir -p .hhi-go-toolchain && cp -a /usr/lib/go/. .hhi-go-toolchain/
+                    connectorRef: Plugins_Docker_Hub_Connector
+              - step:
+                  type: Run
                   name: Build binaries
                   identifier: Run_1
                   spec:
                     connectorRef: Plugins_Docker_Hub_Connector
-                    image: golang:1.26.10
+                    image: harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1
                     shell: Sh
                     command: |-
+                      export PATH="$PWD/.hhi-go-toolchain/bin:$PATH" GOPATH=/go GOTOOLCHAIN=local
                       GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
                       GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
                       GOOS=darwin  GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
                       GOOS=windows GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64
 
-                      apt-get update -y
-                      apt-get install -y zstd
+                      apk update
+                      apk add --no-cache zstd
                       zstd release/plugin-linux-amd64
                       zstd release/plugin-linux-arm64
                       zstd release/plugin-darwin-arm64

@@ -29,11 +29,16 @@ steps:
       - 'echo ''{"Version": "2012-10-17", "Statement": [ { "Action": [ "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:CreateBucket", "s3:DeleteBucket", "s3:ListBucket" ], "Effect": "Allow", "Resource": [ "arn:aws:s3:::s3-round-trip-with-role/*", "arn:aws:s3:::s3-round-trip-with-role" ], "Sid": "" } ] }'' >> /tmp/policy.json'
       - mc admin policy add minio userpolicy /tmp/policy.json
       - mc admin policy set minio userpolicy user=foo
+  - name: build-go-sdk
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    commands:
+      - mkdir -p .hhi-go-toolchain && cp -a /usr/lib/go/. .hhi-go-toolchain/
   - name: build
     # there is an issue in golang 1.17.7-alpine3.15 -- with make files so using 1.17.3 here
     # https://gitlab.alpinelinux.org/alpine/aports/-/issues/12396
-    image: golang:1.26.10-alpine3.23
+    image: harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1
     commands:
+      - export PATH="$PWD/.hhi-go-toolchain/bin:$PATH" GOPATH=/go GOTOOLCHAIN=local
       - apk add --update make git
       - make drone-cache
     environment:
@@ -41,7 +46,7 @@ steps:
 
     
   - name: test
-    image: golang:1.26.10-alpine3.23
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
     commands:
       - go test -mod=vendor -short -cover -tags=integration ./...
     environment:
@@ -248,7 +253,7 @@ platform:
 steps:
   - name: build-push
     pull: always
-    image: golang:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
     commands:
       - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
     environment:
@@ -256,7 +261,7 @@ steps:
       GO111MODULE: on
   - name: build-tag
     pull: always
-    image: golang:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
     commands:
       - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
     environment:
@@ -303,7 +308,7 @@ platform:
 steps:
   - name: build-push
     pull: always
-    image: golang:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
     commands:
       - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
     environment:
@@ -311,7 +316,7 @@ steps:
       GO111MODULE: on
   - name: build-tag
     pull: always
-    image: golang:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
     commands:
       - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
     environment:
@@ -359,6 +364,7 @@ steps:
   - name: build
     image: golang:1.26.10
     commands:
+      - . ./scripts/setup-go-windows.ps1
       - echo $env:DRONE_SEMVER_SHORT
       - go build -o release/windows/amd64/drone-cache.exe
     environment:
@@ -406,6 +412,7 @@ steps:
   - name: build
     image: golang:1.26.10
     commands:
+      - . ./scripts/setup-go-windows.ps1
       - echo $env:DRONE_SEMVER_SHORT
       - go build -o release/windows/amd64/drone-cache.exe
     environment:
@@ -480,7 +487,7 @@ pool:
 
 steps:
   - name: build
-    image: golang:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
     commands:
       - GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
       - GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
@@ -489,7 +496,7 @@ steps:
 
   - name: zstd-compress
     commands:
-      - sudo apt-get update -y
+      - apk update
       - sudo apt-get install -y zstd
       - zstd release/plugin-linux-amd64
       - zstd release/plugin-linux-arm64
