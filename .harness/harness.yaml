@@ -711,7 +711,6 @@ pipeline:
                       GOOS=darwin  GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
                       GOOS=windows GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64
 
-                      apk update
                       apk add --no-cache zstd
                       zstd release/plugin-linux-amd64
                       zstd release/plugin-linux-arm64
