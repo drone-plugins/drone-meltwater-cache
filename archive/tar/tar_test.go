@@ -1,6 +1,9 @@
 package tar
 
 import (
+	stdtar "archive/tar"
+	"bytes"
+	"errors"
 	"io"
 	"io/ioutil"
 	"os"
@@ -502,4 +505,42 @@ func TestExtractTarget(t *testing.T) {
 
 	_, err = extractTarget(dst, "foo/../../outside")
 	test.NotOk(t, err)
+}
+
+func TestExtractStrictPaths(t *testing.T) {
+	t.Setenv("GODEBUG", "tarinsecurepath=0")
+	root := t.TempDir()
+	absolute := filepath.Join(root, "absolute", "cache.txt")
+	for _, tc := range []struct {
+		name    string
+		allowed bool
+	}{
+		{name: absolute, allowed: true},
+		{name: "../outside", allowed: false},
+		{name: "nested/../../outside", allowed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tw := stdtar.NewWriter(&buf)
+			test.Ok(t, tw.WriteHeader(&stdtar.Header{Name: tc.name, Mode: 0600, Size: 5}))
+			_, err := tw.Write([]byte("cache"))
+			test.Ok(t, err)
+			test.Ok(t, tw.Close())
+			a := New(log.NewNopLogger(), root, true, false)
+			_, err = a.Extract(filepath.Join(root, "destination"), &buf)
+			if !tc.allowed {
+				if !errors.Is(err, ErrArchiveNotReadable) {
+					t.Fatalf("expected insecure relative path rejection, got %v", err)
+				}
+				if _, statErr := os.Stat(filepath.Join(root, "outside")); !os.IsNotExist(statErr) {
+					t.Fatalf("unexpected file outside extraction directory: %v", statErr)
+				}
+				return
+			}
+			test.Ok(t, err)
+			data, err := os.ReadFile(absolute)
+			test.Ok(t, err)
+			test.Equals(t, "cache", string(data))
+		})
+	}
 }

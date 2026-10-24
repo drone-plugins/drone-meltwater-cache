@@ -1,8 +1,11 @@
-FROM golang:1.26.10-alpine3.23 AS builder
-RUN apk add --update --no-cache ca-certificates tzdata && update-ca-certificates
+FROM harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8 AS hhi-go-toolchain-0
+FROM harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1@sha256:290a37c85b4284d2c11fa0778e5da79643d912a1f5a57d6f701b77644503b7e7 AS builder
+COPY --from=hhi-go-toolchain-0 /usr/lib/go /usr/lib/go
+ENV PATH=/usr/lib/go/bin:$PATH GOPATH=/go GOTOOLCHAIN=local
+RUN apk add --update --no-cache 'ca-certificates>=20261020-r0' tzdata && update-ca-certificates
 RUN addgroup -g 65532 -S nonroot && adduser -u 65532 -S nonroot -G nonroot
 
-FROM scratch as runner
+FROM scratch AS runner
 
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
