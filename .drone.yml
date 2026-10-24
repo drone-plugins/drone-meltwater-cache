@@ -30,13 +30,13 @@ steps:
       - mc admin policy add minio userpolicy /tmp/policy.json
       - mc admin policy set minio userpolicy user=foo
   - name: build-go-sdk
-    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
     commands:
       - mkdir -p .hhi-go-toolchain && cp -a /usr/lib/go/. .hhi-go-toolchain/
   - name: build
     # there is an issue in golang 1.17.7-alpine3.15 -- with make files so using 1.17.3 here
     # https://gitlab.alpinelinux.org/alpine/aports/-/issues/12396
-    image: harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1
+    image: harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1@sha256:290a37c85b4284d2c11fa0778e5da79643d912a1f5a57d6f701b77644503b7e7
     commands:
       - export PATH="$PWD/.hhi-go-toolchain/bin:$PATH" GOPATH=/go GOTOOLCHAIN=local
       - apk add --update make git
@@ -46,7 +46,7 @@ steps:
 
     
   - name: test
-    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
     commands:
       - go test -mod=vendor -short -cover -tags=integration ./...
     environment:
@@ -253,7 +253,7 @@ platform:
 steps:
   - name: build-push
     pull: always
-    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
     commands:
       - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
     environment:
@@ -261,7 +261,7 @@ steps:
       GO111MODULE: on
   - name: build-tag
     pull: always
-    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
     commands:
       - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache'
     environment:
@@ -271,6 +271,8 @@ steps:
     pull: always
     image: plugins/docker:linux-amd64
     settings:
+      pull_image: true
+      no_cache: true
       auto_tag: true
       auto_tag_suffix: linux-amd64
       dockerfile: docker/Dockerfile.linux.amd64
@@ -308,7 +310,7 @@ platform:
 steps:
   - name: build-push
     pull: always
-    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
     commands:
       - 'go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
     environment:
@@ -316,7 +318,7 @@ steps:
       GO111MODULE: on
   - name: build-tag
     pull: always
-    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
     commands:
       - 'go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache'
     environment:
@@ -326,6 +328,8 @@ steps:
     pull: always
     image: plugins/docker:linux-arm64
     settings:
+      pull_image: true
+      no_cache: true
       auto_tag: true
       auto_tag_suffix: linux-arm64
       dockerfile: docker/Dockerfile.linux.arm64
@@ -420,6 +424,8 @@ steps:
   - name: docker
     image: plugins/docker
     settings:
+      pull_image: true
+      no_cache: true
       dockerfile: docker/Dockerfile.windows.ltsc2022
       repo: plugins/cache
       username:
@@ -487,7 +493,7 @@ pool:
 
 steps:
   - name: build
-    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10
+    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
     commands:
       - GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
       - GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
@@ -496,7 +502,7 @@ steps:
 
   - name: zstd-compress
     commands:
-      - apk update
+      - sudo apt-get update -y
       - sudo apt-get install -y zstd
       - zstd release/plugin-linux-amd64
       - zstd release/plugin-linux-arm64
