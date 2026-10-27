@@ -357,7 +357,7 @@ platform:
 
 steps:
   - name: build
-    image: golang:1.23.0@sha256:acfb46be39840f8c2a6b9efdd673c6627011200c73bab4e6d18b8b9ab4641c46
+    image: golang:1.23.0
     commands:
       - . ./scripts/setup-go-windows.ps1
       - echo $env:DRONE_SEMVER_SHORT
