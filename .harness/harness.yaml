@@ -490,11 +490,12 @@ pipeline:
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
                         image: golang:1.23.0@sha256:acfb46be39840f8c2a6b9efdd673c6627011200c73bab4e6d18b8b9ab4641c46
-                        shell: Sh
+                        shell: Powershell
                         command: |-
                           . ./scripts/setup-go-windows.ps1
                           echo $env:DRONE_SEMVER_SHORT
                           go build -o release/windows/amd64/drone-cache.exe
+                          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                         envVariables:
                           CGO_ENABLED: "0"
                   - step:
@@ -563,11 +564,12 @@ pipeline:
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
                         image: golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
-                        shell: Sh
+                        shell: Powershell
                         command: |-
                           . ./scripts/setup-go-windows.ps1
                           echo $env:DRONE_SEMVER_SHORT
                           go build -o release/windows/amd64/drone-cache.exe
+                          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                         envVariables:
                           CGO_ENABLED: "0"
                   - step:
