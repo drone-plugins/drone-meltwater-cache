@@ -1,5 +1,5 @@
 FROM golang:1.26.10-alpine3.23 AS builder
-RUN apk add --update --no-cache ca-certificates tzdata && update-ca-certificates
+RUN apk add --update --no-cache 'ca-certificates>=20261020-r0' tzdata && update-ca-certificates
 RUN addgroup -g 65532 -S nonroot && adduser -u 65532 -S nonroot -G nonroot
 
 FROM scratch as runner

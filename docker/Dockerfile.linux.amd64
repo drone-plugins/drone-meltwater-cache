@@ -1,5 +1,5 @@
 FROM golang:1.26.10-alpine3.23 AS builder
-RUN apk add --update --no-cache ca-certificates tzdata busybox-static && update-ca-certificates
+RUN apk add --update --no-cache 'ca-certificates>=20261020-r0' tzdata busybox-static && update-ca-certificates
 
 FROM scratch as runner
 

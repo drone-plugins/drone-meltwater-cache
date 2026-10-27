@@ -357,8 +357,9 @@ platform:
 
 steps:
   - name: build
-    image: golang:1.26.10
+    image: golang:1.23.0
     commands:
+      - . ./scripts/setup-go-windows.ps1
       - echo $env:DRONE_SEMVER_SHORT
       - go build -o release/windows/amd64/drone-cache.exe
     environment:
