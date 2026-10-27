@@ -1,9 +1,9 @@
 # escape=`
-FROM mcr.microsoft.com/windows/servercore:ltsc2022@sha256:b52799a67fa596d4bddcd82ae1dab0077a84767fbc33c7342b72b53ecc71ad09 as roots
+FROM mcr.microsoft.com/windows/servercore:ltsc2022 as roots
 COPY docker/windows/ C:/roots-src/
 RUN powershell -NoProfile -ExecutionPolicy Bypass -File C:\roots-src\export-roots.ps1
 
-FROM plugins/base:windows-ltsc2022-amd64@sha256:b0e662a71fbe8a28147fae27a68aa4bc5236c02bbe3400513bbefdb0469a50ce
+FROM plugins/base:windows-ltsc2022-amd64@sha256:0f90d5bceb432f1ee6f93cf44eed6a38c322834edd55df8a6648c9e6f15131f4
 USER ContainerAdministrator
 SHELL ["cmd", "/S", "/C"]
 

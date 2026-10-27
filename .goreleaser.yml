@@ -113,8 +113,6 @@ dockers:
     skip_push: auto
     dockerfile: Dockerfile
     build_flag_templates:
-    - "--pull"
-    - "--no-cache"
     - "--label=org.label-schema.schema-version=1.0"
     - "--label=version={{.Version}}"
     - "--label=org.label-schema.name={{.ProjectName}}"
