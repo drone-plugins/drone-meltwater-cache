@@ -90,23 +90,13 @@ pipeline:
                       mc admin policy add minio userpolicy /tmp/policy.json
               - step:
                   type: Run
-                  name: Prepare patched Go SDK
-                  identifier: build_GoSDK
-                  spec:
-                    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
-                    shell: Sh
-                    command: mkdir -p .hhi-go-toolchain && cp -a /usr/lib/go/. .hhi-go-toolchain/
-                    connectorRef: HHI_Public_Images
-              - step:
-                  type: Run
                   name: build
                   identifier: build
                   spec:
-                    connectorRef: HHI_Public_Images
-                    image: harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1@sha256:290a37c85b4284d2c11fa0778e5da79643d912a1f5a57d6f701b77644503b7e7
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: golang:1.26.10-alpine3.23@sha256:34414731924cf2263160f0021f5cf6e1807382d85248f7cb419d4187b96d5e43
                     shell: Sh
                     command: |-
-                      export PATH="$PWD/.hhi-go-toolchain/bin:$PATH" GOPATH=/go GOTOOLCHAIN=local
                       apk add --update make git
                       make drone-cache
                     envVariables:
@@ -117,8 +107,8 @@ pipeline:
                   name: test
                   identifier: test
                   spec:
-                    connectorRef: HHI_Public_Images
-                    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: golang:1.26.10-alpine3.23@sha256:34414731924cf2263160f0021f5cf6e1807382d85248f7cb419d4187b96d5e43
                     shell: Sh
                     command: go test -mod=vendor -short -cover -tags=integration -timeout 20m ./...
                     envVariables:
@@ -333,8 +323,8 @@ pipeline:
                       type: Run
                       name: build
                       spec:
-                        connectorRef: HHI_Public_Images
-                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
                         shell: Sh
                         command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
                         envVariables:
@@ -346,8 +336,8 @@ pipeline:
                       name: build-tag
                       identifier: Run_2_2
                       spec:
-                        connectorRef: HHI_Public_Images
-                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
                         shell: Sh
                         command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/arm64/drone-cache
                         envVariables:
@@ -364,9 +354,6 @@ pipeline:
                         settings:
                           pull_image: true
                           no_cache: true
-                          base_image_registry: harness0.harness.io
-                          base_image_username: <+secrets.getValue("harness0HARUsername")>
-                          base_image_password: <+secrets.getValue("harness0HARPAT")>
                           username: drone
                           password: <+secrets.getValue("Plugins_Docker_Hub_Pat")>
                           repo: plugins/cache
@@ -385,8 +372,6 @@ pipeline:
                           PLUGIN_NO_CACHE: "true"
                           PLUGIN_PULL_IMAGE: "true"
                           PLUGIN_ENABLE_CACHE: "false"
-                        baseImageConnectorRefs:
-                          - HHI_Public_Images
                         connectorRef: Plugins_Docker_Hub_Connector
                         repo: plugins/cache
                         tags:
@@ -419,8 +404,8 @@ pipeline:
                       name: build-push
                       identifier: Run_1_1
                       spec:
-                        connectorRef: HHI_Public_Images
-                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
                         shell: Sh
                         command: go build -v -ldflags "-X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
                         envVariables:
@@ -432,8 +417,8 @@ pipeline:
                       name: build-tag
                       identifier: Run_1_2
                       spec:
-                        connectorRef: HHI_Public_Images
-                        image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
+                        connectorRef: Plugins_Docker_Hub_Connector
+                        image: golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
                         shell: Sh
                         command: go build -v -ldflags "-X main.version=${DRONE_TAG##v} -X main.build=${DRONE_BUILD_NUMBER}" -a -o release/linux/amd64/drone-cache
                         envVariables:
@@ -450,9 +435,6 @@ pipeline:
                         settings:
                           pull_image: true
                           no_cache: true
-                          base_image_registry: harness0.harness.io
-                          base_image_username: <+secrets.getValue("harness0HARUsername")>
-                          base_image_password: <+secrets.getValue("harness0HARPAT")>
                           username: drone
                           password: <+secrets.getValue("Plugins_Docker_Hub_Pat")>
                           repo: plugins/cache
@@ -471,8 +453,6 @@ pipeline:
                           PLUGIN_NO_CACHE: "true"
                           PLUGIN_PULL_IMAGE: "true"
                           PLUGIN_ENABLE_CACHE: "false"
-                        baseImageConnectorRefs:
-                          - HHI_Public_Images
                         connectorRef: Plugins_Docker_Hub_Connector
                         repo: plugins/cache
                         tags:
@@ -509,13 +489,13 @@ pipeline:
                       name: build
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.23.0
+                        image: golang:1.23.0@sha256:acfb46be39840f8c2a6b9efdd673c6627011200c73bab4e6d18b8b9ab4641c46
                         shell: Sh
                         command: |-
+                          . ./scripts/setup-go-windows.ps1
                           echo $env:DRONE_SEMVER_SHORT
                           go build -o release/windows/amd64/drone-cache.exe
                         envVariables:
-                          GOTOOLCHAIN: go1.26.10
                           CGO_ENABLED: "0"
                   - step:
                       type: Plugin
@@ -582,13 +562,13 @@ pipeline:
                       name: build
                       spec:
                         connectorRef: Plugins_Docker_Hub_Connector
-                        image: golang:1.26.10
+                        image: golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
                         shell: Sh
                         command: |-
+                          . ./scripts/setup-go-windows.ps1
                           echo $env:DRONE_SEMVER_SHORT
                           go build -o release/windows/amd64/drone-cache.exe
                         envVariables:
-                          GOTOOLCHAIN: go1.26.10
                           CGO_ENABLED: "0"
                   - step:
                       type: Plugin
@@ -689,29 +669,20 @@ pipeline:
             steps:
               - step:
                   type: Run
-                  name: Prepare patched Go SDK
-                  identifier: Run_1_GoSDK
-                  spec:
-                    image: harness0.harness.io/oci/docker_artifacts/hhi/go:1.26.10@sha256:718fddf012b3a305e936ae9964e5a642036bcb7b4c6c0786e2f78f238d637db8
-                    shell: Sh
-                    command: mkdir -p .hhi-go-toolchain && cp -a /usr/lib/go/. .hhi-go-toolchain/
-                    connectorRef: HHI_Public_Images
-              - step:
-                  type: Run
                   name: Build binaries
                   identifier: Run_1
                   spec:
-                    connectorRef: HHI_Public_Images
-                    image: harness0.harness.io/oci/docker_artifacts/hhi/harnessos-alpine:1@sha256:290a37c85b4284d2c11fa0778e5da79643d912a1f5a57d6f701b77644503b7e7
+                    connectorRef: Plugins_Docker_Hub_Connector
+                    image: golang:1.26.10@sha256:24a707af49702fa44f02785475d02fb752f6982d3e9c0afb7696e1f0204e7ce9
                     shell: Sh
                     command: |-
-                      export PATH="$PWD/.hhi-go-toolchain/bin:$PATH" GOPATH=/go GOTOOLCHAIN=local
                       GOOS=linux   GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-amd64
                       GOOS=linux   GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-linux-arm64
                       GOOS=darwin  GOARCH=arm64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-darwin-arm64
                       GOOS=windows GOARCH=amd64   go build -ldflags "-s -w -X main.version=${DRONE_TAG##v}" -o release/plugin-windows-amd64
 
-                      apk add --no-cache zstd
+                      apt-get update -y
+                      apt-get install -y zstd
                       zstd release/plugin-linux-amd64
                       zstd release/plugin-linux-arm64
                       zstd release/plugin-darwin-arm64

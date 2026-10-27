@@ -23,7 +23,7 @@ BIN_DIR               ?= $(ROOT_DIR)/tmp/bin
 UPX                   := upx
 
 DOCKER                := docker
-DOCKER_BUILD          := $(DOCKER) build
+DOCKER_BUILD          := $(DOCKER) build --pull --no-cache
 DOCKER_PUSH           := $(DOCKER) push
 DOCKER_COMPOSE        := docker-compose
 

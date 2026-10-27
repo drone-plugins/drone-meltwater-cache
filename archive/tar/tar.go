@@ -241,10 +241,6 @@ func (a *Archive) Extract(dst string, r io.Reader) (int64, error) {
 
 	for {
 		h, err := tr.Next()
-		// Absolute cache mounts are supported; non-local relative names remain invalid.
-		if errors.Is(err, tar.ErrInsecurePath) && h != nil && filepath.IsAbs(h.Name) {
-			err = nil
-		}
 		if err == io.EOF {
 			break
 		}
