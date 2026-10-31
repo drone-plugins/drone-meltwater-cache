@@ -27,31 +27,48 @@ Treat the first argument as a workflow command:
 /add-build-tool-caching <command> [arguments]
 ```
 
-Natural-language equivalents are valid. Read [COMMANDS.md](COMMANDS.md) before executing a command.
+Natural-language equivalents are valid. Read [COMMANDS.md](COMMANDS.md) before executing a command: it defines what each gate checks and what it writes.
 
-Run phases through the executable CLI (non-zero exit code = gate failure):
+Every phase runs through the executable CLI; a non-zero exit code means the gate did not pass:
 
 ```bash
-./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh all --tool <name> --env qa0
+CLI=./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh
+$CLI help
+$CLI status --tool cargo --worker-id w1          # gate table and the next command
+$CLI research --tool cargo --worker-id w1        # writes research.md, exits 2 until it is complete
+$CLI test --tool cargo --worker-id w1 --public   # real tool on a pinned public project: cold, warm, offline, invalidation
+$CLI report --tool cargo --worker-id w1          # REPORT.md and both PR bodies, generated from recorded evidence
 ```
 
-Harness worker runs (pipeline `tempai`, agent `cache_intel_worker`) are split into two agent phases:
+The research record is the single source of truth for later gates: its Fields list (fixture, install command, cache paths, cache env, warm-check path, invalidation file) drives the public lifecycle, the remote pipelines and the harness-core change, so no later command needs those values again.
 
-- `implement`: code, tests, local gates, and a local commit on `feat/<tool>-caching-<worker_id>`.
-- `remote-validate`: test the candidate image that the pipeline built between the phases. The agent container has no Docker daemon. The pipeline pushes the image with the native `BuildAndPushDockerRegistry` step, using the credentials of the `docker_connector` runtime input.
+### Harness worker runs
 
-Remote validation never edits shared templates. `cache-intel.sh remote-setup` renders a per-worker pipeline (`ci_intel_<tool>_<worker>`, from [scripts/remote-pipeline.tmpl.yaml](scripts/remote-pipeline.tmpl.yaml)) that runs the candidate image directly. It maps `HARNESS_CACHE_SERVICE_TOKEN` / `HARNESS_CACHE_SERVICE_ENDPOINT` / `HARNESS_ACCOUNT_ID` to the plugin's cache-service settings, so it uses the real Harness cache backend scoped to that pipeline. Read failed step logs with [scripts/fetch-step-log.sh](scripts/fetch-step-log.sh) and the `download_url` from `harness_get(resource_type=execution_log, params={return_download_url: true})`.
+The orchestration pipeline `tempai` (QA0, `default`/`qajt`) takes `build_tool` and `worker_id`, plus optional `jira_id`, `harness_core` (default true), `product_path` (default false) and `open_pr` (default true). It runs the agent `cache_intel_worker` in phases. Each worker has its own branch, state directory, image tag, validation pipelines, fixture repository and PRs, so several workers can run in parallel; only `product_path` runs must not overlap, because they share the account-level image override.
 
-Commands and routing rules are defined in [COMMANDS.md](COMMANDS.md).
+| Step | Who | What |
+|------|-----|------|
+| `prepare_harness_core` | pipeline | sparse, shallow clone of harness-core `develop` (only the six files the env injection touches) into `<git-common-dir>/cache-intel/harness-core`, using secret `harness0_code_pat`; the token is stripped from the remote before the agent runs |
+| `implement` | agent | research, design, code and tests, the local and public-project gates, the harness-core env commit (when research sets `cache_env`), `REPORT.md`, one local commit on `feat/<tool>-caching-<worker>` |
+| `build_binary`, `push_candidate_image` | pipeline | build and push `<docker_repo>:<tool>-<worker>-<sequence>` with `BuildAndPushDockerRegistry` |
+| `remote_validate` | agent | creates and runs `ci_intel_<tool>_<worker>` on QA0 (cold, warm, invalidate) with the candidate image, records the evidence, regenerates the report, amends the commit |
+| `product_override_on` | pipeline | `product_path` only: sets the account-level VM `cacheTag` to the candidate; refuses when another candidate holds it |
+| `remote_product` | agent | `product_path` only: creates the Harness Code fixture repository and runs `ci_intel_<tool>_<worker>_product` (stage `caching.enabled`) twice: seed, then warm |
+| `product_override_off` | pipeline | always runs: resets `cacheTag`, but only when it still points at this run's candidate |
+| `push_branch_and_pr` | pipeline | pushes the branch and opens or refreshes the draft drone-cache PR from `out/PR_BODY.md` |
+| `harness_core_pr` | pipeline | pushes the harness-core branch and opens or refreshes the draft harness-core PR from `out/HARNESS_CORE_PR.md`; links the two PRs to each other |
+| `summary` | pipeline | prints the terminal state, PR links and the latest result of every gate |
+
+The agent container has no Docker daemon and never pushes, publishes, toggles account settings or opens PRs. Remote validation never edits shared templates: the per-worker pipeline runs the candidate image directly against the real Harness cache backend (`HARNESS_CACHE_SERVICE_TOKEN`, `HARNESS_CACHE_SERVICE_ENDPOINT`, `HARNESS_ACCOUNT_ID`), and sets the research `cache_env` as a stage variable, which is exactly what the harness-core change injects. Read step logs with [scripts/fetch-step-log.sh](scripts/fetch-step-log.sh) and the `download_url` from `harness_get(resource_type=execution_log, params={return_download_url: true})`.
 
 Examples:
 
 ```text
 /add-build-tool-caching research --tool cargo
 /add-build-tool-caching create --tool uv
-/add-build-tool-caching test --tool uv --local
-/add-build-tool-caching remote-test --env qa0 --pipeline <id>
-/add-build-tool-caching all --tool pnpm --env qa0
+/add-build-tool-caching test --tool uv --public
+/add-build-tool-caching remote-test --tool cargo --run warm --env qa0
+/add-build-tool-caching all --tool pnpm --local
 ```
 
 Select the narrowest matching explicit command. A natural-language request to **add**, **implement**, or **support** a tool is an implementation request: autonomously run through local validation and reporting, not merely research. Do not turn explicit `research`, `test`, or `status` requests into implementation or remote mutation.
@@ -341,7 +358,7 @@ Add compatibility tests where affected:
 
 ### 6. Validate locally with restore/save/restore
 
-Exercise the actual cache lifecycle, not only autodetection. Start from the local lifecycle recipe in `ENGINE.md`. The existing `scripts/*-cache-smoke.sh` scripts populate dummy files and prove plumbing only; extend them with a real install when reusing them.
+Exercise the actual cache lifecycle, not only autodetection. `cache-intel.sh test --public` runs steps 1–8 and 10 below against the research fixture and records timings, archive size and keys; add a functional build (step 9) by hand when the tool's cache affects compilation. When the tool is not installed in the agent container, install it in user space (for example `rustup` with `--profile minimal` into a temporary `CARGO_HOME`/`RUSTUP_HOME`, `pip install --user`, or a release tarball) and put it on PATH; do not skip the gate. For manual diagnosis, start from the local lifecycle recipe in `ENGINE.md`. The existing `scripts/*-cache-smoke.sh` scripts populate dummy files and prove plumbing only; extend them with a real install when reusing them.
 
 1. Start with an empty backend namespace or unique key.
 2. Run restore and confirm the miss is non-fatal.
@@ -373,7 +390,7 @@ Capture:
 - restore/save overhead and transferred bytes.
 
 ### 7. Build and pin a candidate image
-Build the candidate plugin image using the repository's established process (`docker/Dockerfile.*` with a prebuilt `release/<os>/<arch>/` binary; see `ENGINE.md`). Publish only with explicit publication authorization; authorization to run a remote test does not itself authorize publication.
+Build the candidate plugin image using the repository's established process (`docker/Dockerfile.*` with a prebuilt `release/<os>/<arch>/` binary; see `ENGINE.md`). Publish only with explicit publication authorization; authorization to run a remote test does not itself authorize publication. In Harness worker runs the orchestration pipeline builds and pushes `<registry>/drone-cache:<tool>-<worker>-<sequence>` between phases; the agent only runs `cache-intel.sh build` to prove the release targets compile.
 
 Requirements:
 
@@ -391,7 +408,7 @@ Keep baseline and candidate pipelines separate when comparing old and new behavi
 
 ### 8. Test in the target environment
 
-Use a real representative project for every supported manager or mode.
+Use a real representative project for every supported manager or mode. In worker runs, `cache-intel.sh remote-setup` renders the pipeline and its `scenario` input implements runs 1–3 deterministically; record each with `remote-test` (see COMMANDS.md for the log markers each run must show).
 
 For each case, run:
 

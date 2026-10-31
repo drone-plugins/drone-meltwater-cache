@@ -3,24 +3,40 @@ pipeline:
   identifier: __PIPELINE_ID__
   projectIdentifier: __PROJECT__
   orgIdentifier: __ORG__
-  description: Cache Intelligence remote validation for __TOOL__ (worker __WORKER__) using __IMAGE__
+  description: "Cache Intelligence validation for __TOOL__ (worker __WORKER__): runs candidate __IMAGE__ directly against the Harness cache backend. Rendered by cache-intel.sh remote-setup; do not edit by hand."
   tags:
     cache_intel: ""
     tool: __TOOL__
     worker: __WORKER__
+#@if harness_code
+  properties:
+    ci:
+      codebase:
+        repoName: __HC_REPO__
+        build:
+          type: branch
+          spec:
+            branch: __HC_BRANCH__
+#@end
   variables:
-    - name: expect_warm
+    - name: scenario
       type: String
-      description: Set to true on the second run; fails the run if the cache was not restored.
-      required: false
-      value: <+input>.default(false).allowedValues(true,false)
+      description: "cold: no restore, true cold install, then save. warm: restore must hit before install. invalidate: a changed lockfile must miss (never saves)."
+      required: true
+      value: <+input>.default(cold).allowedValues(cold,warm,invalidate)
   stages:
     - stage:
         name: validate
         identifier: validate
         type: CI
+        description: Stage variables simulate the cache env that harness-core injects when Cache Intelligence is enabled.
+        variables:__STAGE_VARIABLES__
         spec:
+#@if harness_code
+          cloneCodebase: true
+#@else
           cloneCodebase: false
+#@end
           caching:
             enabled: false
           platform:
@@ -35,6 +51,7 @@ pipeline:
                   type: Run
                   name: fetch_fixture
                   identifier: fetch_fixture
+                  timeout: 10m
                   spec:
                     connectorRef: __DOCKER_CONNECTOR__
                     image: alpine:3.20
@@ -42,20 +59,49 @@ pipeline:
                     envVariables:
                       FIXTURE_REPO: "__FIXTURE_REPO__"
                       FIXTURE_REF: "__FIXTURE_REF__"
+                      FIXTURE_SOURCE: __FIXTURE_SOURCE__
                     command: |-
                       set -eu
                       apk add --no-cache git >/dev/null
-                      rm -rf /harness/fixture
-                      if [ -n "$FIXTURE_REF" ]; then
-                        git clone --depth 1 --branch "$FIXTURE_REF" "$FIXTURE_REPO" /harness/fixture
-                      else
-                        git clone --depth 1 "$FIXTURE_REPO" /harness/fixture
+                      git config --global --add safe.directory '*'
+                      cd /harness
+                      if [ "$FIXTURE_SOURCE" = "github" ]; then
+                        git init -q .
+                        git remote add origin "$FIXTURE_REPO"
+                        git fetch -q --depth 1 origin "$FIXTURE_REF"
+                        git checkout -q FETCH_HEAD
                       fi
-                      echo "FIXTURE_SHA=$(git -C /harness/fixture rev-parse HEAD)"
+                      echo "FIXTURE=$FIXTURE_REPO@$FIXTURE_REF"
+                      echo "FIXTURE_SHA=$(git rev-parse HEAD)"
+                      env | grep -E '^(__ENV_NAMES__)=' || echo "CACHE_ENV=none"
+              - step:
+                  type: Run
+                  name: invalidate_key
+                  identifier: invalidate_key
+                  timeout: 5m
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.variables.scenario> == "invalidate"
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: alpine:3.20
+                    shell: Sh
+                    envVariables:
+                      INVALIDATE_FILE: "__INVALIDATE_FILE__"
+                    command: |-
+                      set -eu
+                      cd /harness
+                      echo "before=$(md5sum "$INVALIDATE_FILE" | cut -d' ' -f1)"
+                      printf '\n' >> "$INVALIDATE_FILE"
+                      echo "after=$(md5sum "$INVALIDATE_FILE" | cut -d' ' -f1)"
               - step:
                   type: Run
                   name: restore_candidate
                   identifier: restore_candidate
+                  timeout: 15m
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.variables.scenario> != "cold"
                   spec:
                     connectorRef: __DOCKER_CONNECTOR__
                     image: __IMAGE__
@@ -72,7 +118,7 @@ pipeline:
                       export PLUGIN_CACHE_SERVICE_BEARER_TOKEN="$HARNESS_CACHE_SERVICE_TOKEN"
                       export PLUGIN_CACHE_SERVICE_BASE_URL="$HARNESS_CACHE_SERVICE_ENDPOINT"
                       export PLUGIN_ACCOUNT_ID="$HARNESS_ACCOUNT_ID"
-                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
+                      cd /harness
                       /bin/drone-cache
                   failureStrategies:
                     - onFailure:
@@ -84,47 +130,94 @@ pipeline:
                   type: Run
                   name: verify_restore
                   identifier: verify_restore
+                  timeout: 5m
                   spec:
                     connectorRef: __DOCKER_CONNECTOR__
                     image: alpine:3.20
                     shell: Sh
                     envVariables:
-                      EXPECT_WARM: <+pipeline.variables.expect_warm>
+                      SCENARIO: <+pipeline.variables.scenario>
                       WARM_CHECK: "__WARM_CHECK__"
                     command: |-
                       set -eu
-                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
-                      if [ -e "$WARM_CHECK" ] && [ -n "$(ls -A "$WARM_CHECK" 2>/dev/null)" ]; then
-                        echo "CACHE_STATE=warm path=$WARM_CHECK"
-                        du -sh "$WARM_CHECK" || true
-                      else
-                        echo "CACHE_STATE=cold path=$WARM_CHECK"
-                        if [ "$EXPECT_WARM" = "true" ]; then
-                          echo "REMOTE_ASSERT=FAIL expected warm restore of $WARM_CHECK"
-                          exit 1
-                        fi
+                      cd /harness
+                      present=false
+                      if [ -e "$WARM_CHECK" ] && [ -n "$(ls -A "$WARM_CHECK" 2>/dev/null)" ]; then present=true; fi
+                      kb=0
+                      if [ "$present" = true ]; then kb=$(du -sk "$WARM_CHECK" | cut -f1); fi
+                      state=cold
+                      if [ "$present" = true ]; then state=warm; fi
+                      echo "CACHE_STATE=$state path=$WARM_CHECK kb=$kb scenario=$SCENARIO"
+                      RESTORED_KB=$kb
+                      if [ "$SCENARIO" = "warm" ] && [ "$present" != true ]; then
+                        echo "REMOTE_ASSERT=FAIL warm run did not restore $WARM_CHECK"
+                        exit 1
+                      fi
+                      if [ "$SCENARIO" != "warm" ] && [ "$present" = true ]; then
+                        echo "REMOTE_ASSERT=FAIL $SCENARIO run unexpectedly found $WARM_CHECK"
+                        exit 1
                       fi
                       echo "REMOTE_ASSERT=PASS"
+                    outputVariables:
+                      - name: RESTORED_KB
+              - step:
+                  type: Run
+                  name: offline_check
+                  identifier: offline_check
+                  timeout: 15m
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.variables.scenario> == "warm"
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __INSTALL_IMAGE__
+                    shell: Sh
+                    envVariables:
+                      OFFLINE_CMD: "__OFFLINE_CMD__"
+                    command: |-
+                      set -eu
+                      cd "/harness/__FIXTURE_SUBDIR__"
+                      if [ -z "$OFFLINE_CMD" ]; then echo "OFFLINE_CHECK=skipped"; exit 0; fi
+                      t0=$(cut -d' ' -f1 /proc/uptime)
+                      sh -c "$OFFLINE_CMD"
+                      t1=$(cut -d' ' -f1 /proc/uptime)
+                      echo "OFFLINE_CHECK=PASS seconds=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')"
               - step:
                   type: Run
                   name: install
                   identifier: install
+                  timeout: 30m
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.variables.scenario> != "invalidate"
                   spec:
                     connectorRef: __DOCKER_CONNECTOR__
                     image: __INSTALL_IMAGE__
                     shell: Sh
                     envVariables:
                       INSTALL_CMD: "__INSTALL_CMD__"
+                      WARM_CHECK: "__WARM_CHECK__"
                     command: |-
                       set -eu
-                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
-                      start=$(date +%s)
+                      cd "/harness/__FIXTURE_SUBDIR__"
+                      t0=$(cut -d' ' -f1 /proc/uptime)
                       sh -c "$INSTALL_CMD"
-                      echo "TIMING_install_seconds=$(( $(date +%s) - start ))"
+                      t1=$(cut -d' ' -f1 /proc/uptime)
+                      INSTALL_SECONDS=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')
+                      CACHE_KB=$(du -sk "/harness/$WARM_CHECK" 2>/dev/null | cut -f1 || echo 0)
+                      echo "TIMING_install_seconds=$INSTALL_SECONDS"
+                      echo "CACHE_KB=$CACHE_KB"
+                    outputVariables:
+                      - name: INSTALL_SECONDS
+                      - name: CACHE_KB
               - step:
                   type: Run
                   name: save_candidate
                   identifier: save_candidate
+                  timeout: 15m
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.variables.scenario> != "invalidate"
                   spec:
                     connectorRef: __DOCKER_CONNECTOR__
                     image: __IMAGE__
@@ -141,5 +234,5 @@ pipeline:
                       export PLUGIN_CACHE_SERVICE_BEARER_TOKEN="$HARNESS_CACHE_SERVICE_TOKEN"
                       export PLUGIN_CACHE_SERVICE_BASE_URL="$HARNESS_CACHE_SERVICE_ENDPOINT"
                       export PLUGIN_ACCOUNT_ID="$HARNESS_ACCOUNT_ID"
-                      cd "/harness/fixture/__FIXTURE_SUBDIR__"
+                      cd /harness
                       /bin/drone-cache

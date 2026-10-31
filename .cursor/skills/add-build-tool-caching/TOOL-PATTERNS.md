@@ -73,6 +73,10 @@ Credential locations to exclude: user-level `.npmrc`, `.yarnrc.yml` with tokens,
 - **Integrity**: caches are shared across branches and pull requests. Prefer content the tool verifies against the lockfile (npm integrity, `go.sum`, Cargo checksums, uv/Poetry hashes). Flag tools that execute unverified cached content.
 - **Platform defaults**: on Linux the default cache usually follows `XDG_CACHE_HOME` or `~/.cache`; on macOS `~/Library/Caches`; on Windows `%LOCALAPPDATA%`. The plugin ships Windows images, so default-location logic must use `filepath` and must not assume POSIX home layouts.
 - **Concurrent writers**: parallel stages can save the same key, and the last writer wins. This is acceptable only if every writer produces equivalent content.
+- **Cache outside the workspace by default**: when the tool's default cache is under `$HOME` (Cargo, Bundler, Composer, Maven, sbt), the build container writes there unless a variable points into the workspace. Record that variable as `cache_env` in research; it becomes the harness-core injection and the stage variable used in remote validation.
+- **Home variables move more than the cache**: `CARGO_HOME`, `GRADLE_USER_HOME`, `BUNDLE_PATH`-style variables also relocate user config, credentials and installed binaries, and harness-core sets them for every step. Prefer a cache-only variable when the tool has one (`npm_config_cache`, `PIP_CACHE_DIR`); otherwise record the fallout in `cache_env_side_effects`.
+- **Relative env values**: tools resolve relative cache variables against their own cwd (Cargo `CARGO_HOME`) or against the config file location. harness-core injects absolute paths; tests should cover both.
+- **Unarchived side files**: some tools keep a tracker or lock next to the cache (Cargo's `.global-cache` SQLite file, `.package-cache`). Leaving them out is correct, but the first invocation after a restore rebuilds them; on slow file systems (Docker bind mounts on macOS) that can take seconds, so take performance numbers from the remote runs.
 
 ## Value check
 

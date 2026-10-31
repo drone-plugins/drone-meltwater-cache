@@ -1,0 +1,99 @@
+pipeline:
+  name: __PIPELINE_ID__
+  identifier: __PIPELINE_ID__
+  projectIdentifier: __PROJECT__
+  orgIdentifier: __ORG__
+  description: "Cache Intelligence product-path validation for __TOOL__ (worker __WORKER__): stage caching.enabled with the account-level cache image overridden to __IMAGE__ by the orchestrator. Rendered by cache-intel.sh remote-setup --product; do not edit by hand."
+  tags:
+    cache_intel: ""
+    cache_intel_product: ""
+    tool: __TOOL__
+    worker: __WORKER__
+  properties:
+    ci:
+      codebase:
+        repoName: __HC_REPO__
+        build:
+          type: branch
+          spec:
+            branch: __HC_BRANCH__
+  variables:
+    - name: expect_warm
+      type: String
+      description: true on the second run; the run fails if Cache Intelligence did not restore the cache.
+      required: true
+      value: <+input>.default(false).allowedValues(true,false)
+  stages:
+    - stage:
+        name: product
+        identifier: product
+        type: CI
+        description: Stage variables simulate the cache env that harness-core injects when Cache Intelligence is enabled.
+        variables:__STAGE_VARIABLES__
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: verify_restore
+                  identifier: verify_restore
+                  timeout: 5m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: alpine:3.20
+                    shell: Sh
+                    envVariables:
+                      EXPECT_WARM: <+pipeline.variables.expect_warm>
+                      WARM_CHECK: "__WARM_CHECK__"
+                    command: |-
+                      set -eu
+                      cd /harness
+                      if [ -e "$WARM_CHECK" ] && [ -n "$(ls -A "$WARM_CHECK" 2>/dev/null)" ]; then
+                        RESTORED_KB=$(du -sk "$WARM_CHECK" | cut -f1)
+                        echo "CACHE_STATE=warm path=$WARM_CHECK kb=$RESTORED_KB"
+                      else
+                        RESTORED_KB=0
+                        echo "CACHE_STATE=cold path=$WARM_CHECK"
+                        if [ "$EXPECT_WARM" = "true" ]; then
+                          echo "REMOTE_ASSERT=FAIL Cache Intelligence did not restore $WARM_CHECK"
+                          exit 1
+                        fi
+                      fi
+                      echo "REMOTE_ASSERT=PASS"
+                    outputVariables:
+                      - name: RESTORED_KB
+              - step:
+                  type: Run
+                  name: install
+                  identifier: install
+                  timeout: 30m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __INSTALL_IMAGE__
+                    shell: Sh
+                    envVariables:
+                      INSTALL_CMD: "__INSTALL_CMD__"
+                      WARM_CHECK: "__WARM_CHECK__"
+                    command: |-
+                      set -eu
+                      cd "/harness/__FIXTURE_SUBDIR__"
+                      t0=$(cut -d' ' -f1 /proc/uptime)
+                      sh -c "$INSTALL_CMD"
+                      t1=$(cut -d' ' -f1 /proc/uptime)
+                      INSTALL_SECONDS=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')
+                      CACHE_KB=$(du -sk "/harness/$WARM_CHECK" 2>/dev/null | cut -f1 || echo 0)
+                      echo "TIMING_install_seconds=$INSTALL_SECONDS"
+                      echo "CACHE_KB=$CACHE_KB"
+                    outputVariables:
+                      - name: INSTALL_SECONDS
+                      - name: CACHE_KB

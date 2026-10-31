@@ -1,411 +1,166 @@
 # Command Reference
 
-Use this file with `SKILL.md`. Commands are workflow selectors; agents and CI should execute them through the repo CLI:
+Use this file with `SKILL.md`. Every workflow command is a gate implemented by the repo CLI. A non-zero exit means the gate did not pass: fix the cause, or fill the requested document, and re-run the same command.
 
 ```bash
-./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh <command> --tool <name> [options]
+CLI=./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh
+$CLI <command> --tool <name> --worker-id <id> [options]
 ```
 
-Interpret a natural-language or slash-style request such as:
+Natural-language and slash-style requests (`/add-build-tool-caching research --tool uv`) map onto these commands. Never require exact syntax from the user.
+
+## Order and gates
 
 ```text
-/add-build-tool-caching research --tool uv
-/add-build-tool-caching create --tool cargo
-/add-build-tool-caching remote-test --env qa0 --pipeline <id>
-/add-build-tool-caching all --tool pnpm --env qa0
+research → design → create → test --all → build → finalize → harness-core      (implement phase)
+remote-setup → remote-test cold → warm → invalidate [→ product-seed → product-warm]   (remote phases)
+validate → report
 ```
 
-Equivalent natural-language requests are valid. Never require the user to use exact syntax.
+| Command | Passes when | Writes |
+|---------|-------------|--------|
+| `research` | every Field is filled, `cache_env` is `none` or `KEY=relative-dir`, no TODO remains, and Sources has two or more URLs | `research.md` (scaffold on first run, exit 2) |
+| `design` | research passed and every design section is filled | `design.md` (scaffold on first run, exit 2) |
+| `create` | design passed, the tool is in `buildToolInfoMapping`, and at least one test whose name contains the tool passed | `evidence/create.log` |
+| `test --local-test` | `go test` (autodetect, plugin, cache), `go vet ./...`, `go build ./...`, and gofmt on changed files | `evidence/test-local.log` |
+| `test --compatibility` | at least one `*Scenario*<tool>*` test passed, plus the full autodetect suite (legacy keys and paths) | `evidence/test-compatibility.log` |
+| `test --lifecycle` | in-repo fixtures from `tool-profiles.env` restore after a wipe (SKIPPED when there is no profile or the tool is missing) | `evidence/lifecycle-*.log` |
+| `test --public` | the public fixture from research survives the full lifecycle below | `metrics.env`, `evidence/public-*` |
+| `build` | linux/amd64, linux/arm64 and windows/amd64 binaries compile | `release/` |
+| `finalize` | README.md and CHANGELOG.md mention the tool | |
+| `harness-core` | NOT_APPLICABLE when `cache_env` is none or already injected; otherwise the env injection is committed in the harness-core checkout (BLOCKED when there is no checkout) | `out/harness-core.*` |
+| `remote-setup` | research passed and `--image` is given | `remote/<pipeline>.yaml` |
+| `remote-test` | `--result PASS` (records a Harness run; FAIL exits 1) | `remote/runs.tsv` |
+| `validate` | no gate FAILED and none is missing | `out/summary.env` |
+| `report` | always (regenerates from state) | `REPORT.md`, `out/PR_BODY.md`, `out/HARNESS_CORE_PR.md` |
 
-## Common arguments
-
-Infer arguments from conversation, repository, saved command state, and environment before asking.
-
-```text
---language <name>       Language ecosystem
---tool <name>           Package manager or build tool
---manager <name>        Alias for --tool
---repo <path|url>       Source repository or fixture
---branch <name>         Source branch
---env <name|url>        Target environment or Harness URL
---account <id>          Harness account
---org <id>              Harness organization
---project <id>          Harness project
---pipeline <id|url>     Harness pipeline
---execution <id|url>    Harness execution
---image <tag|digest>    Candidate plugin image
---baseline <tag|sha>    Baseline revision or image
---mode <v0|v1>          Pipeline generation/runtime mode
---from <command>        Resume from a named command
---local                  Complete through local lifecycle without remote work
---worker-id <id>         Stable coordinator-assigned ID for parallel work
---dry-run                Produce design/payloads without writes
-```
-
-Infer missing values with `AUTONOMY.md`. Ask only for a user-owned decision under its interruption policy. Harness write operations require known organization and project scope unless the resource is intentionally account-scoped.
-
-## Command routing
-
-Supported commands:
-
-- `help`: show commands, expected arguments, and examples.
-- `status`: summarize completed evidence, current phase, blockers, and next command.
-- `research`: gather requirements and verify build-tool behavior.
-- `design`: produce detection, path, key, compatibility, and test design.
-- `create`: implement the smallest complete code-and-test increment.
-- `test`: run local unit, scenario, regression, and cache-lifecycle tests.
-- `build`: build the candidate binary/image and record immutable identity.
-- `finalize`: update user documentation, changelog, migration notes, and evidence handoff.
-- `remote-setup`: discover or create Harness validation resources.
-- `remote-test`: execute cold, warm, invalidation, and compatibility runs.
-- `diagnose`: investigate a local or Harness test failure.
-- `validate`: evaluate all acceptance and compatibility gates.
-- `report`: produce implementation, evidence, rollout, and limitation reports.
-- `all`: run the complete workflow in dependency order.
-
-If no command is supplied:
-
-1. route "add", "implement", or "support" requests through research, design, create, local tests, lifecycle validation, finalize, validate, and report;
-2. use `status` when asked what remains;
-3. infer the narrowest command for explanation, research, diagnosis, or test-only requests;
-4. include build and remote phases only when their prerequisites and authorization are available;
-5. state the selected route before performing material work.
-
-Commands may be combined:
-
-```text
-research + design
-create + test
-build + remote-test
-validate + report
-```
-
-Do not expand an explicit narrow command into implementation or remote mutation.
-
-## Command state
-
-Persist state after every phase using `AUTONOMY.md`, not only in conversation. A standalone agent uses worker ID `local`; parallel workers use the coordinator-assigned ID.
-
-`AUTONOMY.md` defines the single canonical, versioned task-state schema and status enum. `status`, worker handoffs, validation, and reports must read from that schema rather than maintaining parallel field names.
-
-Do not invent missing state. Verify mutable remote state before using it.
-
-## `help`
-
-Return:
-
-1. the command list;
-2. required arguments for the requested operation;
-3. two or three relevant invocation examples;
-4. the recommended next command, if context exists.
-
-Do not inspect or mutate code or remote resources for `help`.
-
-## `status`
-
-Inspect available local and remote evidence without changing it. Report:
-
-- selected tool, whether it is already supported (`buildToolInfoMapping`), and the triage classification from `SKILL.md`;
-- current terminal state from `AUTONOMY.md`;
-- baseline and candidate identities;
-- completed commands and their outcomes;
-- local test status;
-- Harness pipeline/execution status when known;
-- unresolved design decisions and blockers;
-- one recommended next command.
-
-Use Harness read tools when execution state may have changed.
+Utilities: `help`, `status` (gate table and the next command), `waive --gate <g> --result BLOCKED|NOT_APPLICABLE|SKIPPED --reason "<owner and action>"`, `fixture-commit --from <dir> [--files a,b]`, and `all` (implement-phase gates, then validate and report).
 
 ## `research`
 
-Follow `SKILL.md` triage and sections 1 and 2, using `TOOL-PATTERNS.md` as the starting checklist.
+Follow `SKILL.md` triage and sections 1 and 2, starting from `TOOL-PATTERNS.md`. The first run writes `research.md` from [scripts/research.tmpl.md](scripts/research.tmpl.md) with the "Existing support" section prefilled (current mapping entries, preparers, and the variables harness-core already injects). Fill it from official documentation and from commands you ran against the real tool; then re-run `research`.
 
-Outputs:
+The Fields list is machine-read. Later gates take their inputs from it, so they need no extra flags:
 
-- triage classification and existing-support findings;
-- requirements record;
-- primary documentation findings, with the tool versions they apply to;
-- detection and key candidates;
-- cache-path classification with cache type and value estimate;
-- engine fit: what `ENGINE.md` capabilities cover, and what would need an engine change;
-- runtime/container-sharing constraints;
-- security and portability exclusions;
-- assumptions resolved by autonomous defaults;
-- only unresolved user-owned decisions.
+- `cache_paths`, `excluded_paths`, `warm_check`: workspace-relative; the public lifecycle scans the saved archive for every excluded segment.
+- `cache_env`: the variable that build steps need so the tool writes into the cached directory, as `KEY=workspace-relative-dir`, or `none`. A value here drives the harness-core change and the stage variable in the remote pipelines.
+- `cache_env_side_effects`: harness-core will set `cache_env` for every step of every stage with caching on, not only the install step. List everything else that variable relocates (for `CARGO_HOME`: `cargo install` binaries in `bin/`, `config.toml`, `credentials.toml`) and how users keep it working (project-level `.cargo/config.toml`, `CARGO_REGISTRIES_*` env). It becomes the Compatibility section of the harness-core PR; reviewers decide on it.
+- `fixture_repo`/`fixture_ref`: a public https repository pinned to a tag or commit with a committed lockfile. Prefer a real project with 50 or more locked dependencies so the cold/warm difference is measurable.
+- `install_image`, `install_cmd`, `offline_cmd`: the install command must not wire the cache env itself (the CLI and the pipeline inject it). `offline_cmd` proves the tool consumes the restored data without network; use `none` only when the tool has no offline mode, and say so in Limitations.
+- `harness_code_repo`: Harness Code repository holding a copy of the fixture, used by the product path.
 
-Research must populate the evidence ledger in `AUTONOMY.md`, distinguishing documented behavior, observed behavior, and assumptions. Do not edit production code.
+Do not edit production code during `research`.
 
 ## `design`
 
-Follow `SKILL.md` section 3.
-
-Outputs:
-
-- tool identity, detection rules, and mapping-entry placement;
-- root/nested/workspace discovery behavior;
-- relocate vs. follow-only strategy for each path;
-- coexistence and ambiguity rules;
-- path/configuration precedence;
-- key inputs and migration effects;
-- restore/save behavior;
-- scenario and compatibility matrices;
-- local and remote validation plan.
-
-Apply autonomous defaults first. Stop only when the remaining choice meets the `AUTONOMY.md` interruption policy; batch all current user-owned decisions.
+Follow `SKILL.md` section 3 and `ENGINE.md`. The scaffold ([scripts/design.tmpl.md](scripts/design.tmpl.md)) asks for the summary, mapping entry and placement, the path table, the scenario matrix (each row names the test that covers it), compatibility and migration, and limitations. Summary, Compatibility and Limitations are copied verbatim into `REPORT.md` and the pull request description, so write them for reviewers.
 
 ## `create`
 
-Follow `SKILL.md` sections 4 and 5.
-
-Preconditions:
-
-- requirements and design are known;
-- ambiguous compatibility decisions are resolved;
-- starting revision and working-tree state are recorded.
-
-Actions:
-
-1. implement one reviewable ecosystem or behavior increment;
-2. add unit, scenario, and regression tests with the code;
-3. preserve unrelated changes;
-4. format changed files;
-5. run focused tests for changed packages;
-6. return changed files, behavior, tests, and remaining work.
-
-`create` does not publish an image or mutate Harness resources unless combined with the corresponding command.
-Full repository, race, compatibility, and lifecycle gates belong to `test`; do not duplicate them merely because `create` follows the testing guidance for test design.
+Follow `SKILL.md` sections 4 and 5. Implement the preparer and mapping entry with unit and scenario tests in the same change. Name tests after the tool (`Test_cargoPreparer_*`, `TestScenario_Cargo_*`): `create` and `test --compatibility` select tests by name and fail when none ran.
 
 ## `test`
 
-Follow `SKILL.md` sections 5 and 6.
+```bash
+$CLI test --tool <t> --worker-id <w> --all            # local-test, compatibility, lifecycle, public
+$CLI test --tool <t> --worker-id <w> --public [--runner auto|host|docker]
+```
 
-Modes:
+`--public` clones the research fixture into a scratch workspace and runs the real tool against the plugin built from this checkout, using the filesystem backend and an isolated plugin environment (`env -i`):
 
-- `test --local`: focused and full repository tests;
-- `test --lifecycle`: local restore/install/save/clean/restore/install, using the recipe in `ENGINE.md`;
-- `test --compatibility`: baseline/candidate keys, side effects, and archive interoperability;
-- `test --all`: all applicable local modes.
+1. cold restore must miss;
+2. install (timed) must populate `warm_check`;
+3. save; the archive listing must not contain any `excluded_paths` segment;
+4. `git clean -ffdx` must remove the cache (proves it lives in the workspace);
+5. warm restore must populate `warm_check`;
+6. `offline_cmd` must succeed from the restored data alone;
+7. warm install (timed);
+8. changing `invalidate_file` must produce a different key, and the restore must miss.
 
-Use direct commands with propagated exit codes. Report every required command as passed, failed, or skipped with a reason. A wrapper command that ignores failures is not evidence.
+The research `cache_env` is set for both the plugin and the tool, exactly as harness-core will inject it. `--runner auto` uses the tool on PATH, otherwise Docker with `install_image`; the agent container has no Docker, so install the tool in user space there (`SKILL.md` section 6). On macOS Docker bind mounts, the first tool invocation after a restore can be slow (file-system overhead); trust the remote timings for performance claims.
 
 ## `build`
 
-Actions:
+Cross-compiles the release binaries and records the linux/amd64 checksum. The agent never builds or pushes images: the orchestration pipeline builds `docker/Dockerfile.linux.amd64` with `BuildAndPushDockerRegistry` after the implement phase, and passes the tag to the remote phase.
 
-1. verify local gates required before image creation;
-2. build supported binary/container targets using repository conventions (`ENGINE.md`, "Building a candidate image");
-3. smoke-test the candidate locally;
-4. tag with branch/commit identity;
-5. publish only with explicit publication authorization; remote-test authorization alone is not publication authorization;
-6. record tag and digest;
-7. preserve the known-good baseline identity.
+## `harness-core`
 
-Never use `latest` as validation evidence.
+When research sets `cache_env`, Cache Intelligence must inject it into every step, like `GOCACHE`, `GRADLE_USER_HOME`, `PIP_CACHE_DIR` and `CP_CACHE_DIR`. The command runs [scripts/harness-core-env.py](scripts/harness-core-env.py) against the harness-core checkout (default `<git-common-dir>/cache-intel/harness-core`, prepared by the pipeline) and commits on `feature/[<JIRA>-]cache-intel-<tool>-env-<worker>`:
+
+- `ContainerExecutionConstants`: `<TOOL>_CACHE_ENV_NAME`, `_CACHE_DIR` (`/harness/<dir>/`), `_CACHE_DIR_WIN`, `_CACHE_DIR_SUFFIX`, with `cache_env_reason` as the comment;
+- `VmInitializeUtilsImpl` (`fullWorkDir + suffix`) and `K8InitializeTaskUtils` (`/harness/<dir>/`), Linux/macOS and Windows branches;
+- assertions in `VmInitializeUtilsImplTest` and both `K8InitializeTaskUtilsTest` classes.
+
+Pass `--jira <KEY>` when the pipeline has one; a missing Jira is not a blocker (the PR title can be edited later). Use `--no-windows` when the tool has no Windows support. Exit code 3 from the generator means harness-core already injects the variable; the gate is then NOT_APPLICABLE. The pipeline pushes the branch and opens the harness-core pull request; the agent never pushes.
 
 ## `remote-setup`
 
-Use Harness MCP when available. This command may discover, verify, create, or update validation resources.
-
-Required sequence:
-
-1. Select the MCP connection matching `--env`; do not silently use production for QA or vice versa.
-2. Establish account, organization, and project from explicit arguments, a Harness URL, or confirmed context.
-3. Use `harness_describe` to confirm resource types and operations when uncertain.
-4. Use `harness_list`/`harness_get` to verify repositories, connectors, secrets, delegates/infrastructure, templates, and pipelines.
-5. Reuse suitable resources. Do not create duplicates.
-6. Use `harness_schema` before constructing an unfamiliar create/update body.
-7. Preview the complete write payload in chat.
-8. Use `harness_create` or `harness_update`; rely on the MCP server's approval dialog instead of asking for a second confirmation.
-9. Re-read the resource and verify the candidate image, repository, branch, cache settings, and pipeline version.
-
-Prefer a dedicated validation pipeline. Keep baseline and candidate pipelines/runs distinguishable. Do not modify shared production resources without explicit authorization.
-
-In Harness worker runs, render that pipeline with the CLI instead of hand-writing it:
-
 ```bash
-./.cursor/skills/add-build-tool-caching/scripts/cache-intel.sh remote-setup --tool <tool> --worker-id <id> \
-  --image <repo:tag> --docker-connector <connector> \
-  --fixture-repo <public git URL> --fixture-ref <tag> \
-  --install-image <image> --install-cmd '<install command with cache env wiring>' \
-  --warm-check <path relative to fixture>
+$CLI remote-setup --tool <t> --worker-id <w> --image <repo:tag> [--docker-connector rpdockerhub] \
+  [--fixture-source github|harness_code] [--product --harness-code-repo <id> [--harness-code-branch main]]
 ```
 
-The pipeline (`ci_intel_<tool>_<worker>`) clones the fixture, runs the candidate image for restore and save, and runs the install in between. A `verify_restore` step fails the run when `expect_warm=true` and the warm-check path is empty. Stage `caching` stays disabled, and shared `RestoreCacheFromHarness` / `SaveCacheToHarness` templates are never edited. v0 stages with `caching.enabled` run the Harness-managed `plugins/cache` image, not a candidate.
+Renders `ci_intel_<tool>_<worker>` from [scripts/remote-pipeline.tmpl.yaml](scripts/remote-pipeline.tmpl.yaml), all values coming from research:
+
+- the fixture is cloned into `/harness` itself, and `cache_env` is a stage variable (`KEY=/harness/<dir>`), which is exactly what the harness-core change injects;
+- a `scenario` input drives deterministic runs: `cold` skips restore (true cold baseline) and saves with `PLUGIN_OVERRIDE=true`; `warm` must restore before install, then runs `offline_cmd` and the install; `invalidate` changes `invalidate_file`, must miss, and never saves;
+- the candidate image runs restore and save directly against the Harness cache backend (`HARNESS_CACHE_SERVICE_TOKEN`/`_ENDPOINT`, `HARNESS_ACCOUNT_ID`); stage `caching` stays disabled.
+
+With `--product` it also renders `ci_intel_<tool>_<worker>_product` from [scripts/remote-product-pipeline.tmpl.yaml](scripts/remote-product-pipeline.tmpl.yaml): a Harness Code codebase, `caching.enabled: true`, and no plugin steps. It runs the real Cache Intelligence path, so it is meaningful only while the orchestrator has overridden the account-level cache image (`cacheTag`) to the candidate. Never change that override yourself.
+
+To create the Harness Code fixture: copy only what the tool needs to resolve dependencies (manifest, lockfile, stub targets) into a scratch directory, run `$CLI fixture-commit --from <dir>`, create the repository with `harness_create resource_type=repository`, then commit `remote/fixture-commit.json` with `harness_create resource_type=commit`. Keep the commit small; its body passes through the MCP call.
+
+Then, with the Harness MCP server for the environment: preview the YAML once, `harness_create resource_type=pipeline` (or `harness_update` when it exists), and re-read it to confirm the image and fixture.
 
 ## `remote-test`
 
-Use Harness MCP for execution and monitoring.
+Run the scenarios in order and wait for each to finish: `cold`, `warm`, `invalidate`. Inspect logs, not only statuses:
 
-Preconditions:
+```bash
+# harness_get resource_type=execution_log params {execution_id, stage_id: validate, step_id: <step>, return_download_url: true}
+./.cursor/skills/add-build-tool-caching/scripts/fetch-step-log.sh '<download_url>' 200
+```
 
-- candidate image/tag is immutable and reachable;
-- Harness scope and pipeline are verified;
-- the pipeline actually references the candidate;
-- fixture repo, branch, install command, expected path, and key inputs are known.
+| Scenario | Must see |
+|----------|----------|
+| cold | `verify_restore`: `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`; `install`: `TIMING_install_seconds`; `save_candidate`: upload of the cached paths |
+| warm | `restore_candidate`: `build tools detected: <tool>` and downloads; `verify_restore`: `CACHE_STATE=warm`; `offline_check`: `OFFLINE_CHECK=PASS`; a smaller `TIMING_install_seconds` |
+| invalidate | `invalidate_key` changed the hash; `verify_restore`: `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS` |
+| product-seed / product-warm | the Cache Intelligence restore step logs `build tools detected: <tool>` (the baseline image cannot detect a new tool, so this proves the override took effect); product-warm `verify_restore`: `CACHE_STATE=warm` |
 
-Required sequence:
+Record each run, with metrics taken from the logs:
 
-1. Preview pipeline, inputs, image, expected cache paths, and test matrix.
-2. Use `harness_execute` to run the pipeline.
-3. Poll with `harness_get` or execution-list operations until terminal status.
-4. Run cold, warm, invalidation, and requested compatibility cases.
-5. Use `harness_diagnose` for completed failures and relevant execution summaries/logs.
-6. Capture execution URLs, statuses, restore/save results, tool-consumption evidence, timing, and bytes.
-7. If `harness_diagnose` / `execution_log` return 404 for logs, request `return_download_url: true` and run `scripts/fetch-step-log.sh '<download_url>'`. Only if that also fails, report the limitation and request the precise log markers from the user.
-8. Record each run with `cache-intel.sh remote-test --run cold|warm --execution-url <url> --result PASS|FAIL`; `cache-intel.sh validate --env <env>` reports `REMOTE_VALIDATED` only when both passed.
+```bash
+$CLI remote-test --tool <t> --worker-id <w> --run warm --execution-url <url> --result PASS \
+  --metrics install_seconds=0.41,cache_kb=42500,restore_state=warm
+```
 
-Do not clear or delete shared caches. Use unique keys/namespaces for cold tests unless explicit deletion is approved. A green execution, optimization label, or restored dummy file does not prove the package manager consumed cached data.
-
-If publication, scope, credentials, entitlement, or infrastructure is unavailable, preserve all local evidence and finish as `REMOTE_BLOCKED` with the exact dependency, owner, and action. Do not repeatedly ask for alternate scope.
-
-## `diagnose`
-
-For local failures:
-
-1. reproduce with the narrowest direct command;
-2. classify code regression, fixture issue, environment dependency, or pre-existing failure;
-3. inspect relevant logs and code;
-4. identify the smallest correction and tests that would prove it;
-5. report the diagnosis without editing production code.
-
-For Harness failures:
-
-1. verify execution, pipeline, image, inputs, and environment;
-2. use `harness_get` and `harness_diagnose`;
-3. distinguish cache miss from permissions, backend, archive, network, infrastructure, and install failures;
-4. identify the local or remote correction and affected rerun cases;
-5. report the diagnosis without mutation.
-
-Do not remediate access-denied, quota, entitlement, or authentication failures by guessing alternate scope.
-Combine `diagnose + create` to implement a code fix, or `diagnose + remote-setup` for an authorized configuration correction.
-
-## `finalize`
-
-Follow `SKILL.md` section 10.
-
-Actions:
-
-1. update README support, precedence, paths, keys, wiring, exclusions, and tested support matrix;
-2. update `CHANGELOG.md` when the change is user-visible;
-3. record compatibility, expected cold starts, limitations, rollout, and rollback;
-4. update durable task state and evidence provenance;
-5. leave coordinator-owned shared docs to the coordinator during parallel work, recording the required content in the worker handoff.
+A green execution alone is not evidence. If a run fails, diagnose (`harness_diagnose`, step logs), fix, rebuild only when code changed, and re-run the scenario. Do not delete shared caches; `cold` overwrites its own key.
 
 ## `validate`
 
-Evaluate completion criteria from `SKILL.md` without making unrelated changes.
-
-Return each gate as:
-
-```text
-PASS: evidence
-FAIL: evidence and required correction
-BLOCKED: exact dependency and owner/action
-NOT_APPLICABLE: reason
-```
-
-Never claim all-platform, zero-regression, or end-to-end support from unit tests alone.
-End with one terminal state from `AUTONOMY.md`.
+Re-runs the full autodetect suite, then evaluates every gate from the ledger and prints `PASS`, `FAIL`, `BLOCK` or `MISS` per gate. Terminal state: `FAILED` when any gate failed, `INCOMPLETE` when a required gate is missing, `LOCAL_COMPLETE` without `--env`, `REMOTE_VALIDATED` when cold, warm and invalidate all passed, otherwise `REMOTE_BLOCKED`. It exits non-zero only for `FAILED` and `INCOMPLETE`.
 
 ## `report`
 
-Include links for Harness executions and other remote resources. Omit sections that do not apply rather than padding them. Use this template:
+Generates, from state only (never hand-edit the output; fix the inputs and regenerate):
 
-```markdown
-# Cache Intelligence: <tool>
+- `REPORT.md` at the repository root: at-a-glance table, summary, every gate with evidence, the local public-project lifecycle with timings, the Harness runs table with links, the harness-core change, research and design narrative, compatibility, limitations, rollout, and the collapsible command ledger;
+- `out/PR_BODY.md`: the GitHub pull request description;
+- `out/HARNESS_CORE_PR.md`: the harness-core pull request description (only when the harness-core gate committed a change).
 
-## Summary
-<One paragraph: what is now supported, the triage classification, and overall validation status.>
+Commit `REPORT.md` with the change. Never convert an unverified path into a supported-tool claim.
 
-## Revisions
-- Starting: <branch> @ <sha>
-- Ending: <branch> @ <sha>
-- Candidate image: <tag> (<digest>)
-- Baseline image: <tag>
+## `status` and `help`
 
-## Behavior
-- Detection files and precedence:
-- Cached paths, with strategy (relocate / follow only) and cache type:
-- Key inputs:
-- Configuration precedence and files written to the repository:
-- Wiring required in later build steps:
-- Deliberately excluded paths and why:
-
-## Evidence
-| Check | Result | Evidence |
-|-------|--------|----------|
-| Unit / scenario tests | PASS/FAIL/SKIPPED/BLOCKED/NOT_APPLICABLE | command and summary |
-| Full test, race, vet, build | | |
-| Local cold / warm / invalidation | | key, sizes, durations |
-| Package manager consumed restore | | offline/instrumented proof |
-| Harness cold / warm / invalidation | | execution links |
-| Compatibility (legacy keys, archives, overrides) | | |
-
-## Evidence provenance
-- Documented claims (source and applicable version):
-- Observed claims (command, environment, artifact/log):
-- Remaining assumptions and confidence:
-
-## Command ledger
-- PASS:
-- FAIL:
-- SKIPPED / BLOCKED / NOT_APPLICABLE, with reason and owner/action:
-
-## Measurements
-- Cold vs. warm install time:
-- Archive size and restore/save overhead:
-
-## Compatibility and migration
-<Key or path changes for existing users, and the expected first cold run.>
-
-## Limitations and open decisions
-
-## Feedback incorporated
-<Failed assumptions, resulting tests, design corrections, and remaining unsupported cases.>
-
-## Rollout and rollback
-<Staged rollout steps, known-good image, and what rollback does or does not restore.>
-```
-
-Do not convert an unverified candidate path into a supported-tool claim.
-
-## `all`
-
-Run commands in this order:
-
-```text
-research
-design
-create
-test --all
-build
-finalize
-remote-setup
-remote-test
-validate
-report
-```
-
-Rules:
-
-- when `--local` is set or remote prerequisites are unavailable, stop after local build/validation/report and use `LOCAL_COMPLETE` or `REMOTE_BLOCKED`;
-- apply autonomous defaults and stop only at a user-owned decision defined by `AUTONOMY.md`;
-- retry transient technical failures or use a safe alternative;
-- continue independent work when one external dependency is blocked;
-- do not skip a failed gate;
-- after each command, update state and incorporate feedback;
-- do not perform remote writes, image publication, or deployment unless needed for the requested end-to-end scope and authorized through the relevant approval mechanism.
-
-For parallel work, follow the coordinator/worker ownership and serial integration protocol in `AUTONOMY.md`. Workers do not independently edit coordinator-owned shared surfaces.
+`status` prints the gate table and the next command; it changes nothing. `help` prints usage, the state layout, and how images and logs are handled.
 
 ## Harness MCP tool map
 
-Use the consolidated Harness tools:
-
 - discovery: `harness_describe`, `harness_schema`, `harness_search`;
 - reads: `harness_list`, `harness_get`, `harness_status`;
-- writes: `harness_create`, `harness_update`, `harness_delete`;
+- writes: `harness_create`, `harness_update` (only the worker's own `ci_intel_<tool>_<worker>*` pipelines and `cache_intel_fixture_<tool>_<worker>` repositories);
 - execution: `harness_execute`;
 - failure analysis: `harness_diagnose`.
 
-Use `harness_delete` only when the user explicitly requests cleanup and the exact resource is verified. Surface governance or policy failures as blockers and adjust the proposed configuration before retrying.
+Never use `harness_delete`, and never modify templates, connectors, secrets, account settings or the CI execution config. Surface governance or policy failures as blockers.

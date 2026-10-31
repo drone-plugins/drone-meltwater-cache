@@ -7,10 +7,10 @@ Use this policy for implementation requests and parallel tool work. The goal is 
 When the user asks to **add**, **implement**, or **support** caching for a tool without naming a command, run:
 
 ```text
-research → design → create → test --local → test --lifecycle → finalize → validate → report
+research → design → create → test --all → build → finalize → harness-core → validate → report
 ```
 
-Also run `build` when local image construction is available. Run `remote-setup` and `remote-test` only when the user supplied or previously authorized the environment, scope, publication, and execution. Missing remote access does not block local completion.
+`test --all` includes the public-project lifecycle. Run `remote-setup` and `remote-test` only when the user supplied or previously authorized the environment, scope, publication, and execution. Missing remote access does not block local completion. `harness-core` needs a harness-core checkout; without one it records BLOCKED with the owner and continues.
 
 An explicit narrow command remains narrow. For example, `research` and `diagnose` never edit production code. Combine `diagnose + create` when the user requests diagnosis and correction.
 
@@ -57,7 +57,7 @@ Every task ends in one of these states:
 - `DESIGNED`: implementation-ready design complete; blocked only by a user-owned decision.
 - `LOCAL_COMPLETE`: implementation, focused/full applicable tests, local lifecycle, docs, and report complete.
 - `REMOTE_BLOCKED`: local work is complete; an exact remote dependency, owner, and action are recorded.
-- `REMOTE_VALIDATED`: the immutable candidate passed target-environment cold, warm, invalidation, and applicable compatibility cases.
+- `REMOTE_VALIDATED`: the immutable candidate passed target-environment cold, warm, and invalidation runs (`remote-cold`, `remote-warm`, `remote-invalidate` all PASS), plus applicable compatibility cases. Product-path runs (`product-seed`, `product-warm`) are additional evidence, not a requirement.
 - `INTEGRATION_BLOCKED`: tool-local work is complete but awaits coordinator-owned shared changes or conflict resolution.
 - `FAILED`: a reproducible correctness or safety gate failed and no safe correction remains in scope.
 
@@ -65,52 +65,24 @@ Do not label authentication, authorization, quota, entitlement, missing scope, o
 
 ## Durable task state
 
-Do not rely only on conversation memory. Store transient state outside the working tree so it is shared by linked worktrees and never enters the product diff:
-
-```bash
-STATE_ROOT="$(git rev-parse --path-format=absolute --git-common-dir)/cache-intel"
-STARTING_SHORT_SHA="$(git rev-parse --short=12 HEAD)"
-# TOOL_SLUG and WORKER_ID must match: ^[a-z0-9][a-z0-9.-]*$
-mkdir -p "$STATE_ROOT/tasks"
-TASK_STATE="$STATE_ROOT/tasks/$TOOL_SLUG-$WORKER_ID-$STARTING_SHORT_SHA.md"
-```
-
-The coordinator alone owns `$STATE_ROOT/manifest.md`. Each worker owns exactly one task-state file. If there is no coordinator, use worker ID `local`; if that path belongs to another active task, choose a unique slug before work begins. Reject unsanitized slugs rather than interpolating them into paths. Update state atomically after every phase and before handoff: render the whole document to a temporary file in `$STATE_ROOT/tasks`, then rename it over `TASK_STATE`. Never let two workers write the same file.
-
-This shared path applies to local linked worktrees. Cloud or separately cloned workers cannot share it: the coordinator must include the assigned manifest record in each worker prompt, and the worker must return the complete task-state schema in its handoff so the coordinator can update `manifest.md`.
-
-Required task-state fields:
+Do not rely only on conversation memory. `cache-intel.sh` keeps task state outside the working tree, so it is shared by linked worktrees, survives commits, and never enters the product diff:
 
 ```text
-schema_version: 1
-agent_or_worker:
-tool:
-state:
-starting_branch:
-starting_sha:
-baseline_revision_and_image:
-owned_files:
-mapping_position_proposed:
-shared_changes_requested:
-triage:
-engine_fit:
-supported_versions_platforms:
-fixture_and_revision:
-cache_paths_and_types:
-key_inputs:
-decisions_and_defaults_applied:
-evidence_ledger:
-command_results: # each is PASS | FAIL | SKIPPED | BLOCKED | NOT_APPLICABLE, with evidence/reason
-local_lifecycle_proof:
-candidate_sha:
-candidate_image_and_digest:
-remote_scope_and_executions:
-blockers_with_owner_action:
-handoff:
-next_command:
+$(git rev-parse --git-common-dir)/cache-intel/
+  work/<tool>-<worker>/        one directory per task; only that worker writes it
+    state.env                  tool, worker, base branch, starting SHA, candidate image, terminal state
+    research.md, design.md     the research and design records (the research Fields list drives later gates)
+    ledger.tsv                 every gate result, oldest first: time, gate, result, evidence
+    metrics.env                measured local values (fixture SHA, timings, archive size, keys)
+    evidence/                  logs for each gate, archive listings
+    remote/                    rendered pipelines, runs.tsv (one row per Harness run), fixture-commit.json
+    out/                       PR_BODY.md, HARNESS_CORE_PR.md, harness-core.env/.patch, summary.env
+  harness-core/                sparse harness-core clone when the orchestrator provides one
 ```
 
-Never put credentials, tokens, raw private configuration, or secret-bearing logs in task state.
+`TOOL` and `WORKER_ID` must match `^[a-z0-9][a-z0-9.-]*$`; the CLI rejects anything else. A standalone agent uses worker ID `local`. Read state with `cache-intel.sh status`; never edit `ledger.tsv` or `runs.tsv` by hand. Record an external blocker with `cache-intel.sh waive --gate <gate> --result BLOCKED --reason "<owner and action>"`.
+
+Never put credentials, tokens, raw private configuration, or secret-bearing logs in task state, evidence, or reports.
 
 ## Evidence ledger
 
@@ -136,7 +108,7 @@ Before launching workers:
 
 1. assign one tool identifier and isolated branch/worktree per worker;
 2. assign a stable worker ID and starting SHA;
-3. reserve ownership and proposed mapping position in `manifest.md`;
+3. reserve ownership and the proposed mapping position for each worker;
 4. identify shared helpers, likely engine changes, and conflicting ecosystems;
 5. assign collision-free names using `<tool>-<worker-id>-<starting-short-sha>` for branches, images, fixtures, pipelines, and cache namespaces.
 
@@ -151,15 +123,17 @@ The coordinator exclusively owns:
 
 ### Worker responsibilities
 
-Workers own tool-local research, preparer/config code, unit tests, scenario tests, fixtures, lifecycle evidence, and a proposed mapping entry/position. They must:
+Workers own tool-local research, preparer/config code, unit tests, scenario tests, fixtures, lifecycle evidence, and their mapping entry. Two modes exist:
+
+- **Harness pipeline workers** (`tempai`): each worker has its own clone, branch `feat/<tool>-caching-<worker>`, image tag, validation pipeline, and pull request. The worker commits its `buildToolInfoMapping` entry as one isolated hunk, at a position chosen by the design record; if two worker PRs touch neighbouring lines, the second rebases at review time. This is the only mode in which a worker edits the mapping file.
+- **Linked worktrees in one checkout** (several local agents): the coordinator owns the mapping file. Workers keep the proposed entry in `design.md`, apply it only inside their own worktree for tests, and finish as `INTEGRATION_BLOCKED` when only coordinator work remains.
+
+In both modes workers must:
 
 - avoid editing files assigned to another worker;
-- never commit the shared `buildToolInfoMapping` file; store the proposed entry and unified patch in task state;
-- when full detection tests require the entry, apply that patch temporarily only in the isolated worktree, capture evidence, then reverse it before handoff; dependent scenario tests may remain `INTEGRATION_BLOCKED` until the coordinator applies the entry;
-- request shared changes through task state instead of implementing them silently;
+- request engine or shared-helper changes through the design record instead of implementing them silently;
 - continue all independent work when a shared change is pending;
-- finish as `INTEGRATION_BLOCKED` rather than waiting when only coordinator work remains;
-- never publish, deploy, merge, or mutate shared remote resources unless specifically assigned and approved.
+- never publish, deploy, merge, or mutate shared remote resources unless specifically assigned and approved. The orchestration pipeline, not the worker, pushes branches, publishes images, toggles the account-level Cache Intelligence image, and opens pull requests.
 
 ### Integration order
 
@@ -173,7 +147,7 @@ The coordinator integrates serially:
 6. run repository regression, race, vet, and supported builds;
 7. build uniquely tagged candidates;
 8. run remote validation in isolated namespaces where authorized;
-9. consolidate task-state evidence into the final report.
+9. consolidate each worker's `REPORT.md` evidence into the final report.
 
 If workers discover the same engine limitation, create one coordinator-owned engine task. Tool workers must not independently implement competing engine changes.
 

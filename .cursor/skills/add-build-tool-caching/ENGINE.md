@@ -82,9 +82,25 @@ Conventions:
 - With no detected tool and no overrides, the step logs and exits successfully without caching.
 - The package.json fallback plan (`WriteAutoDetectPlan` / `ReadAutoDetectPlan`) stores the restore-time key and path identities under `HARNESS_TMP_PATH`, scoped to the execution and stage. Save then reuses them, because install can create `package-lock.json` and change detection. If a new tool can create or change a detection file during install, extend this mechanism deliberately rather than inventing a parallel one.
 
+- Autodetect runs from `os.Getwd()`, not from `HARNESS_WORKSPACE`. In Harness every step starts in the workspace root (`/harness` on Linux, `/tmp/harness` on macOS VMs), so restore, build and save resolve relative tool settings against the same directory.
+- The final key is `PLUGIN_ACCOUNT_ID + "/" + <composite key>`; there is no repository namespace in the key. The fallback key generator is used only when key generation itself errors, not on a cache miss.
+
+## Environment injected by harness-core
+
+Restore, build and save run in separate containers that share only the workspace. When a tool's cache lives outside the workspace by default, the build step must be told where to write it, and the plugin cannot do that from its own container. With stage `caching.enabled`, ci-manager therefore adds cache variables to every step:
+
+| Infrastructure | Source | Linux / macOS value | Windows value |
+|----------------|--------|---------------------|---------------|
+| VM (Harness Cloud, self-hosted VMs) | `VmInitializeUtilsImpl.getCacheEnvironmentVariable(fullWorkDir, os)` | `fullWorkDir + <TOOL>_CACHE_DIR_SUFFIX` | `<TOOL>_CACHE_DIR_WIN` |
+| Kubernetes | `K8InitializeTaskUtils.getCacheEnvironmentVariable(os)` | `<TOOL>_CACHE_DIR` (`/harness/<dir>/`) | `<TOOL>_CACHE_DIR_WIN` |
+
+Constants live in `879-pipeline-ci-commons/.../ContainerExecutionConstants.java`. Injected today: `GOCACHE`, `GRADLE_USER_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `PIPENV_CACHE_DIR`, `POETRY_CACHE_DIR`, `UV_CACHE_DIR`, and `CP_CACHE_DIR` (not on Windows). A new tool that needs one sets `cache_env` in research; `cache-intel.sh harness-core` then generates the constants, both injection sites, and the unit-test assertions in one commit (model: harness-core commit `42caa0346d5e`). Until that change ships, users must set the variable in their build steps, which the README must say.
+
+The preparer must follow the variable when it is set and fall back to the same `<workspace>/<dir>` when it is not, so the plugin and the build agree in both cases.
+
 ## Local lifecycle recipe
 
-Build the binary, then run restore, install, save, wipe, and restore against a disposable filesystem backend:
+`cache-intel.sh test --public` automates this recipe against the research fixture. The manual form, for diagnosis: build the binary, then run restore, install, save, wipe, and restore against a disposable filesystem backend:
 
 ```bash
 REPO_ROOT="$(pwd)"
@@ -144,3 +160,4 @@ Use `release/linux/arm64` with `Dockerfile.linux.arm64`, and `release/windows/am
 - The `Makefile` `test`, `test-integration`, and `test-e2e` recipes prefix `go test` with `-`, so make ignores test failures. Run `go test` directly for evidence.
 - `make container` builds from a root `Dockerfile`, which does not exist. Use the `docker/Dockerfile.*` commands above.
 - Do not hardcode developer-specific absolute paths (home directories, module caches) in scripts or tests; use `mktemp`, `t.TempDir()`, and environment defaults.
+- On macOS `t.TempDir()` is under `/var/folders`, a symlink to `/private/var`, and `os.Getwd()` returns the resolved path. Tests that compare paths derived from the working directory must resolve the temp dir first (`filepath.EvalSymlinks(t.TempDir())`), or they pass on Linux and fail on macOS.
