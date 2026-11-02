@@ -80,6 +80,47 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
+| **Cargo** | `Cargo.lock` | `CARGO_HOME` (required in build steps) | `.cache/cargo/{registry/cache,registry/index,git/db}` | ✅ Read-only; excludes Cargo home config and credentials |
+
+#### Cargo (Rust) Details
+
+- **Detection and key:** `Cargo.lock` at the workspace root or one directory
+  level below it. The existing engine selects the shortest match (root wins)
+  and contributes the lockfile's 32-character lowercase MD5 digest. There is no
+  `Cargo.toml` fallback or recursive/multi-lock hashing. Legacy-only repositories
+  keep their keys; repositories newly detecting Cargo get a cold first run.
+- **Cached paths:** only `$CARGO_HOME/registry/cache`,
+  `$CARGO_HOME/registry/index`, and `$CARGO_HOME/git/db`. Without `CARGO_HOME`,
+  the plugin selects `<workspace>/.cache/cargo` as the home. Relative
+  `CARGO_HOME` values resolve from the step's working directory, not the nested
+  project's directory. Preparation never modifies Cargo configuration.
+- **Required environment:** set `CARGO_HOME=/harness/.cache/cargo` (adjust for
+  your actual workspace) consistently in restore, build and save steps until
+  the companion harness-core environment injection ships. Merely choosing a
+  plugin path cannot redirect Cargo in another container. An explicit home
+  outside the workspace works only if that location is shared across steps.
+- **Configuration side effects:** `CARGO_HOME` also moves home `config.toml`,
+  `credentials.toml` (including legacy names), `cargo install` binaries under
+  `bin/`, install metadata and cache tracking/locks. Existing home files are
+  not migrated. Use project `.cargo/config.toml` and `CARGO_REGISTRIES_*`
+  authentication variables, and manage `PATH` explicitly for installed binaries.
+- **Exclusions and limits:** no `target`, toolchains, installed binaries,
+  credentials/configuration, `registry/src`, `git/checkouts`, or home-root
+  trackers/locks are archived. Cargo regenerates extracted sources/checkouts.
+  Download caches can grow and can contain private dependency source; do not
+  embed credentials in dependency URLs. Only Cargo 1.85.0 on Linux x86_64 has
+  real-tool validation; release cross-compilation does not establish native
+  Windows/macOS behavior. The fixture has no Git dependencies, so Git cache
+  consumption is not proven by that lifecycle.
+
+Evidence: `cache-intel.sh create --tool cargo --worker-id w1` and
+`cache-intel.sh test --tool cargo --worker-id w1 --all` cover path/key behavior,
+configuration preservation, legacy coexistence and the pinned ripgrep 14.1.1
+lifecycle (cold/save/wipe/restore/offline/invalidate). See [REPORT.md](REPORT.md)
+for timings and gate evidence; fetch-only testing does not claim a functional
+compilation. Cargo's [home reference](https://doc.rust-lang.org/cargo/guide/cargo-home.html)
+and [environment reference](https://doc.rust-lang.org/cargo/reference/environment-variables.html)
+describe the home layout and configuration scope.
 
 #### Python Package Manager Details
 
