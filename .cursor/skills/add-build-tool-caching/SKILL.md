@@ -52,9 +52,9 @@ The orchestration pipeline `tempai` (QA0, `default`/`qajt`) takes `build_tool` a
 | `implement` | agent | research, design, code and tests, the local and public-project gates, the harness-core env commit (when research sets `cache_env`), `REPORT.md`, one local commit on `feat/<tool>-caching-<worker>` |
 | `build_binary`, `push_candidate_image` | pipeline | build and push `<docker_repo>:<tool>-<worker>-<sequence>` with `BuildAndPushDockerRegistry` |
 | `remote_validate` | agent | creates and runs `ci_intel_<tool>_<worker>` on QA0 (cold, warm, invalidate) with the candidate image, records the evidence, regenerates the report, amends the commit |
-| `product_override_on` | pipeline | `product_path` only: sets the account-level VM `cacheTag` to the candidate; refuses when another candidate holds it |
+| `product_override_on` | pipeline | `product_path` only: sets the account-level K8s (`infra=K8`) `cacheGCSTag`, `cacheS3Tag`, and `cacheTag` to the candidate; refuses when another candidate holds it |
 | `remote_product` | agent | `product_path` only: creates the Harness Code fixture repository and runs `ci_intel_<tool>_<worker>_product` (stage `caching.enabled`) twice: seed, then warm |
-| `product_override_off` | pipeline | always runs: resets `cacheTag`, but only when it still points at this run's candidate |
+| `product_override_off` | pipeline | always runs: resets `cacheGCSTag`, `cacheS3Tag`, and `cacheTag`, but only when they still point at this run's candidate |
 | `push_branch_and_pr` | pipeline | pushes the branch and opens or refreshes the draft drone-cache PR from `out/PR_BODY.md` |
 | `harness_core_pr` | pipeline | pushes the harness-core branch and opens or refreshes the draft harness-core PR from `out/HARNESS_CORE_PR.md`; links the two PRs to each other |
 | `summary` | pipeline | prints the terminal state, PR links and the latest result of every gate |
