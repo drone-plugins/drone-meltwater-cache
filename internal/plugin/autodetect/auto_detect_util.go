@@ -157,6 +157,12 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 				"Pipfile.lock",
 			},
 		},
+		{
+			globToDetect:        "Cargo.lock",
+			tool:                "cargo",
+			preparer:            newCargoPreparer(),
+			additionalCacheDirs: cargoCacheDirs,
+		},
 	}
 
 	var directoriesToCache []string
