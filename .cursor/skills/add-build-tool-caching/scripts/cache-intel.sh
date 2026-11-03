@@ -40,6 +40,7 @@ GATE=""
 REASON=""
 FROM_DIR=""
 FIXTURE_FILES=""
+FIXTURE_REPLACE=""
 declare -A OPT=()
 
 STATE_ROOT=""
@@ -73,6 +74,7 @@ Utilities:
   help | status
   waive          Record a gate as BLOCKED or NOT_APPLICABLE: --gate <name> --result BLOCKED --reason "<owner/action>"
   fixture-commit Build the Harness Code fixture commits (main, plus the invalidate branch): --from <dir> [--files a,b]
+                 [--replace <paths-file>] when the repository holds another project (paths now on main)
 
 Common options:
   --tool <name>            build tool (required)          --worker-id <id>   isolates state, branch, image, pipeline
@@ -477,6 +479,8 @@ test_public() {
   git -C "$ws" fetch -q --depth 1 origin "$ref" || die "cannot fetch ${repo} ${ref}"
   git -C "$ws" checkout -q FETCH_HEAD
   metric LOCAL_FIXTURE_SHA "$(git -C "$ws" rev-parse HEAD)"
+  metric LOCAL_FIXTURE_REPO "$repo"
+  metric LOCAL_FIXTURE_REF "$ref"
   metric LOCAL_RUNNER "$ACTIVE_RUNNER$( [[ "$ACTIVE_RUNNER" == docker ]] && echo " ($(field install_image))")"
   PLUGIN="$(plugin_bin)"
 
@@ -531,7 +535,11 @@ test_public() {
     || { record test-public FAIL "key did not change after ${inval} changed"; exit 1; }
   git -C "$ws" checkout -q -- "$inval"
 
-  record test-public PASS "$(kv_get "$METRICS" LOCAL_RUNNER): cold $(kv_get "$METRICS" LOCAL_COLD_INSTALL_S)s, warm $(kv_get "$METRICS" LOCAL_WARM_INSTALL_S)s$( [[ -n "$offline" ]] && echo ", offline OK"), archive $(kv_get "$METRICS" LOCAL_ARCHIVE_KB)KB, invalidation missed"
+  # The offline check is the first step to read the restored cache; the install after it has nothing left to fetch.
+  local warm_s
+  warm_s="$(kv_get "$METRICS" LOCAL_WARM_INSTALL_S)"
+  [[ -z "$offline" ]] || warm_s="$(kv_get "$METRICS" LOCAL_OFFLINE_S)"
+  record test-public PASS "$(kv_get "$METRICS" LOCAL_RUNNER): ${repo}@${ref}: cold $(kv_get "$METRICS" LOCAL_COLD_INSTALL_S)s, warm ${warm_s}s$( [[ -n "$offline" ]] && echo " (offline check)"), archive $(kv_get "$METRICS" LOCAL_ARCHIVE_KB)KB, invalidation missed"
 }
 
 load_profile() {
@@ -738,6 +746,13 @@ cmd_remote_setup() {
   for f in fixture_repo fixture_ref install_image install_cmd warm_check invalidate_file; do
     [[ -n "$(field "$f")" ]] || die "research field ${f} is empty"
   done
+  local local_repo local_ref
+  local_repo="$(kv_get "$METRICS" LOCAL_FIXTURE_REPO)"; local_ref="$(kv_get "$METRICS" LOCAL_FIXTURE_REF)"
+  if [[ "$(gate_result test-public)" == PASS && -n "$local_repo" ]] \
+    && [[ "$local_repo" != "$(field fixture_repo)" || "$local_ref" != "$(field fixture_ref)" ]]; then
+    record remote-setup FAIL "research names $(field fixture_repo)@$(field fixture_ref) but test --public ran on ${local_repo}@${local_ref}"
+    die "research names $(field fixture_repo)@$(field fixture_ref), but the local test ran on ${local_repo}@${local_ref}. The remote phase validates the project the local test used: restore fixture_repo and fixture_ref in research.md, re-run research, and replace the fixture repository's content if it holds another project (COMMANDS.md remote-setup)."
+  fi
   kv_set "$STATE_FILE" CANDIDATE_IMAGE "$IMAGE_TAG"
   local id out repo
   id="$(remote_pipeline_id)"
@@ -754,10 +769,18 @@ The pipeline runs on Kubernetes (${K8S_CONNECTOR}/${K8S_NAMESPACE}) with caching
 steps Cache Intelligence injects (restore-cache-harness, save-cache-harness). They run ${IMAGE_TAG} only while the
 orchestrator pins it in the account-level K8s cache tags; never change that setting.
 Next, with Harness MCP (scope ${HARNESS_ORG}/${HARNESS_PROJECT}):
-  1. Fixture repository ${repo}: if harness_get finds none, harness_create resource_type=repository (private,
-     default branch ${OPT[harness_code_branch]:-main}), then harness_create resource_type=commit with
-     remote/fixture-commit.json and then remote/fixture-commit-invalidate.json from "cache-intel.sh fixture-commit".
-     Skip a commit when the branch already holds those files.
+  1. Fixture repository ${repo}, holding $(field fixture_repo)@$(field fixture_ref): run "cache-intel.sh fixture-commit"
+     and compare the FIXTURE_MATCH blob sha of $(field invalidate_file) with the one harness_get
+     resource_type=file_content params {repo_id: ${repo}, git_ref: <branch>, path: $(field invalidate_file)} returns:
+       - no repository: harness_create resource_type=repository (private, default branch ${OPT[harness_code_branch]:-main}),
+         then commit the files FIXTURE_COMMITS lists, in order;
+       - both branches match: the repository already holds this fixture; commit nothing;
+       - otherwise it holds another project: never switch research to it. Save the paths harness_list
+         resource_type=file_content params {repo_id: ${repo}, git_ref: ${OPT[harness_code_branch]:-main}} returns, re-run
+         fixture-commit with --replace <that file>, and commit the files FIXTURE_COMMITS lists, in order (they empty
+         each branch, then recreate the fixture). If branch ${INVALIDATE_BRANCH} does not exist, commit
+         remote/fixture-commit-invalidate.json in place of the two ${INVALIDATE_BRANCH} commits.
+     Commit with harness_create resource_type=commit, body = the file's JSON.
      For repository and commit calls pass org_id=${HARNESS_ORG} and project_id=${HARNESS_PROJECT} (commit also
      params {repo_id: ${repo}}) and omit resource_scope: the MCP server rejects resource_scope=project for these
      types ("Supported scopes: account"), yet org_id/project_id address the project repository.
@@ -859,7 +882,7 @@ cmd_fixture_commit() {
   python3 "$HELPERS" fixture-commit --from "$FROM_DIR" --out "$out" --files "$FIXTURE_FILES" \
     --title "Cache Intelligence fixture: $(field fixture_repo)@$(field fixture_ref)" \
     --branch "${OPT[harness_code_branch]:-main}" \
-    --invalidate-file "$(field invalidate_file)" --invalidate-branch "$INVALIDATE_BRANCH"
+    --invalidate-file "$(field invalidate_file)" --invalidate-branch "$INVALIDATE_BRANCH" ${FIXTURE_REPLACE:+--replace "$FIXTURE_REPLACE"}
   echo "FIXTURE_REPOSITORY=$(fixture_repo_id)"
 }
 
@@ -918,6 +941,7 @@ parse_args() {
       --reason) REASON="${2:?}"; shift 2 ;;
       --from) FROM_DIR="${2:?}"; shift 2 ;;
       --files) FIXTURE_FILES="${2:-}"; shift 2 ;;
+      --replace) FIXTURE_REPLACE="${2:?}"; shift 2 ;;
       --local-test) TEST_MODE=local; shift ;;
       --lifecycle) TEST_MODE=lifecycle; shift ;;
       --compatibility) TEST_MODE=compatibility; shift ;;

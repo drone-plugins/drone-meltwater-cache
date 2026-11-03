@@ -4,7 +4,8 @@
 Subcommands:
   fields <research.md>                    print `name<TAB>value` for every field
   check <research|design> <file>          print problems; exit 1 when the document is incomplete
-  fixture-commit --from DIR --out FILE    build the Harness Code commit bodies (MCP harness_create commit)
+  fixture-commit --from DIR --out FILE [--replace PATHS]
+                                          build the Harness Code commit bodies (MCP harness_create commit)
   report --work DIR --repo DIR ...        render REPORT.md, PR_BODY.md and HARNESS_CORE_PR.md
 """
 import argparse
@@ -135,7 +136,26 @@ def git_blob_sha(data):
     return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 
-def fixture_commit(src, out, title, branch, files, max_kb, invalidate_file="", invalidate_branch="invalidate"):
+def read_paths(path):
+    """Paths from `harness_list resource_type=file_content` output (its `files` array), a JSON list, or one per line."""
+    text = read(path).strip()
+    if not text:
+        sys.exit("--replace %s is empty: save the paths harness_list resource_type=file_content returns for main" % path)
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return [line.strip() for line in text.splitlines() if line.strip()]
+    if isinstance(data, dict):
+        data = data.get("files") or [i["path"] for i in data.get("items", []) if i.get("type") == "file"]
+    return [p for p in data if isinstance(p, str) and p]
+
+
+def write_commit(path, body):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(body, f)
+
+
+def fixture_commit(src, out, title, branch, files, max_kb, invalidate_file="", invalidate_branch="invalidate", replace=""):
     selected = []
     roots = [os.path.join(src, f) for f in files] if files else [src]
     for root in roots:
@@ -162,8 +182,7 @@ def fixture_commit(src, out, title, branch, files, max_kb, invalidate_file="", i
         except UnicodeDecodeError:
             actions.append({"action": "CREATE", "path": rel, "payload": base64.b64encode(data).decode(), "encoding": "base64"})
         total += size
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump({"title": title, "branch": branch, "actions": actions}, f)
+    write_commit(out, {"title": title, "branch": branch, "actions": actions})
     print("FIXTURE_COMMIT=%s files=%d bytes=%d skipped=%s" % (out, len(actions), total, ",".join(skipped) or "none"))
     if not invalidate_file:
         return
@@ -177,16 +196,33 @@ def fixture_commit(src, out, title, branch, files, max_kb, invalidate_file="", i
         data = f.read()
     changed = data + b"\n"
     payload = changed.decode("utf-8") if action["encoding"] == "utf8" else base64.b64encode(changed).decode()
-    inv_out = os.path.splitext(out)[0] + "-invalidate.json"
-    with open(inv_out, "w", encoding="utf-8") as f:
-        json.dump({
-            "title": "Cache Intelligence fixture: change %s (invalidate scenario)" % rel,
-            "branch": branch,
-            "new_branch": invalidate_branch,
-            "actions": [{"action": "UPDATE", "path": rel, "payload": payload, "encoding": action["encoding"],
-                         "sha": git_blob_sha(data)}],
-        }, f)
+    base = os.path.splitext(out)[0]
+    inv_title = "Cache Intelligence fixture: change %s (invalidate scenario)" % rel
+    inv_out = base + "-invalidate.json"
+    write_commit(inv_out, {
+        "title": inv_title,
+        "branch": branch,
+        "new_branch": invalidate_branch,
+        "actions": [{"action": "UPDATE", "path": rel, "payload": payload, "encoding": action["encoding"],
+                     "sha": git_blob_sha(data)}],
+    })
     print("FIXTURE_INVALIDATE_COMMIT=%s branch=%s file=%s" % (inv_out, invalidate_branch, rel))
+    print("FIXTURE_MATCH path=%s %s_sha=%s %s_sha=%s" % (rel, branch, git_blob_sha(data), invalidate_branch, git_blob_sha(changed)))
+    if not replace:
+        print("FIXTURE_COMMITS=%s,%s" % (out, inv_out))
+        return
+    # The repository holds another project. Harness Code UPDATE needs each file's current blob sha, so each branch is
+    # emptied first and then gets the fixture through CREATE; the invalidate branch already exists, hence no new_branch.
+    old = read_paths(replace)
+    clear = "Cache Intelligence fixture: remove the previous fixture"
+    clear_main, clear_inv, inv_replace = base + "-clear-main.json", base + "-clear-invalidate.json", base + "-invalidate-replace.json"
+    write_commit(clear_main, {"title": clear, "branch": branch, "actions": [{"action": "DELETE", "path": p} for p in old]})
+    write_commit(clear_inv, {"title": clear, "branch": invalidate_branch, "actions": [{"action": "DELETE", "path": p} for p in old]})
+    changed_action = dict(action, payload=payload)
+    write_commit(inv_replace, {"title": inv_title, "branch": invalidate_branch,
+                               "actions": [changed_action if a["path"] == rel else a for a in actions]})
+    print("FIXTURE_REPLACES=%d paths" % len(old))
+    print("FIXTURE_COMMITS=%s,%s,%s,%s" % (clear_main, out, clear_inv, inv_replace))
 
 
 # ---------------------------------------------------------------- report
@@ -292,14 +328,24 @@ class Report:
             return "%s, already injected by harness-core" % where
         return "%s, harness-core change %s" % (where, status.lower().replace("_", " "))
 
+    def local_fixture(self):
+        m, f = self.metrics, self.fields
+        return m.get("LOCAL_FIXTURE_REPO") or f.get("fixture_repo", "?"), m.get("LOCAL_FIXTURE_REF") or f.get("fixture_ref", "?")
+
+    def fixture_changed(self):
+        return self.local_fixture() != (self.fields.get("fixture_repo", "?"), self.fields.get("fixture_ref", "?"))
+
+    def local_warm_s(self):
+        return self.metrics.get("LOCAL_OFFLINE_S") or self.metrics.get("LOCAL_WARM_INSTALL_S")
+
     def local_line(self):
         m = self.metrics
         if self.gate("test-public")[0] != "PASS":
             return "%s (%s)" % (self.gate("test-public")[0], self.gate("test-public")[1] or "not run")
-        parts = ["cold install %s" % secs(m.get("LOCAL_COLD_INSTALL_S")), "warm install %s" % secs(m.get("LOCAL_WARM_INSTALL_S"))]
+        warm = "warm install %s" % secs(self.local_warm_s())
         if m.get("LOCAL_OFFLINE_S"):
-            parts.append("offline check %s" % secs(m.get("LOCAL_OFFLINE_S")))
-        parts.append("archive %s" % kb_to_mb(m.get("LOCAL_ARCHIVE_KB")))
+            warm += " (the offline check)"
+        parts = ["cold install %s" % secs(m.get("LOCAL_COLD_INSTALL_S")), warm, "archive %s" % kb_to_mb(m.get("LOCAL_ARCHIVE_KB"))]
         return ", ".join(parts)
 
     def remote_line(self, names):
@@ -324,7 +370,7 @@ class Report:
             ("Cached paths", ", ".join(code(x.strip()) for x in f.get("cache_paths", "").split(","))),
             ("Never cached", ", ".join(code(x.strip()) for x in f.get("excluded_paths", "").split(","))),
             ("Build-step env", self.env_line()),
-            ("Local, public project", "%s @ %s: %s" % (f.get("fixture_repo", "?"), code(f.get("fixture_ref", "?")), self.local_line())),
+            ("Local, public project", "%s @ %s: %s" % (self.local_fixture()[0], code(self.local_fixture()[1]), self.local_line())),
             ("Harness Cache Intelligence (K8s)", self.remote_line(["cold", "warm", "invalidate"])),
             ("Candidate image", code(self.image())),
         ]
@@ -347,8 +393,9 @@ class Report:
         m, f = self.metrics, self.fields
         if not m.get("LOCAL_FIXTURE_SHA"):
             return "Not run. %s" % (self.gate("test-public")[1] or "")
+        repo, ref = self.local_fixture()
         rows = [
-            ("Fixture", "%s @ %s (`%s`)" % (f.get("fixture_repo"), code(f.get("fixture_ref")), m.get("LOCAL_FIXTURE_SHA", "")[:12])),
+            ("Fixture", "%s @ %s (`%s`)" % (repo, code(ref), m.get("LOCAL_FIXTURE_SHA", "")[:12])),
             ("Runner", "%s%s" % (m.get("LOCAL_RUNNER", "?"), (" with " + code(m["LOCAL_TOOL_VERSION"])) if m.get("LOCAL_TOOL_VERSION") else "")),
             ("1. Cold restore", "miss, as expected"),
             ("2. Install (cold)", "%s with `%s`" % (secs(m.get("LOCAL_COLD_INSTALL_S")), f.get("install_cmd"))),
@@ -356,10 +403,13 @@ class Report:
             ("4. Fresh checkout", "`git clean -ffdx` removed every untracked and ignored file"),
             ("5. Warm restore", "%s, %s restored into %s" % (secs(m.get("LOCAL_WARM_RESTORE_S")), kb_to_mb(m.get("LOCAL_WARM_KB")), code(f.get("warm_check")))),
             ("6. Offline check", ("%s with `%s`" % (secs(m.get("LOCAL_OFFLINE_S")), f.get("offline_cmd"))) if m.get("LOCAL_OFFLINE_S") else "not applicable"),
-            ("7. Install (warm)", secs(m.get("LOCAL_WARM_INSTALL_S"))),
+            ("7. Install (warm)", secs(m.get("LOCAL_WARM_INSTALL_S")) + ("; step 6 already read the restored cache, so the warm install time is step 6's" if m.get("LOCAL_OFFLINE_S") else "")),
             ("8. Invalidation", "changing %s gave key `%s` instead of `%s`; restore missed" % (code(f.get("invalidate_file")), m.get("LOCAL_INVALIDATED_KEY", "?"), m.get("LOCAL_KEY", "?"))),
         ]
-        return "\n".join(["| Step | Result |", "|------|--------|"] + ["| %s | %s |" % r for r in rows])
+        out = ["| Step | Result |", "|------|--------|"] + ["| %s | %s |" % r for r in rows]
+        if self.fixture_changed():
+            out += ["", "Research now names %s @ %s, a different project from the one above; the Harness runs below used it, so these local results do not cover it." % (f.get("fixture_repo", "?"), code(f.get("fixture_ref", "?")))]
+        return "\n".join(out)
 
     def remote_section(self):
         if not self.runs:
@@ -377,6 +427,7 @@ class Report:
         notes = [
             "",
             "- Every run is a Kubernetes stage with `caching.enabled: true`: restore and save are the steps Cache Intelligence injects, running the candidate image that the orchestrator pins in the account-level K8s cache tags for the duration of the remote phase.",
+            "- The codebase is a Harness Code copy of %s @ %s (manifest, lockfile and stub sources)." % (self.fields.get("fixture_repo", "?"), code(self.fields.get("fixture_ref", "?"))),
             "- **cold** uses cache policy `push` (no restore), so its install time is a true cold baseline; save then overwrites the key with the candidate's archive.",
             warm,
             "- **invalidate** clones a fixture branch where %s differs, uses `pull`, and must miss; it never saves." % code(self.fields.get("invalidate_file")),
@@ -575,6 +626,7 @@ def main():
     s.add_argument("--max-kb", type=int, default=256)
     s.add_argument("--invalidate-file", default="")
     s.add_argument("--invalidate-branch", default="invalidate")
+    s.add_argument("--replace", default="", help="paths now on the fixture repository's main branch")
     s = sub.add_parser("report")
     s.add_argument("--work", required=True)
     s.add_argument("--repo", required=True)
@@ -596,7 +648,7 @@ def main():
         sys.exit(1 if problems else 0)
     elif a.cmd == "fixture-commit":
         files = [x.strip() for x in a.files.split(",") if x.strip()]
-        fixture_commit(a.src, a.out, a.title, a.branch, files, a.max_kb, a.invalidate_file, a.invalidate_branch)
+        fixture_commit(a.src, a.out, a.title, a.branch, files, a.max_kb, a.invalidate_file, a.invalidate_branch, a.replace)
     elif a.cmd == "report":
         r = Report(a)
         r.write_report(os.path.join(a.repo, "REPORT.md"))

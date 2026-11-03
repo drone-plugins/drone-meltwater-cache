@@ -34,7 +34,7 @@ validate → report
 | `validate` | no gate FAILED and none is missing | `out/summary.env` |
 | `report` | always (regenerates from state) | `REPORT.md`, `out/PR_BODY.md`, `out/HARNESS_CORE_PR.md` |
 
-Utilities: `help`, `status` (gate table and the next command), `waive --gate <g> --result BLOCKED|NOT_APPLICABLE|SKIPPED --reason "<owner and action>"`, `fixture-commit --from <dir> [--files a,b]` (writes `remote/fixture-commit.json` for `main` and `remote/fixture-commit-invalidate.json` for the `invalidate` branch), and `all` (implement-phase gates, then validate and report).
+Utilities: `help`, `status` (gate table and the next command), `waive --gate <g> --result BLOCKED|NOT_APPLICABLE|SKIPPED --reason "<owner and action>"`, `fixture-commit --from <dir> [--files a,b] [--replace <paths-file>]` (writes `remote/fixture-commit.json` for `main` and `remote/fixture-commit-invalidate.json` for the `invalidate` branch; `--replace` adds the commits that swap out another project, see `remote-setup`), and `all` (implement-phase gates, then validate and report).
 
 ## `research`
 
@@ -77,6 +77,8 @@ $CLI test --tool <t> --worker-id <w> --public [--runner auto|host|docker]
 7. warm install (timed);
 8. changing `invalidate_file` must produce a different key, and the restore must miss.
 
+With an `offline_cmd`, step 6 is the first to read the restored cache and the install in step 7 has nothing left to fetch, so the reported warm time is step 6's. The fixture this command ran on is recorded (`LOCAL_FIXTURE_REPO`, `LOCAL_FIXTURE_REF`), and `remote-setup` refuses a research fixture that differs from it.
+
 The research `cache_env` is set for both the plugin and the tool, exactly as harness-core will inject it. `--runner auto` uses the tool on PATH, otherwise Docker with `install_image`; the agent container has no Docker, so install the tool in user space there (`SKILL.md` section 6). On macOS Docker bind mounts, the first tool invocation after a restore can be slow (file-system overhead); trust the remote timings for performance claims.
 
 ## `build`
@@ -110,7 +112,9 @@ Renders `ci_intel_<tool>_<worker>` from [scripts/remote-pipeline.tmpl.yaml](scri
 
 The cache key is the hash of the detected files only, so every candidate for the same fixture shares it. That is why `cold` must not restore, and why `invalidate` never saves.
 
-To create the Harness Code fixture: copy only what the tool needs to resolve dependencies (manifest, lockfile, stub targets) into a scratch directory, keeping `fixture_subdir`, and run `$CLI fixture-commit --from <dir>`. Create the repository with `harness_create resource_type=repository` (private, default branch `main`), commit `remote/fixture-commit.json`, then `remote/fixture-commit-invalidate.json` (it creates branch `invalidate` with `invalidate_file` changed by one trailing newline; the blob `sha` it carries is the one of the `main` commit). Keep the commits small; their bodies pass through the MCP call. For `repository` and `commit` calls pass `org_id` and `project_id` (and `params.repo_id` for commits) but omit `resource_scope`: the MCP server rejects `resource_scope=project` for these types ("Supported scopes: account"), while `org_id`/`project_id` alone address the project repository.
+To create the Harness Code fixture: copy only what the tool needs to resolve dependencies (manifest, lockfile, stub targets) into a scratch directory, keeping `fixture_subdir`, and run `$CLI fixture-commit --from <dir>`. Create the repository with `harness_create resource_type=repository` (private, default branch `main`), commit `remote/fixture-commit.json`, then `remote/fixture-commit-invalidate.json` (it creates branch `invalidate` with `invalidate_file` changed by one trailing newline; the blob `sha` it carries is the one of the `main` commit). Keep the commits small; their bodies pass through the MCP call.
+
+The repository outlives the run, so a later run of the same worker can find it holding another project. `fixture-commit` prints `FIXTURE_MATCH`, the blob sha `invalidate_file` has on each branch when the branch holds this fixture; compare it with the `sha` of `harness_get resource_type=file_content` for that path and branch. When both match, commit nothing. Otherwise never switch research to the project found there: the local lifecycle ran on the research fixture, and `remote-setup` fails when the two differ. Save the paths `harness_list resource_type=file_content` returns for `main` and re-run `fixture-commit --replace <file>`. Harness Code `UPDATE` needs each file's current blob sha, so the commits it lists in `FIXTURE_COMMITS` empty each branch with `DELETE` actions and then recreate the fixture with `CREATE`, `invalidate` included. Commit them in that order; if `invalidate` does not exist yet, commit `remote/fixture-commit-invalidate.json` in place of its two commits. For `repository` and `commit` calls pass `org_id` and `project_id` (and `params.repo_id` for commits) but omit `resource_scope`: the MCP server rejects `resource_scope=project` for these types ("Supported scopes: account"), while `org_id`/`project_id` alone address the project repository.
 
 Then, with the Harness MCP server for the environment: preview the YAML once, `harness_create resource_type=pipeline` (or `harness_update` when it exists), and re-read it to confirm the infrastructure, the fixture repository and the stage variable.
 
