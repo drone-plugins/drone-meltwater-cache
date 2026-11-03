@@ -15,7 +15,7 @@ pipeline:
         build:
           type: branch
           spec:
-            branch: <+<+pipeline.variables.scenario> == "invalidate" ? "__INVALIDATE_BRANCH__" : "__HC_BRANCH__">
+            branch: '<+<+pipeline.variables.scenario> == "invalidate" ? "__INVALIDATE_BRANCH__" : "__HC_BRANCH__">'
   variables:
     - name: scenario
       type: String

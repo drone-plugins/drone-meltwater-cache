@@ -28,6 +28,7 @@ BASE_BRANCH="${BASE_BRANCH:-}"
 RUNNER="${CACHE_INTEL_RUNNER:-auto}"
 K8S_CONNECTOR="${CACHE_INTEL_K8S_CONNECTOR:-deleciplay}"
 K8S_NAMESPACE="${CACHE_INTEL_K8S_NAMESPACE:-harness-delegate-ng}"
+HARNESS_UI="${CACHE_INTEL_HARNESS_UI:-https://qa0.harness.io}"
 INVALIDATE_BRANCH=invalidate
 HC_DIR=""
 JIRA_ID="${JIRA_ID:-}"
@@ -91,6 +92,7 @@ Research-field overrides (normally read from research.md):
 remote-setup:   --k8s-connector <id> (default deleciplay)  --k8s-namespace <ns> (default harness-delegate-ng)
                 fixture repository: research harness_code_repo, default cache_intel_fixture_<tool>_<worker>
 remote-test:    --run <name> --execution-url <url> --result PASS|FAIL|BLOCKED [--metrics k=v,k=v] [--reason ...]
+                the URL is recorded on CACHE_INTEL_HARNESS_UI (default https://qa0.harness.io)
 harness-core:   --hc-dir <checkout> (default <git-common-dir>/cache-intel/harness-core) [--jira CI-123] [--no-windows]
 
 Examples:
@@ -808,6 +810,12 @@ cmd_remote_test() {
   esac
   case "$REMOTE_RESULT" in PASS|FAIL|BLOCKED) ;; *) die "--result must be PASS, FAIL or BLOCKED" ;; esac
   [[ "$REMOTE_RESULT" == BLOCKED || -n "$EXECUTION_URL" ]] || die "--execution-url is required"
+  if [[ -n "$EXECUTION_URL" ]]; then
+    [[ "$EXECUTION_URL" == *"/pipelines/$(remote_pipeline_id)/"* ]] \
+      || die "--execution-url is not an execution of $(remote_pipeline_id): $EXECUTION_URL"
+    # The agent's MCP server reaches Harness through a proxy, so the UI host in the URLs it reports is unreliable.
+    EXECUTION_URL="${HARNESS_UI%/}/${EXECUTION_URL#*://*/}"
+  fi
   local metrics="${RUN_METRICS//,/;}"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$REMOTE_RUN" "$REMOTE_RESULT" "$EXECUTION_URL" "${IMAGE_TAG:-unknown}" "$metrics" >>"$RUNS"
   local gate="remote-${REMOTE_RUN}"
