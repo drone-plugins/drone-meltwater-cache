@@ -249,7 +249,14 @@ func credentials(l log.Logger, c Config) (*google.Credentials, error) {
 	defer cancel()
 
 	if c.JSONKey != "" {
-		creds, err := google.CredentialsFromJSON(ctx, []byte(c.JSONKey), gcstorage.ScopeFullControl)
+		creds, err := serviceAccountCredentials(l, []byte(c.JSONKey), c.Timeout, gcstorage.ScopeFullControl)
+		if err == nil {
+			return creds, nil
+		}
+
+		level.Debug(l).Log("msg", "json key not handled by clock skew aware token source, using default", "err", err)
+
+		creds, err = google.CredentialsFromJSON(ctx, []byte(c.JSONKey), gcstorage.ScopeFullControl)
 		if err == nil {
 			return creds, nil
 		}
