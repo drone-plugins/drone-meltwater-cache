@@ -26,7 +26,9 @@ DOCKER_CONNECTOR="${DOCKER_CONNECTOR:-rpdockerhub}"
 REPO_NAME="${REPO_NAME:-drone-plugins/drone-meltwater-cache}"
 BASE_BRANCH="${BASE_BRANCH:-}"
 RUNNER="${CACHE_INTEL_RUNNER:-auto}"
-PRODUCT=false
+K8S_CONNECTOR="${CACHE_INTEL_K8S_CONNECTOR:-deleciplay}"
+K8S_NAMESPACE="${CACHE_INTEL_K8S_NAMESPACE:-harness-delegate-ng}"
+INVALIDATE_BRANCH=invalidate
 HC_DIR=""
 JIRA_ID="${JIRA_ID:-}"
 HC_WINDOWS=true
@@ -61,8 +63,8 @@ Workflow (each command is a gate; non-zero exit = not passed):
   build          Cross-compile release binaries (image is built by the orchestration pipeline)
   finalize       Require README and CHANGELOG entries for the tool
   harness-core   Add the tool's cache env to harness-core (VM + K8s + tests) when research says it is needed
-  remote-setup   Render this worker's Harness validation pipeline(s) from the research fields
-  remote-test    Record a Harness run: --run cold|warm|invalidate|product-seed|product-warm
+  remote-setup   Render this worker's Harness Cache Intelligence validation pipeline from the research fields
+  remote-test    Record a Harness run: --run cold|warm|invalidate
   validate       Evaluate every gate and print the terminal state
   report         Generate REPORT.md, the GitHub PR body and the harness-core PR body
   all            research → design → create → test --all → build → finalize → harness-core → validate → report
@@ -70,7 +72,7 @@ Workflow (each command is a gate; non-zero exit = not passed):
 Utilities:
   help | status
   waive          Record a gate as BLOCKED or NOT_APPLICABLE: --gate <name> --result BLOCKED --reason "<owner/action>"
-  fixture-commit Build a Harness Code commit body from a directory: --from <dir> [--files a,b]
+  fixture-commit Build the Harness Code fixture commits (main, plus the invalidate branch): --from <dir> [--files a,b]
 
 Common options:
   --tool <name>            build tool (required)          --worker-id <id>   isolates state, branch, image, pipeline
@@ -84,8 +86,8 @@ Research-field overrides (normally read from research.md):
   --fixture-repo --fixture-ref --fixture-subdir --install-image --install-cmd --offline-cmd
   --warm-check --invalidate-file --cache-env KEY=dir --harness-code-repo <id> --harness-code-branch <b>
 
-remote-setup:   --product                 also render the product-path pipeline (needs harness_code_repo)
-                --fixture-source github|harness_code   where the direct pipeline gets the fixture (default github)
+remote-setup:   --k8s-connector <id> (default deleciplay)  --k8s-namespace <ns> (default harness-delegate-ng)
+                fixture repository: research harness_code_repo, default cache_intel_fixture_<tool>_<worker>
 remote-test:    --run <name> --execution-url <url> --result PASS|FAIL|BLOCKED [--metrics k=v,k=v] [--reason ...]
 harness-core:   --hc-dir <checkout> (default <git-common-dir>/cache-intel/harness-core) [--jira CI-123] [--no-windows]
 
@@ -212,7 +214,8 @@ Skill: ${SKILL_DIR}/SKILL.md (read COMMANDS.md for each command's contract).
 State: <git-common-dir>/cache-intel/work/<tool>-<worker>/ (research.md, design.md, ledger.tsv, metrics.env,
        remote/, out/). It lives outside the working tree, so it never enters the product diff.
 Images: the agent container has no Docker daemon. The orchestration pipeline builds and pushes the
-       candidate with BuildAndPushDockerRegistry and passes it to the remote-validate phase.
+       candidate with BuildAndPushDockerRegistry, pins it in the account-level K8s cache tags for the
+       remote-validate phase, and resets the tags afterwards.
 Logs:   scripts/fetch-step-log.sh '<download_url from harness_get execution_log>'.
 EOF
 }
@@ -242,7 +245,7 @@ cmd_status() {
   printf '%-20s %-15s %s\n' GATE RESULT EVIDENCE
   local g
   for g in research design create test-local test-compatibility test-lifecycle test-public build finalize \
-    harness-core remote-cold remote-warm remote-invalidate product-seed product-warm; do
+    harness-core remote-cold remote-warm remote-invalidate; do
     local row
     row="$(awk -F'\t' -v g="$g" '$2 == g { r = $3 "\t" $4 } END { print r }' "$LEDGER" 2>/dev/null || true)"
     printf '%-20s %-15s %s\n' "$g" "${row%%$'\t'*}" "$( [[ "$row" == *$'\t'* ]] && echo "${row#*$'\t'}" | cut -c1-90)"
@@ -679,8 +682,15 @@ cmd_harness_core() {
 yaml_dq_escape() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
 
 remote_pipeline_id() {
-  local raw="ci_intel_${TOOL_SLUG}_${WORKER_ID}${1:-}"
+  local raw="ci_intel_${TOOL_SLUG}_${WORKER_ID}"
   echo "$raw" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_\n' '_' | cut -c1-120
+}
+
+fixture_repo_id() {
+  local r
+  r="$(field harness_code_repo)"
+  [[ -n "$r" ]] || r="$(echo "cache_intel_fixture_${TOOL_SLUG}_${WORKER_ID}" | tr -c 'a-z0-9_.\n-' '_')"
+  printf '%s' "$r"
 }
 
 stage_variables() {
@@ -691,18 +701,11 @@ stage_variables() {
 }
 
 render_template() {
-  # render_template <template> <out> <pipeline-id> <harness_code:true|false>
-  local tmpl="$1" out="$2" id="$3" hc="$4" body subdir key
+  # render_template <template> <out> <pipeline-id>
+  local tmpl="$1" out="$2" id="$3" body subdir key
   subdir="$(field fixture_subdir)"; subdir="${subdir:-.}"
   key="$(cache_env_key)"
-  local source=github fixture_repo
-  fixture_repo="$(field fixture_repo)"
-  if [[ "$hc" == true ]]; then source=harness_code; fixture_repo="$(field harness_code_repo)"; fi
-  body="$(awk -v hc="$hc" '
-    /^#@if harness_code/ { inblk = 1; keep = (hc == "true"); next }
-    /^#@else/ { keep = !keep; next }
-    /^#@end/ { inblk = 0; next }
-    { if (!inblk || keep) print }' "$tmpl")"
+  body="$(<"$tmpl")"
   body="${body//__PIPELINE_ID__/$id}"
   body="${body//__ORG__/$HARNESS_ORG}"
   body="${body//__PROJECT__/$HARNESS_PROJECT}"
@@ -710,11 +713,11 @@ render_template() {
   body="${body//__WORKER__/$WORKER_ID}"
   body="${body//__IMAGE__/$IMAGE_TAG}"
   body="${body//__DOCKER_CONNECTOR__/$DOCKER_CONNECTOR}"
-  body="${body//__HC_REPO__/$(field harness_code_repo)}"
+  body="${body//__K8S_CONNECTOR__/$K8S_CONNECTOR}"
+  body="${body//__K8S_NAMESPACE__/$K8S_NAMESPACE}"
+  body="${body//__HC_REPO__/$(fixture_repo_id)}"
   body="${body//__HC_BRANCH__/${OPT[harness_code_branch]:-main}}"
-  body="${body//__FIXTURE_SOURCE__/$source}"
-  body="${body//__FIXTURE_REPO__/$(yaml_dq_escape "$fixture_repo")}"
-  body="${body//__FIXTURE_REF__/$(yaml_dq_escape "$(field fixture_ref)")}"
+  body="${body//__INVALIDATE_BRANCH__/$INVALIDATE_BRANCH}"
   body="${body//__FIXTURE_SUBDIR__/$subdir}"
   body="${body//__INSTALL_IMAGE__/$(field install_image)}"
   body="${body//__INSTALL_CMD__/$(yaml_dq_escape "$(field install_cmd)")}"
@@ -736,54 +739,48 @@ cmd_remote_setup() {
     [[ -n "$(field "$f")" ]] || die "research field ${f} is empty"
   done
   kv_set "$STATE_FILE" CANDIDATE_IMAGE "$IMAGE_TAG"
-  local hc=false
-  [[ -n "$(field harness_code_repo)" && "${OPT[fixture_source]:-}" == harness_code ]] && hc=true
-  local id out
+  local id out repo
   id="$(remote_pipeline_id)"
   out="$WORK_DIR/remote/${id}.yaml"
-  render_template "$SCRIPT_DIR/remote-pipeline.tmpl.yaml" "$out" "$id" "$hc"
+  repo="$(fixture_repo_id)"
+  render_template "$SCRIPT_DIR/remote-pipeline.tmpl.yaml" "$out" "$id"
   echo "PIPELINE_ID=${id}"
   echo "PIPELINE_YAML=${out}"
-  local source evidence
-  if $hc; then source="$(field harness_code_repo)"; else source="$(field fixture_repo)"; fi
-  evidence="pipeline=${id}; image=${IMAGE_TAG}; fixture=${source}@$(field fixture_ref); cache_env=$(field cache_env)"
-  if $PRODUCT; then
-    [[ -n "$(field harness_code_repo)" ]] || die "--product needs research field harness_code_repo (create it with MCP and fixture-commit)"
-    local pid pout
-    pid="$(remote_pipeline_id _product)"
-    pout="$WORK_DIR/remote/${pid}.yaml"
-    render_template "$SCRIPT_DIR/remote-product-pipeline.tmpl.yaml" "$pout" "$pid" true
-    echo "PRODUCT_PIPELINE_ID=${pid}"
-    echo "PRODUCT_PIPELINE_YAML=${pout}"
-    evidence+="; product=${pid}"
-  fi
+  echo "FIXTURE_REPOSITORY=${repo} (branches ${OPT[harness_code_branch]:-main} and ${INVALIDATE_BRANCH})"
   cat <<EOF
 ORG=${HARNESS_ORG}
 PROJECT=${HARNESS_PROJECT}
+The pipeline runs on Kubernetes (${K8S_CONNECTOR}/${K8S_NAMESPACE}) with caching.enabled, so restore and save are the
+steps Cache Intelligence injects (restore-cache-harness, save-cache-harness). They run ${IMAGE_TAG} only while the
+orchestrator pins it in the account-level K8s cache tags; never change that setting.
 Next, with Harness MCP (scope ${HARNESS_ORG}/${HARNESS_PROJECT}):
-  1. harness_create resource_type=pipeline body=<YAML file contents>; if it exists, harness_update with the same body.
-  2. Run in order, waiting for each to finish (harness_diagnose on the execution URL):
+  1. Fixture repository ${repo}: if harness_get finds none, harness_create resource_type=repository (private,
+     default branch ${OPT[harness_code_branch]:-main}), then harness_create resource_type=commit with
+     remote/fixture-commit.json and then remote/fixture-commit-invalidate.json from "cache-intel.sh fixture-commit".
+     Skip a commit when the branch already holds those files.
+  2. harness_create resource_type=pipeline body=<YAML file contents>; if it exists, harness_update with the same body.
+  3. Run in order, waiting for each to finish (harness_diagnose on the execution URL):
        inputs {scenario: "cold"} → {scenario: "warm"} → {scenario: "invalidate"}
-  3. Read step logs: harness_get resource_type=execution_log params {execution_id, stage_id: validate,
+     Each run executes only the stage named after its scenario.
+  4. Read step logs: harness_get resource_type=execution_log params {execution_id, stage_id: <scenario>,
      step_id: <step>, return_download_url: true} → scripts/fetch-step-log.sh '<download_url>' 200
-  4. Record each: cache-intel.sh remote-test --run <scenario> --execution-url <url> --result PASS|FAIL \\
-       --metrics install_seconds=<TIMING_install_seconds>,cache_kb=<CACHE_KB or RESTORED_KB>
+  5. Record each: cache-intel.sh remote-test --run <scenario> --execution-url <url> --result PASS|FAIL \\
+       --metrics install_seconds=<TIMING_install_seconds>,cache_kb=<CACHE_KB or RESTORED_KB>,restore_state=<CACHE_STATE>
 EOF
-  record remote-setup PASS "$evidence"
+  record remote-setup PASS "pipeline=${id}; image=${IMAGE_TAG}; fixture=${repo}; infra=k8s:${K8S_CONNECTOR}/${K8S_NAMESPACE}; cache_env=$(field cache_env)"
 }
 
 cmd_remote_test() {
   init_state
   case "$REMOTE_RUN" in
-    cold|warm|invalidate|product-seed|product-warm) ;;
-    *) die "--run must be cold, warm, invalidate, product-seed or product-warm" ;;
+    cold|warm|invalidate) ;;
+    *) die "--run must be cold, warm or invalidate" ;;
   esac
   case "$REMOTE_RESULT" in PASS|FAIL|BLOCKED) ;; *) die "--result must be PASS, FAIL or BLOCKED" ;; esac
   [[ "$REMOTE_RESULT" == BLOCKED || -n "$EXECUTION_URL" ]] || die "--execution-url is required"
   local metrics="${RUN_METRICS//,/;}"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$REMOTE_RUN" "$REMOTE_RESULT" "$EXECUTION_URL" "${IMAGE_TAG:-unknown}" "$metrics" >>"$RUNS"
   local gate="remote-${REMOTE_RUN}"
-  [[ "$REMOTE_RUN" == product-* ]] && gate="$REMOTE_RUN"
   record "$gate" "$REMOTE_RESULT" "${EXECUTION_URL:-$REASON}${metrics:+; $metrics}"
   [[ "$REMOTE_RESULT" != FAIL ]] || exit 1
 }
@@ -811,10 +808,6 @@ cmd_validate() {
     printf '%-5s %-20s %s\n' "${r:-MISS}" "$g" ""
     [[ "$r" == FAIL ]] && failed+="$g "
     [[ "$r" == PASS ]] || remote_ok=false
-  done
-  for g in product-seed product-warm; do
-    r="$(gate_result "$g")"; [[ -n "$r" ]] && printf '%-5s %-20s (optional)\n' "$r" "$g"
-    [[ "$r" == FAIL ]] && failed+="$g "
   done
   local state
   if [[ -n "$failed" ]]; then state=FAILED
@@ -854,9 +847,13 @@ cmd_waive() {
 cmd_fixture_commit() {
   init_state
   [[ -n "$FROM_DIR" ]] || die "--from <dir> is required"
+  [[ -n "$(field invalidate_file)" ]] || die "research field invalidate_file is empty"
   local out="$WORK_DIR/remote/fixture-commit.json"
   python3 "$HELPERS" fixture-commit --from "$FROM_DIR" --out "$out" --files "$FIXTURE_FILES" \
-    --title "Cache Intelligence fixture: $(field fixture_repo)@$(field fixture_ref)"
+    --title "Cache Intelligence fixture: $(field fixture_repo)@$(field fixture_ref)" \
+    --branch "${OPT[harness_code_branch]:-main}" \
+    --invalidate-file "$(field invalidate_file)" --invalidate-branch "$INVALIDATE_BRANCH"
+  echo "FIXTURE_REPOSITORY=$(fixture_repo_id)"
 }
 
 cmd_all() {
@@ -890,8 +887,8 @@ parse_args() {
       --docker-connector) DOCKER_CONNECTOR="${2:?}"; shift 2 ;;
       --repo-name) REPO_NAME="${2:?}"; shift 2 ;;
       --runner) RUNNER="${2:?}"; shift 2 ;;
-      --product) PRODUCT=true; shift ;;
-      --fixture-source) OPT[fixture_source]="${2:?}"; shift 2 ;;
+      --k8s-connector) K8S_CONNECTOR="${2:?}"; shift 2 ;;
+      --k8s-namespace) K8S_NAMESPACE="${2:?}"; shift 2 ;;
       --fixture-repo) OPT[fixture_repo]="${2:?}"; shift 2 ;;
       --fixture-ref) OPT[fixture_ref]="${2:?}"; shift 2 ;;
       --fixture-subdir) OPT[fixture_subdir]="${2:?}"; shift 2 ;;

@@ -57,7 +57,7 @@ Every task ends in one of these states:
 - `DESIGNED`: implementation-ready design complete; blocked only by a user-owned decision.
 - `LOCAL_COMPLETE`: implementation, focused/full applicable tests, local lifecycle, docs, and report complete.
 - `REMOTE_BLOCKED`: local work is complete; an exact remote dependency, owner, and action are recorded.
-- `REMOTE_VALIDATED`: the immutable candidate passed target-environment cold, warm, and invalidation runs (`remote-cold`, `remote-warm`, `remote-invalidate` all PASS), plus applicable compatibility cases. Product-path runs (`product-seed`, `product-warm`) are additional evidence, not a requirement.
+- `REMOTE_VALIDATED`: the immutable candidate passed target-environment cold, warm, and invalidation runs on the real Cache Intelligence path (`remote-cold`, `remote-warm`, `remote-invalidate` all PASS), plus applicable compatibility cases.
 - `INTEGRATION_BLOCKED`: tool-local work is complete but awaits coordinator-owned shared changes or conflict resolution.
 - `FAILED`: a reproducible correctness or safety gate failed and no safe correction remains in scope.
 

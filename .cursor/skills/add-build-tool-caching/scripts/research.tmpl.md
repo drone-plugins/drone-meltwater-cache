@@ -23,7 +23,7 @@ Field reference:
 - warm_check: workspace-relative directory that must be non-empty after a warm restore
 - invalidate_file: workspace-relative file whose change must change the key (usually the lockfile)
 - unset_env: tool env vars to clear during isolated local runs (comma-separated), or none
-- harness_code_repo: Harness Code repo identifier holding a copy of the fixture (product path), or none
+- harness_code_repo: Harness Code repo identifier holding a copy of the fixture (remote validation), or none for cache_intel_fixture_<tool>_<worker>
 -->
 
 

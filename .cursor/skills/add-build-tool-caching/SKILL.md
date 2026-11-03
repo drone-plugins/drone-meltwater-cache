@@ -44,22 +44,21 @@ The research record is the single source of truth for later gates: its Fields li
 
 ### Harness worker runs
 
-The orchestration pipeline `tempai` (QA0, `default`/`qajt`) takes `build_tool` and `worker_id`, plus optional `jira_id`, `harness_core` (default true), `product_path` (default false) and `open_pr` (default true). It runs the agent `cache_intel_worker` in phases. Each worker has its own branch, state directory, image tag, validation pipelines, fixture repository and PRs, so several workers can run in parallel; only `product_path` runs must not overlap, because they share the account-level image override.
+The orchestration pipeline `tempai` (QA0, `default`/`qajt`) takes `build_tool` and `worker_id`, plus optional `jira_id`, `harness_core` (default true) and `open_pr` (default true). It runs the agent `cache_intel_worker` in phases. Each worker has its own branch, state directory, image tag, validation pipeline, fixture repository and PRs, so several workers can implement in parallel. Remote validation takes turns: it needs the account-level K8s Cache Intelligence image pinned to the worker's candidate, and there is only one such setting per account.
 
 | Step | Who | What |
 |------|-----|------|
 | `prepare_harness_core` | pipeline | sparse, shallow clone of harness-core `develop` (only the six files the env injection touches) into `<git-common-dir>/cache-intel/harness-core`, using secret `harness0_code_pat`; the token is stripped from the remote before the agent runs |
 | `implement` | agent | research, design, code and tests, the local and public-project gates, the harness-core env commit (when research sets `cache_env`), `REPORT.md`, one local commit on `feat/<tool>-caching-<worker>` |
 | `build_binary`, `push_candidate_image` | pipeline | build and push `<docker_repo>:<tool>-<worker>-<sequence>` with `BuildAndPushDockerRegistry` |
-| `remote_validate` | agent | creates and runs `ci_intel_<tool>_<worker>` on QA0 (cold, warm, invalidate) with the candidate image, records the evidence, regenerates the report, amends the commit |
-| `product_override_on` | pipeline | `product_path` only: sets the account-level K8s (`infra=K8`) `cacheGCSTag`, `cacheS3Tag`, and `cacheTag` to the candidate; refuses when another candidate holds it |
-| `remote_product` | agent | `product_path` only: creates the Harness Code fixture repository and runs `ci_intel_<tool>_<worker>_product` (stage `caching.enabled`) twice: seed, then warm |
-| `product_override_off` | pipeline | always runs: resets `cacheGCSTag`, `cacheS3Tag`, and `cacheTag`, but only when they still point at this run's candidate |
+| `cache_override_on` | pipeline | sets the account-level K8s (`infra=K8`) `cacheGCSTag`, `cacheS3Tag`, and `cacheTag` to the candidate; while another candidate holds them it waits, up to 10 minutes, then fails |
+| `remote_validate` | agent | creates the Harness Code fixture repository (`main` and `invalidate` branches) and `ci_intel_<tool>_<worker>`, a Kubernetes pipeline with `caching.enabled`, runs it cold, warm and invalidate, records the evidence, regenerates the report, amends the commit |
+| `cache_override_off` | pipeline | always runs: resets `cacheGCSTag`, `cacheS3Tag`, and `cacheTag` (K8 and VM), but only when they still point at this run's candidate |
 | `push_branch_and_pr` | pipeline | pushes the branch and opens or refreshes the draft drone-cache PR from `out/PR_BODY.md` |
 | `harness_core_pr` | pipeline | pushes the harness-core branch and opens or refreshes the draft harness-core PR from `out/HARNESS_CORE_PR.md`; links the two PRs to each other |
 | `summary` | pipeline | prints the terminal state, PR links and the latest result of every gate |
 
-The agent container has no Docker daemon and never pushes, publishes, toggles account settings or opens PRs. Remote validation never edits shared templates: the per-worker pipeline runs the candidate image directly against the real Harness cache backend (`HARNESS_CACHE_SERVICE_TOKEN`, `HARNESS_CACHE_SERVICE_ENDPOINT`, `HARNESS_ACCOUNT_ID`), and sets the research `cache_env` as a stage variable, which is exactly what the harness-core change injects. Read step logs with [scripts/fetch-step-log.sh](scripts/fetch-step-log.sh) and the `download_url` from `harness_get(resource_type=execution_log, params={return_download_url: true})`.
+The agent container has no Docker daemon and never pushes, publishes, toggles account settings or opens PRs. Remote validation never edits shared templates: the per-worker pipeline is an ordinary Kubernetes stage with `caching.enabled`, so the restore and save steps are the ones Cache Intelligence injects, and they run the candidate only because the pipeline pinned it in the account-level K8s cache tags. On K8s that pin applies only through the project's self-hosted cache connector (GCP: `cacheGCSTag`, AWS: `cacheS3Tag`); without one, Cache Intelligence uses the ci-manager service image. The research `cache_env` is a stage variable, which is exactly what the harness-core change injects. Read step logs with [scripts/fetch-step-log.sh](scripts/fetch-step-log.sh) and the `download_url` from `harness_get(resource_type=execution_log, params={return_download_url: true})`.
 
 Examples:
 

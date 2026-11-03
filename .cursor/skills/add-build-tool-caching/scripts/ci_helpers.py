@@ -4,11 +4,12 @@
 Subcommands:
   fields <research.md>                    print `name<TAB>value` for every field
   check <research|design> <file>          print problems; exit 1 when the document is incomplete
-  fixture-commit --from DIR --out FILE    build a Harness Code commit body (MCP harness_create commit)
+  fixture-commit --from DIR --out FILE    build the Harness Code commit bodies (MCP harness_create commit)
   report --work DIR --repo DIR ...        render REPORT.md, PR_BODY.md and HARNESS_CORE_PR.md
 """
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -36,11 +37,9 @@ GATES = [
     ("build", "Cross-compiled release binaries"),
     ("finalize", "README and CHANGELOG"),
     ("harness-core", "harness-core env injection"),
-    ("remote-cold", "Harness: cold run"),
-    ("remote-warm", "Harness: warm run"),
-    ("remote-invalidate", "Harness: invalidation run"),
-    ("product-seed", "Harness Cache Intelligence (product path): seed run"),
-    ("product-warm", "Harness Cache Intelligence (product path): warm run"),
+    ("remote-cold", "Harness Cache Intelligence (K8s): cold run"),
+    ("remote-warm", "Harness Cache Intelligence (K8s): warm run"),
+    ("remote-invalidate", "Harness Cache Intelligence (K8s): invalidation run"),
 ]
 
 
@@ -132,7 +131,11 @@ def check_design(text):
 
 # ---------------------------------------------------------------- fixture commit
 
-def fixture_commit(src, out, title, branch, files, max_kb):
+def git_blob_sha(data):
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def fixture_commit(src, out, title, branch, files, max_kb, invalidate_file="", invalidate_branch="invalidate"):
     selected = []
     roots = [os.path.join(src, f) for f in files] if files else [src]
     for root in roots:
@@ -162,6 +165,28 @@ def fixture_commit(src, out, title, branch, files, max_kb):
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"title": title, "branch": branch, "actions": actions}, f)
     print("FIXTURE_COMMIT=%s files=%d bytes=%d skipped=%s" % (out, len(actions), total, ",".join(skipped) or "none"))
+    if not invalidate_file:
+        return
+    # The invalidate scenario clones a branch whose invalidate_file differs from `branch`; restore runs before any
+    # user step, so the change has to be committed. UPDATE needs the blob sha, which is the one of the bytes above.
+    rel = os.path.relpath(os.path.join(src, invalidate_file), src).replace(os.sep, "/")
+    action = next((a for a in actions if a["path"] == rel), None)
+    if action is None:
+        sys.exit("invalidate_file %s is not in the fixture commit (skipped or not under --from)" % rel)
+    with open(os.path.join(src, rel), "rb") as f:
+        data = f.read()
+    changed = data + b"\n"
+    payload = changed.decode("utf-8") if action["encoding"] == "utf8" else base64.b64encode(changed).decode()
+    inv_out = os.path.splitext(out)[0] + "-invalidate.json"
+    with open(inv_out, "w", encoding="utf-8") as f:
+        json.dump({
+            "title": "Cache Intelligence fixture: change %s (invalidate scenario)" % rel,
+            "branch": branch,
+            "new_branch": invalidate_branch,
+            "actions": [{"action": "UPDATE", "path": rel, "payload": payload, "encoding": action["encoding"],
+                         "sha": git_blob_sha(data)}],
+        }, f)
+    print("FIXTURE_INVALIDATE_COMMIT=%s branch=%s file=%s" % (inv_out, invalidate_branch, rel))
 
 
 # ---------------------------------------------------------------- report
@@ -286,7 +311,7 @@ class Report:
             extra = []
             if r["metrics"].get("install_seconds"):
                 extra.append("install %s" % secs(r["metrics"]["install_seconds"]))
-            label = "%s %s" % (name.replace("product-", ""), r["result"])
+            label = "%s %s" % (name, r["result"])
             bits.append(link(label, r["url"]) + (" (%s)" % ", ".join(extra) if extra else ""))
         return " · ".join(bits) if bits else "not run"
 
@@ -300,8 +325,7 @@ class Report:
             ("Never cached", ", ".join(code(x.strip()) for x in f.get("excluded_paths", "").split(","))),
             ("Build-step env", self.env_line()),
             ("Local, public project", "%s @ %s: %s" % (f.get("fixture_repo", "?"), code(f.get("fixture_ref", "?")), self.local_line())),
-            ("Harness, candidate image", self.remote_line(["cold", "warm", "invalidate"])),
-            ("Harness, real Cache Intelligence", self.remote_line(["product-seed", "product-warm"]) if self.last_run("product-seed") or self.last_run("product-warm") else "not run (opt-in `product_path`)"),
+            ("Harness Cache Intelligence (K8s)", self.remote_line(["cold", "warm", "invalidate"])),
             ("Candidate image", code(self.image())),
         ]
         out = ["| | |", "|---|---|"]
@@ -312,7 +336,7 @@ class Report:
         out = ["| Gate | Result | Evidence |", "|------|--------|----------|"]
         for name, label in GATES:
             result, ev = self.gate(name)
-            if compact and result == "NOT RUN" and name in ("test-lifecycle", "product-seed", "product-warm"):
+            if compact and result == "NOT RUN" and name == "test-lifecycle":
                 continue
             if compact and len(ev) > 140:
                 ev = ev[:137] + "..."
@@ -348,15 +372,14 @@ class Report:
                 kb_to_mb(m["cache_kb"]) if m.get("cache_kb") else m.get("restore_state", "—"), code(r["image"])))
         notes = [
             "",
-            "- **cold** skips restore, so its install time is a true cold baseline; save then overwrites the key with the candidate's archive.",
-            "- **warm** must restore %s before install, or the run fails." % code(self.fields.get("warm_check")),
-            "- **invalidate** changes %s and must miss; it never saves." % code(self.fields.get("invalidate_file")),
+            "- Every run is a Kubernetes stage with `caching.enabled: true`: restore and save are the steps Cache Intelligence injects, running the candidate image that the orchestrator pins in the account-level K8s cache tags for the duration of the remote phase.",
+            "- **cold** uses cache policy `push` (no restore), so its install time is a true cold baseline; save then overwrites the key with the candidate's archive.",
+            "- **warm** uses `pull-push` and must restore %s before install, or the run fails." % code(self.fields.get("warm_check")),
+            "- **invalidate** clones a fixture branch where %s differs, uses `pull`, and must miss; it never saves." % code(self.fields.get("invalidate_file")),
         ]
         env = self.fields.get("cache_env", "none")
         if env not in ("", "none"):
             notes.append("- Every step gets %s as a stage variable, exactly what the harness-core change injects." % code(env.replace("=", "=/harness/", 1)))
-        if any(r["run"].startswith("product") for r in self.runs):
-            notes.append("- **product** runs use `caching.enabled: true` with the account-level Cache Intelligence image overridden to the candidate for the duration of the run, then reset.")
         return "\n".join(out + notes)
 
     def harness_core_section(self):
@@ -546,6 +569,8 @@ def main():
     s.add_argument("--branch", default="main")
     s.add_argument("--files", default="")
     s.add_argument("--max-kb", type=int, default=256)
+    s.add_argument("--invalidate-file", default="")
+    s.add_argument("--invalidate-branch", default="invalidate")
     s = sub.add_parser("report")
     s.add_argument("--work", required=True)
     s.add_argument("--repo", required=True)
@@ -567,7 +592,7 @@ def main():
         sys.exit(1 if problems else 0)
     elif a.cmd == "fixture-commit":
         files = [x.strip() for x in a.files.split(",") if x.strip()]
-        fixture_commit(a.src, a.out, a.title, a.branch, files, a.max_kb)
+        fixture_commit(a.src, a.out, a.title, a.branch, files, a.max_kb, a.invalidate_file, a.invalidate_branch)
     elif a.cmd == "report":
         r = Report(a)
         r.write_report(os.path.join(a.repo, "REPORT.md"))

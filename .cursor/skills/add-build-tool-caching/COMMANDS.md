@@ -13,7 +13,7 @@ Natural-language and slash-style requests (`/add-build-tool-caching research --t
 
 ```text
 research → design → create → test --all → build → finalize → harness-core      (implement phase)
-remote-setup → remote-test cold → warm → invalidate [→ product-seed → product-warm]   (remote phases)
+remote-setup → remote-test cold → warm → invalidate                             (remote-validate phase)
 validate → report
 ```
 
@@ -34,7 +34,7 @@ validate → report
 | `validate` | no gate FAILED and none is missing | `out/summary.env` |
 | `report` | always (regenerates from state) | `REPORT.md`, `out/PR_BODY.md`, `out/HARNESS_CORE_PR.md` |
 
-Utilities: `help`, `status` (gate table and the next command), `waive --gate <g> --result BLOCKED|NOT_APPLICABLE|SKIPPED --reason "<owner and action>"`, `fixture-commit --from <dir> [--files a,b]`, and `all` (implement-phase gates, then validate and report).
+Utilities: `help`, `status` (gate table and the next command), `waive --gate <g> --result BLOCKED|NOT_APPLICABLE|SKIPPED --reason "<owner and action>"`, `fixture-commit --from <dir> [--files a,b]` (writes `remote/fixture-commit.json` for `main` and `remote/fixture-commit-invalidate.json` for the `invalidate` branch), and `all` (implement-phase gates, then validate and report).
 
 ## `research`
 
@@ -47,7 +47,7 @@ The Fields list is machine-read. Later gates take their inputs from it, so they 
 - `cache_env_side_effects`: harness-core will set `cache_env` for every step of every stage with caching on, not only the install step. List everything else that variable relocates (for `CARGO_HOME`: `cargo install` binaries in `bin/`, `config.toml`, `credentials.toml`) and how users keep it working (project-level `.cargo/config.toml`, `CARGO_REGISTRIES_*` env). It becomes the Compatibility section of the harness-core PR; reviewers decide on it.
 - `fixture_repo`/`fixture_ref`: a public https repository pinned to a tag or commit with a committed lockfile. Prefer a real project with 50 or more locked dependencies so the cold/warm difference is measurable.
 - `install_image`, `install_cmd`, `offline_cmd`: the install command must not wire the cache env itself (the CLI and the pipeline inject it). `offline_cmd` proves the tool consumes the restored data without network; use `none` only when the tool has no offline mode, and say so in Limitations.
-- `harness_code_repo`: Harness Code repository holding a copy of the fixture, used by the product path.
+- `harness_code_repo`: Harness Code repository holding a copy of the fixture, cloned by the remote pipeline; `none` means `cache_intel_fixture_<tool>_<worker>`.
 
 Do not edit production code during `research`.
 
@@ -97,36 +97,39 @@ Pass `--jira <KEY>` when the pipeline has one; a missing Jira is not a blocker (
 
 ```bash
 $CLI remote-setup --tool <t> --worker-id <w> --image <repo:tag> [--docker-connector rpdockerhub] \
-  [--fixture-source github|harness_code] [--product --harness-code-repo <id> [--harness-code-branch main]]
+  [--k8s-connector deleciplay] [--k8s-namespace harness-delegate-ng] [--harness-code-repo <id>] [--harness-code-branch main]
 ```
 
-Renders `ci_intel_<tool>_<worker>` from [scripts/remote-pipeline.tmpl.yaml](scripts/remote-pipeline.tmpl.yaml), all values coming from research:
+Renders `ci_intel_<tool>_<worker>` from [scripts/remote-pipeline.tmpl.yaml](scripts/remote-pipeline.tmpl.yaml), all values coming from research. It validates the real product path:
 
-- the fixture is cloned into `/harness` itself, and `cache_env` is a stage variable (`KEY=/harness/<dir>`), which is exactly what the harness-core change injects;
-- a `scenario` input drives deterministic runs: `cold` skips restore (true cold baseline) and saves with `PLUGIN_OVERRIDE=true`; `warm` must restore before install, then runs `offline_cmd` and the install; `invalidate` changes `invalidate_file`, must miss, and never saves;
-- the candidate image runs restore and save directly against the Harness cache backend (`HARNESS_CACHE_SERVICE_TOKEN`/`_ENDPOINT`, `HARNESS_ACCOUNT_ID`); stage `caching` stays disabled.
+- Kubernetes stages (`KubernetesDirect`, default `deleciplay` / `harness-delegate-ng`) with `caching.enabled: true` and no plugin steps: restore and save are the steps Cache Intelligence injects (`restore-cache-harness`, `save-cache-harness`), backed by the project's self-hosted cache connector and bucket;
+- those steps run the candidate only because the orchestrator pins it in the account-level K8s cache tags (`cacheGCSTag`, `cacheS3Tag`, `cacheTag`, `infra=K8`) for the remote-validate phase. Never change that setting yourself;
+- the codebase is the Harness Code fixture repository, because the injected restore runs right after the clone and before any user step;
+- `cache_env` is a stage variable (`KEY=/harness/<dir>`), which is exactly what the harness-core change injects;
+- a `scenario` input runs only the stage of the same name, each with a fixed cache policy: `cold` uses `push` (no restore, true cold baseline, then save with override); `warm` uses `pull-push`, must restore before install, then runs `offline_cmd` and the install; `invalidate` clones the fixture's `invalidate` branch (changed `invalidate_file`), uses `pull`, must miss, and never saves.
 
-With `--product` it also renders `ci_intel_<tool>_<worker>_product` from [scripts/remote-product-pipeline.tmpl.yaml](scripts/remote-product-pipeline.tmpl.yaml): a Harness Code codebase, `caching.enabled: true`, and no plugin steps. It runs the real Cache Intelligence path, so it is meaningful only while the orchestrator has overridden the account-level cache images (`cacheGCSTag`, `cacheS3Tag`, `cacheTag`) to the candidate. Never change that override yourself.
+The cache key is the hash of the detected files only, so every candidate for the same fixture shares it. That is why `cold` must not restore, and why `invalidate` never saves.
 
-To create the Harness Code fixture: copy only what the tool needs to resolve dependencies (manifest, lockfile, stub targets) into a scratch directory, run `$CLI fixture-commit --from <dir>`, create the repository with `harness_create resource_type=repository`, then commit `remote/fixture-commit.json` with `harness_create resource_type=commit`. Keep the commit small; its body passes through the MCP call.
+To create the Harness Code fixture: copy only what the tool needs to resolve dependencies (manifest, lockfile, stub targets) into a scratch directory, keeping `fixture_subdir`, and run `$CLI fixture-commit --from <dir>`. Create the repository with `harness_create resource_type=repository` (private, default branch `main`), commit `remote/fixture-commit.json`, then `remote/fixture-commit-invalidate.json` (it creates branch `invalidate` with `invalidate_file` changed by one trailing newline; the blob `sha` it carries is the one of the `main` commit). Keep the commits small; their bodies pass through the MCP call.
 
-Then, with the Harness MCP server for the environment: preview the YAML once, `harness_create resource_type=pipeline` (or `harness_update` when it exists), and re-read it to confirm the image and fixture.
+Then, with the Harness MCP server for the environment: preview the YAML once, `harness_create resource_type=pipeline` (or `harness_update` when it exists), and re-read it to confirm the infrastructure, the fixture repository and the stage variable.
 
 ## `remote-test`
 
-Run the scenarios in order and wait for each to finish: `cold`, `warm`, `invalidate`. Inspect logs, not only statuses:
+Run the scenarios in order and wait for each to finish: `cold`, `warm`, `invalidate`. Each run executes only the stage named after its scenario, so that is the `stage_id` for its logs. Inspect logs, not only statuses:
 
 ```bash
-# harness_get resource_type=execution_log params {execution_id, stage_id: validate, step_id: <step>, return_download_url: true}
+# harness_get resource_type=execution_log params {execution_id, stage_id: <scenario>, step_id: <step>, return_download_url: true}
 ./.cursor/skills/add-build-tool-caching/scripts/fetch-step-log.sh '<download_url>' 200
 ```
 
 | Scenario | Must see |
 |----------|----------|
-| cold | `verify_restore`: `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`; `install`: `TIMING_install_seconds`; `save_candidate`: upload of the cached paths |
-| warm | `restore_candidate`: `build tools detected: <tool>` and downloads; `verify_restore`: `CACHE_STATE=warm`; `offline_check`: `OFFLINE_CHECK=PASS`; a smaller `TIMING_install_seconds` |
-| invalidate | `invalidate_key` changed the hash; `verify_restore`: `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS` |
-| product-seed / product-warm | the Cache Intelligence restore step logs `build tools detected: <tool>` (the baseline image cannot detect a new tool, so this proves the override took effect); product-warm `verify_restore`: `CACHE_STATE=warm` |
+| cold | no `restore-cache-harness` step (policy `push`); `verify_restore`: `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`; `install`: `TIMING_install_seconds`; `save-cache-harness`: `build tools detected: <tool>` and the upload of the cached paths |
+| warm | `restore-cache-harness`: `build tools detected: <tool>` and the download; `verify_restore`: `CACHE_STATE=warm`; `offline_check`: `OFFLINE_CHECK=PASS`; a smaller `TIMING_install_seconds` |
+| invalidate | `verify_restore`: `FIXTURE=...@invalidate`, a `KEY_FILE_MD5` different from the cold run's, `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`; `restore-cache-harness`: `build tools detected: <tool>` and a miss; no `save-cache-harness` step (policy `pull`) |
+
+`build tools detected: <tool>` is the proof that the candidate ran: the baseline image cannot detect a new tool. When it is missing, the account-level image pin did not take effect (or the project has no self-hosted cache connector, in which case Cache Intelligence uses the service image); record BLOCKED with that evidence, not FAIL.
 
 Record each run, with metrics taken from the logs:
 
@@ -159,7 +162,7 @@ Commit `REPORT.md` with the change. Never convert an unverified path into a supp
 
 - discovery: `harness_describe`, `harness_schema`, `harness_search`;
 - reads: `harness_list`, `harness_get`, `harness_status`;
-- writes: `harness_create`, `harness_update` (only the worker's own `ci_intel_<tool>_<worker>*` pipelines and `cache_intel_fixture_<tool>_<worker>` repositories);
+- writes: `harness_create`, `harness_update` (only the worker's own `ci_intel_<tool>_<worker>` pipeline and `cache_intel_fixture_<tool>_<worker>` repository, including its commits);
 - execution: `harness_execute`;
 - failure analysis: `harness_diagnose`.
 
