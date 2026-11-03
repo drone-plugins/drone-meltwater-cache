@@ -758,6 +758,9 @@ Next, with Harness MCP (scope ${HARNESS_ORG}/${HARNESS_PROJECT}):
      default branch ${OPT[harness_code_branch]:-main}), then harness_create resource_type=commit with
      remote/fixture-commit.json and then remote/fixture-commit-invalidate.json from "cache-intel.sh fixture-commit".
      Skip a commit when the branch already holds those files.
+     For repository and commit calls pass org_id=${HARNESS_ORG} and project_id=${HARNESS_PROJECT} (commit also
+     params {repo_id: ${repo}}) and omit resource_scope: the MCP server rejects resource_scope=project for these
+     types ("Supported scopes: account"), yet org_id/project_id address the project repository.
   2. harness_create resource_type=pipeline body=<YAML file contents>; if it exists, harness_update with the same body.
   3. Run in order, waiting for each to finish (harness_diagnose on the execution URL):
        inputs {scenario: "cold"} → {scenario: "warm"} → {scenario: "invalidate"}
