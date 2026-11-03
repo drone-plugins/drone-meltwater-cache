@@ -769,6 +769,10 @@ Next, with Harness MCP (scope ${HARNESS_ORG}/${HARNESS_PROJECT}):
      step_id: <step>, return_download_url: true} → scripts/fetch-step-log.sh '<download_url>' 200
   5. Record each: cache-intel.sh remote-test --run <scenario> --execution-url <url> --result PASS|FAIL \\
        --metrics install_seconds=<TIMING_install_seconds>,cache_kb=<CACHE_KB or RESTORED_KB>,restore_state=<CACHE_STATE>
+     For warm, install_seconds is offline_check's TIMING_offline_seconds (the first step that reads the restored
+     cache); use the install's only when offline_check printed OFFLINE_CHECK=skipped.
+     In the invalidate run an IgnoreFailed restore-cache-harness after a not-found for every path is the expected
+     miss (see COMMANDS.md "remote-test").
 EOF
   record remote-setup PASS "pipeline=${id}; image=${IMAGE_TAG}; fixture=${repo}; infra=k8s:${K8S_CONNECTOR}/${K8S_NAMESPACE}; cache_env=$(field cache_env)"
 }

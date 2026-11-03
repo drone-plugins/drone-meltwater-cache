@@ -370,11 +370,15 @@ class Report:
             out.append("| %s | %s | %s | %s | %s | %s |" % (
                 r["run"], r["result"], link("open", r["url"]), secs(m.get("install_seconds")),
                 kb_to_mb(m["cache_kb"]) if m.get("cache_kb") else m.get("restore_state", "—"), code(r["image"])))
+        warm = "- **warm** uses `pull-push` and must restore %s before install, or the run fails." % code(self.fields.get("warm_check"))
+        offline = self.fields.get("offline_cmd", "none")
+        if offline not in ("", "none"):
+            warm += " Its install time is that of %s, the first step that reads the restored cache; the install after it has nothing left to fetch." % code(offline)
         notes = [
             "",
             "- Every run is a Kubernetes stage with `caching.enabled: true`: restore and save are the steps Cache Intelligence injects, running the candidate image that the orchestrator pins in the account-level K8s cache tags for the duration of the remote phase.",
             "- **cold** uses cache policy `push` (no restore), so its install time is a true cold baseline; save then overwrites the key with the candidate's archive.",
-            "- **warm** uses `pull-push` and must restore %s before install, or the run fails." % code(self.fields.get("warm_check")),
+            warm,
             "- **invalidate** clones a fixture branch where %s differs, uses `pull`, and must miss; it never saves." % code(self.fields.get("invalidate_file")),
         ]
         env = self.fields.get("cache_env", "none")

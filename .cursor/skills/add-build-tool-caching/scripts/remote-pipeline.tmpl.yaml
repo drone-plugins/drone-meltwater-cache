@@ -186,7 +186,9 @@ pipeline:
                       t0=$(cut -d' ' -f1 /proc/uptime)
                       sh -c "$OFFLINE_CMD"
                       t1=$(cut -d' ' -f1 /proc/uptime)
-                      echo "OFFLINE_CHECK=PASS seconds=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')"
+                      OFFLINE_SECONDS=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')
+                      echo "TIMING_offline_seconds=$OFFLINE_SECONDS"
+                      echo "OFFLINE_CHECK=PASS seconds=$OFFLINE_SECONDS"
                     resources:
                       limits:
                         memory: 2Gi

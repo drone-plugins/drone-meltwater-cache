@@ -126,12 +126,14 @@ Run the scenarios in order and wait for each to finish: `cold`, `warm`, `invalid
 | Scenario | Must see |
 |----------|----------|
 | cold | no `restore-cache-harness` step (policy `push`); `verify_restore`: `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`; `install`: `TIMING_install_seconds`; `save-cache-harness`: `build tools detected: <tool>` and the upload of the cached paths |
-| warm | `restore-cache-harness`: `build tools detected: <tool>` and the download; `verify_restore`: `CACHE_STATE=warm`; `offline_check`: `OFFLINE_CHECK=PASS`; a smaller `TIMING_install_seconds` |
-| invalidate | `verify_restore`: `FIXTURE=...@invalidate`, a `KEY_FILE_MD5` different from the cold run's, `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`; `restore-cache-harness`: `build tools detected: <tool>` and a miss; no `save-cache-harness` step (policy `pull`) |
+| warm | `restore-cache-harness`: `build tools detected: <tool>` and the download; `verify_restore`: `CACHE_STATE=warm`; `offline_check`: `OFFLINE_CHECK=PASS` and a `TIMING_offline_seconds` below the cold `TIMING_install_seconds` |
+| invalidate | `verify_restore`: `FIXTURE=...@invalidate`, a `KEY_FILE_MD5` different from the cold run's, `CACHE_STATE=cold`, `REMOTE_ASSERT=PASS`; `restore-cache-harness`: `build tools detected: <tool>` and a not-found for every path under the new key; no `save-cache-harness` step (policy `pull`) |
+
+When every path misses, the plugin exits non-zero (`restore failed`, then `silent fails disabled`), with the released image too: `failIfKeyNotFound` is only consulted when no paths are given, and Cache Intelligence always passes them. The injected restore carries an Ignore failure strategy, so that step and the invalidate run end `IgnoreFailed`. That is the expected miss: record PASS when the markers above hold. Invalidate fails only when a path was restored, `verify_restore` fails, or a save step ran.
 
 `build tools detected: <tool>` is the proof that the candidate ran: the baseline image cannot detect a new tool. When it is missing, the account-level image pin did not take effect (or the project has no self-hosted cache connector, in which case Cache Intelligence uses the service image); record BLOCKED with that evidence, not FAIL.
 
-Record each run, with metrics taken from the logs:
+Record each run, with metrics taken from the logs. For warm, `install_seconds` is `TIMING_offline_seconds`: `offline_check` is the first step that reads the restored cache, so the install after it has nothing left to fetch. Use the install's `TIMING_install_seconds` only when `offline_check` printed `OFFLINE_CHECK=skipped`.
 
 ```bash
 $CLI remote-test --tool <t> --worker-id <w> --run warm --execution-url <url> --result PASS \
