@@ -80,6 +80,49 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
+| **Cargo** | `Cargo.lock` | required `CARGO_HOME` shared across steps | `.cache/cargo/{registry/index,registry/cache,git/db}` | ✅ Read-only; excludes config and credentials |
+
+#### Cargo (Rust) Details
+
+`Cargo.lock` detects Cargo at the repository root or one directory level below.
+The plugin caches only `registry/index`, `registry/cache` and `git/db` under
+`CARGO_HOME`; without that variable its selected default is
+`<workspace>/.cache/cargo`. Absolute overrides are honored and relative values
+resolve against the step working directory, even for a nested manifest. The
+preparer does not run Cargo or modify any configuration.
+
+**Required build environment:** set `CARGO_HOME=/harness/.cache/cargo` in restore,
+build and save steps (use your actual workspace on other runners) until the
+companion harness-core injection is deployed. Merely selecting this path in the
+plugin does not change Cargo's native `~/.cargo` default. `CARGO_HOME` also moves
+user configuration, credentials and `cargo install` binaries/metadata for every
+step. Keep project settings in `.cargo/config.toml`, use `CARGO_REGISTRIES_*`
+environment credentials, and explicitly preserve installed binary PATHs when
+needed. These side effects are described in the
+[official Cargo home documentation](https://doc.rust-lang.org/cargo/guide/cargo-home.html).
+
+The key contribution is the lowercase 32-character MD5 of `Cargo.lock`, using
+the existing engine. Lockless projects are not detected. When multiple lockfiles
+match, the existing shortest-path selection chooses only one (equal-length ties
+choose the later match); deeper projects are unsupported. Other managers may
+coexist; Cargo is appended to their composite key, so mixed repositories get a
+first cold run, while legacy-only keys remain unchanged. See
+`go test -count=1 ./internal/plugin/autodetect -run '(?i)cargo'` for these scenarios.
+
+Never selected: `target`, `registry/src`, `git/checkouts`, toolchains, installed
+binaries, config, credentials, home-level lock files or SQLite trackers. Cargo
+re-extracts source trees from the downloads. Private dependency source can still
+be present in the cache: restrict backend access accordingly. Registries or
+source overrides can require additional network downloads; cache size is not
+bounded. Home-level trackers are rebuilt after restore. No compiled artifacts or
+cross-platform runtime support are claimed.
+
+Local evidence: `cache-intel.sh test --tool cargo --worker-id w6 --all` passed the
+cold/save/fresh-checkout/warm/offline/invalidation lifecycle on ripgrep `14.1.1`
+(61 locked packages), with real Cargo 1.85.1 on Linux amd64. It measured 0.67s cold
+fetch, 0.31s restored offline fetch, 0.02s save and 0.02s restore, with 18,172KB of
+backend archives. This small fixture shows modest local savings, not a remote
+performance guarantee.
 
 #### Python Package Manager Details
 
