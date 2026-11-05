@@ -80,6 +80,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Pipenv** | `Pipfile.lock` | `PIPENV_CACHE_DIR` / `.env` | `.cache/pipenv` | ✅ Merged |
 | **pip** | `requirements.txt` / `constraints.txt` / `pyproject.toml` | `PIP_CACHE_DIR` / `pip.conf` | `.cache/pip` | ✅ Merged |
 | **Composer** | `composer.lock` / `composer.json` | `COMPOSER_VENDOR_DIR` / `COMPOSER_CACHE_DIR` / `composer.json` | `vendor` | ✅ Read-only. Does not modify `composer.json` |
+| **Cargo** | `Cargo.lock` | `CARGO_HOME` (required in build steps) | `.cache/cargo/{registry/index,registry/cache,git/db}` | Read-only; no config changes |
 
 #### Python Package Manager Details
 
@@ -149,6 +150,51 @@ For projects using Poetry (`poetry.lock`), the plugin will:
 3. Cache and restore that directory across builds
 
 No explicit mount configuration needed - just add the cache steps to your pipeline.
+
+#### Cargo (Rust) Details
+
+Cargo uses a committed `Cargo.lock` at the root or one directory level down;
+manifest-only projects and deeper projects are not detected. The shortest lockfile
+wins, with root preferred. Its MD5 contributes 32 lowercase hex characters to the
+cache key. Mixed projects keep existing tool order and append Cargo's digest,
+so their first run after rollout is cold; legacy-only keys are unchanged.
+Evidence: `TestScenario_Cargo_Layouts`, `TestScenario_Cargo_Key` and
+`TestScenario_Cargo_MixedLegacy` via `cache-intel.sh create --tool cargo --worker-id w3`.
+
+**Required stage environment:** set `CARGO_HOME=/harness/.cache/cargo` for restore,
+build and save (substitute your absolute workspace on other runners). Until the
+companion harness-core injection ships, this wiring is required. Without the
+variable, the plugin proposes `<workspace>/.cache/cargo`, but Cargo itself still
+uses its native home; the plugin cannot export variables to later build steps.
+Explicit `CARGO_HOME` wins; relative values resolve against process cwd, including
+when the detected lockfile is nested. External paths need shared mounts.
+Evidence: `Test_cargoPreparer_Paths`, and the official
+[Cargo environment reference](https://doc.rust-lang.org/cargo/reference/environment-variables.html).
+
+Only `registry/index`, `registry/cache` and `git/db` under that home are cached.
+Missing leaves are graceful (for example git/db with crates.io-only dependencies).
+No configuration is rewritten. Excluded: `registry/src`, `git/checkouts`, `target`,
+installed binaries, toolchains, credentials/config files and local lock/tracker
+metadata. CARGO_HOME also relocates user configuration, credentials and
+`cargo install` binaries/tracking files for **every** step: use project-level
+`.cargo/config.toml`, `CARGO_REGISTRIES_*` configuration/auth environment variables,
+and explicitly provision tools with real toolchain binaries on PATH. Do not
+assume old home-level config or installed binaries are copied. Private dependency
+source/repository URLs require access-controlled caches; never embed credentials
+in dependency URLs. Evidence: `Test_cargoPreparer_NoMutation`,
+`TestScenario_Cargo_Allowlist` and the official
+[Cargo home guide](https://doc.rust-lang.org/cargo/guide/cargo-home.html).
+
+Local evidence: `cache-intel.sh test --tool cargo --worker-id w3 --all` passed
+ripgrep 14.1.1's public cold/save/fresh-checkout/warm/offline/invalidation lifecycle
+with Cargo 1.85.0 on Linux amd64 (61 locked packages). Fetch measured 0.69s cold,
+0.04s warm, 0.31s offline, with 0.03s restore and 0.02s save of an 18172 KB archive
+on the local filesystem backend. These are not network-backend speed guarantees;
+transfer overhead can outweigh the small fetch savings. Cache growth needs
+monitoring. Native Windows/macOS execution, full compilation, private registry
+and git dependency lifecycles are not claimed. Release binaries cross-compile
+for Linux amd64/arm64 and Windows amd64 (`cache-intel.sh build`); runtime evidence
+and exact gate commands are recorded in REPORT.md.
 
 #### Composer (PHP) Details
 
