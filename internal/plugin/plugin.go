@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/meltwater/drone-cache/internal/plugin/autodetect"
@@ -128,6 +129,11 @@ func (p *Plugin) Exec() error { // nolint:funlen
 			if len(buildTools) > 0 {
 				toolDetected = true
 				p.logger.Log("msg", "build tools detected: "+strings.Join(buildTools, ", ")) //nolint: errcheck
+				if slices.Contains(buildTools, "cargo") && strings.TrimSpace(os.Getenv("CARGO_HOME")) == "" {
+					level.Warn(p.logger).Log( //nolint: errcheck
+						"msg", "CARGO_HOME environment variable is not set; Cargo defaults to ~/.cargo while cache is configured for <workspace>/.cache/cargo. Set CARGO_HOME to a workspace path (e.g. /harness/.cache/cargo) across all steps to avoid cache misses in build steps",
+					)
+				}
 			} else if pathOverridden {
 				p.logger.Log("msg", "using provided cache path") //nolint: errcheck
 			} else {
