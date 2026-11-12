@@ -135,6 +135,28 @@ func TestScenario_Composer_DualLayer_WithCacheDir(t *testing.T) {
 	test.Equals(t, expected, dirs)
 }
 
+// Scenario 6b: Dual layer with COMPOSER_HOME in workspace
+func TestScenario_Composer_DualLayer_WithComposerHome(t *testing.T) {
+	isolateComposerEnv(t)
+	tmpDir := setupComposerScenarioDir(t, map[string]string{
+		"composer.json": `{"name": "test/app"}`,
+		"composer.lock": `{"packages": []}`,
+	})
+	t.Setenv("HARNESS_WORKSPACE", tmpDir)
+	t.Setenv("COMPOSER_HOME", filepath.Join(tmpDir, ".composer"))
+
+	dirs, tools, hash, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+
+	test.Equals(t, []string{"composer"}, tools)
+	test.Assert(t, hash != "", "expected non-empty hash")
+	expected := []string{
+		filepath.Join(tmpDir, "vendor"),
+		filepath.Join(tmpDir, ".composer", "cache"),
+	}
+	test.Equals(t, expected, dirs)
+}
+
 // Scenario 7: Full-stack hybrid repo (PHP + Node)
 func TestScenario_Composer_Hybrid_WithNode(t *testing.T) {
 	isolateComposerEnv(t)

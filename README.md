@@ -200,12 +200,12 @@ build container to immediately verify installed dependencies and skip network do
 - **Vendor Directory**: Defaults to `vendor/` in the project directory. If
   `COMPOSER_VENDOR_DIR` is set or `config.vendor-dir` is configured in `composer.json`,
   that directory is cached instead.
-- **Download Cache**: If `COMPOSER_CACHE_DIR` or `config.cache-dir` in `composer.json`
-  is configured to a workspace path, it is also cached as an additional directory.
+- **Download Cache**: If `COMPOSER_CACHE_DIR`, `COMPOSER_HOME`, or `config.cache-dir` in `composer.json`
+  points to a workspace path, the download cache (`$COMPOSER_HOME/cache`) is also cached as an additional directory.
 - **Read-Only / Zero Mutation**: The plugin never modifies `composer.json` or writes
   to the repository. Tracked files remain clean for downstream git and release steps.
-- **Security**: The global `$COMPOSER_HOME` directory (which may contain `auth.json`
-  with private tokens) is never cached.
+- **Security**: The global `$COMPOSER_HOME` root directory (which may contain `auth.json`
+  with private tokens) is never cached; only the package download cache subfolder is included.
 
 ## Example Usage of drone-cache
 

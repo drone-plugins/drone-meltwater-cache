@@ -91,9 +91,17 @@ func effectiveComposerCacheDir(dir string) (string, error) {
 	}
 
 	// Check if standard cache locations reside on the shared workspace.
-	// We check XDG_CACHE_HOME, then UserHomeDir.
+	// We check COMPOSER_HOME, XDG_CACHE_HOME, then UserHomeDir.
 	root := workspaceRoot(dir)
 	if root == "" {
+		return "", nil
+	}
+
+	if composerHome := strings.TrimSpace(os.Getenv("COMPOSER_HOME")); composerHome != "" {
+		homeCache, err := resolveRepoPath(dir, filepath.Join(composerHome, "cache"))
+		if err == nil && pathWithin(homeCache, root) {
+			return homeCache, nil
+		}
 		return "", nil
 	}
 

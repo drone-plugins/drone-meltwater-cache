@@ -238,6 +238,86 @@ func TestComposerCacheDirs_InsideWorkspace_XDG(t *testing.T) {
 	test.Equals(t, extraDirs, []string{expected})
 }
 
+func TestComposerCacheDirs_ComposerHome_InsideWorkspace_Relative(t *testing.T) {
+	isolateComposerEnv(t)
+	dir := t.TempDir()
+
+	t.Setenv("HARNESS_WORKSPACE", dir)
+	t.Setenv("COMPOSER_HOME", ".composer")
+
+	extraDirs, err := composerCacheDirs(dir)
+	test.Ok(t, err)
+
+	expected := filepath.Join(dir, ".composer", "cache")
+	test.Equals(t, extraDirs, []string{expected})
+}
+
+func TestComposerCacheDirs_ComposerHome_InsideWorkspace_Absolute(t *testing.T) {
+	isolateComposerEnv(t)
+	dir := t.TempDir()
+
+	composerHome := filepath.Join(dir, ".composer")
+	t.Setenv("HARNESS_WORKSPACE", dir)
+	t.Setenv("COMPOSER_HOME", composerHome)
+
+	extraDirs, err := composerCacheDirs(dir)
+	test.Ok(t, err)
+
+	expected := filepath.Join(composerHome, "cache")
+	test.Equals(t, extraDirs, []string{expected})
+}
+
+func TestComposerCacheDirs_ComposerHome_OutsideWorkspace(t *testing.T) {
+	isolateComposerEnv(t)
+	dir := t.TempDir()
+	outsideHome := filepath.Join(t.TempDir(), "outside-composer")
+
+	t.Setenv("HARNESS_WORKSPACE", dir)
+	t.Setenv("COMPOSER_HOME", outsideHome)
+
+	extraDirs, err := composerCacheDirs(dir)
+	test.Ok(t, err)
+	test.Assert(t, len(extraDirs) == 0, "expected no extra cache dirs when COMPOSER_HOME is outside workspace")
+}
+
+func TestComposerCacheDirs_ComposerCacheDir_Outranks_ComposerHome(t *testing.T) {
+	isolateComposerEnv(t)
+	dir := t.TempDir()
+
+	t.Setenv("HARNESS_WORKSPACE", dir)
+	t.Setenv("COMPOSER_HOME", ".composer")
+	t.Setenv("COMPOSER_CACHE_DIR", "custom_cache_dir")
+
+	extraDirs, err := composerCacheDirs(dir)
+	test.Ok(t, err)
+
+	expected := filepath.Join(dir, "custom_cache_dir")
+	test.Equals(t, extraDirs, []string{expected})
+}
+
+func TestComposerCacheDirs_ComposerJSON_Outranks_ComposerHome(t *testing.T) {
+	isolateComposerEnv(t)
+	dir := t.TempDir()
+
+	composerJSON := filepath.Join(dir, "composer.json")
+	err := os.WriteFile(composerJSON, []byte(`{
+		"name": "acme/project",
+		"config": {
+			"cache-dir": ".custom-json-cache"
+		}
+	}`), 0644)
+	test.Ok(t, err)
+
+	t.Setenv("HARNESS_WORKSPACE", dir)
+	t.Setenv("COMPOSER_HOME", ".composer")
+
+	extraDirs, err := composerCacheDirs(dir)
+	test.Ok(t, err)
+
+	expected := filepath.Join(dir, ".custom-json-cache")
+	test.Equals(t, extraDirs, []string{expected})
+}
+
 func TestComposer_ZeroMutation_PreservesFile(t *testing.T) {
 	isolateComposerEnv(t)
 	dir := t.TempDir()
