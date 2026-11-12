@@ -1,0 +1,282 @@
+pipeline:
+  name: __PIPELINE_ID__
+  identifier: __PIPELINE_ID__
+  projectIdentifier: __PROJECT__
+  orgIdentifier: __ORG__
+  description: "Cache Intelligence validation for __TOOL__ (worker __WORKER__) on Kubernetes: caching.enabled stages, so restore and save are the steps Cache Intelligence injects, running the image the orchestrator pins in the account-level K8s cache tags (__IMAGE__). Rendered by cache-intel.sh remote-setup; do not edit by hand."
+  tags:
+    cache_intel: ""
+    tool: __TOOL__
+    worker: __WORKER__
+  properties:
+    ci:
+      codebase:
+        repoName: __HC_REPO__
+        build:
+          type: branch
+          spec:
+            branch: '<+<+pipeline.variables.scenario> == "invalidate" ? "__INVALIDATE_BRANCH__" : "__HC_BRANCH__">'
+  variables:
+    - name: scenario
+      type: String
+      description: "Runs only the matching stage. cold: policy push (no restore), true cold install, then save. warm: policy pull-push; restore must hit before install. invalidate: fixture branch __INVALIDATE_BRANCH__ (changed lockfile), policy pull; must miss and never saves."
+      required: true
+      value: <+input>.default(cold).allowedValues(cold,warm,invalidate)
+  stages:
+    - stage:
+        name: cold
+        identifier: cold
+        type: CI
+        description: Stage variables simulate the cache env that harness-core injects when Cache Intelligence is enabled.
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.variables.scenario> == "cold"
+        variables:__STAGE_VARIABLES__
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+            policy: push
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: __K8S_CONNECTOR__
+              namespace: __K8S_NAMESPACE__
+              automountServiceAccountToken: true
+              nodeSelector: {}
+              os: Linux
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: verify_restore
+                  identifier: verify_restore
+                  timeout: 5m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: alpine:3.20
+                    shell: Sh
+                    envVariables:
+                      EXPECT: cold
+                      WARM_CHECK: "__WARM_CHECK__"
+                      INVALIDATE_FILE: "__INVALIDATE_FILE__"
+                      FIXTURE: <+codebase.repoUrl>@<+codebase.branch> <+codebase.commitSha>
+                    command: |-
+                      set -eu
+                      cd /harness
+                      echo "FIXTURE=$FIXTURE"
+                      echo "KEY_FILE_MD5=$(md5sum "$INVALIDATE_FILE" | cut -d' ' -f1) file=$INVALIDATE_FILE"
+                      env | grep -E '^(__ENV_NAMES__)=' || echo "CACHE_ENV=none"
+                      present=false
+                      if [ -e "$WARM_CHECK" ] && [ -n "$(ls -A "$WARM_CHECK" 2>/dev/null)" ]; then present=true; fi
+                      RESTORED_KB=0
+                      state=cold
+                      if [ "$present" = true ]; then RESTORED_KB=$(du -sk "$WARM_CHECK" | cut -f1); state=warm; fi
+                      echo "CACHE_STATE=$state path=$WARM_CHECK kb=$RESTORED_KB"
+                      if [ "$state" != "$EXPECT" ]; then
+                        echo "REMOTE_ASSERT=FAIL expected $EXPECT but found $state at $WARM_CHECK"
+                        exit 1
+                      fi
+                      echo "REMOTE_ASSERT=PASS"
+                    outputVariables:
+                      - name: RESTORED_KB
+              - step:
+                  type: Run
+                  name: install
+                  identifier: install
+                  timeout: 30m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __INSTALL_IMAGE__
+                    shell: Sh
+                    envVariables:
+                      INSTALL_CMD: "__INSTALL_CMD__"
+                      WARM_CHECK: "__WARM_CHECK__"
+                    command: |-
+                      set -eu
+                      cd "/harness/__FIXTURE_SUBDIR__"
+                      t0=$(cut -d' ' -f1 /proc/uptime)
+                      sh -c "$INSTALL_CMD"
+                      t1=$(cut -d' ' -f1 /proc/uptime)
+                      INSTALL_SECONDS=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')
+                      CACHE_KB=$(du -sk "/harness/$WARM_CHECK" 2>/dev/null | cut -f1 || echo 0)
+                      echo "TIMING_install_seconds=$INSTALL_SECONDS"
+                      echo "CACHE_KB=$CACHE_KB"
+                    resources:
+                      limits:
+                        memory: 2Gi
+                        cpu: "1"
+                    outputVariables:
+                      - name: INSTALL_SECONDS
+                      - name: CACHE_KB
+    - stage:
+        name: warm
+        identifier: warm
+        type: CI
+        description: Stage variables simulate the cache env that harness-core injects when Cache Intelligence is enabled.
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.variables.scenario> == "warm"
+        variables:__STAGE_VARIABLES__
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+            policy: pull-push
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: __K8S_CONNECTOR__
+              namespace: __K8S_NAMESPACE__
+              automountServiceAccountToken: true
+              nodeSelector: {}
+              os: Linux
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: verify_restore
+                  identifier: verify_restore
+                  timeout: 5m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: alpine:3.20
+                    shell: Sh
+                    envVariables:
+                      EXPECT: warm
+                      WARM_CHECK: "__WARM_CHECK__"
+                      INVALIDATE_FILE: "__INVALIDATE_FILE__"
+                      FIXTURE: <+codebase.repoUrl>@<+codebase.branch> <+codebase.commitSha>
+                    command: |-
+                      set -eu
+                      cd /harness
+                      echo "FIXTURE=$FIXTURE"
+                      echo "KEY_FILE_MD5=$(md5sum "$INVALIDATE_FILE" | cut -d' ' -f1) file=$INVALIDATE_FILE"
+                      env | grep -E '^(__ENV_NAMES__)=' || echo "CACHE_ENV=none"
+                      present=false
+                      if [ -e "$WARM_CHECK" ] && [ -n "$(ls -A "$WARM_CHECK" 2>/dev/null)" ]; then present=true; fi
+                      RESTORED_KB=0
+                      state=cold
+                      if [ "$present" = true ]; then RESTORED_KB=$(du -sk "$WARM_CHECK" | cut -f1); state=warm; fi
+                      echo "CACHE_STATE=$state path=$WARM_CHECK kb=$RESTORED_KB"
+                      if [ "$state" != "$EXPECT" ]; then
+                        echo "REMOTE_ASSERT=FAIL expected $EXPECT but found $state at $WARM_CHECK"
+                        exit 1
+                      fi
+                      echo "REMOTE_ASSERT=PASS"
+                    outputVariables:
+                      - name: RESTORED_KB
+              - step:
+                  type: Run
+                  name: offline_check
+                  identifier: offline_check
+                  timeout: 15m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __INSTALL_IMAGE__
+                    shell: Sh
+                    envVariables:
+                      OFFLINE_CMD: "__OFFLINE_CMD__"
+                    command: |-
+                      set -eu
+                      cd "/harness/__FIXTURE_SUBDIR__"
+                      if [ -z "$OFFLINE_CMD" ]; then echo "OFFLINE_CHECK=skipped"; exit 0; fi
+                      t0=$(cut -d' ' -f1 /proc/uptime)
+                      sh -c "$OFFLINE_CMD"
+                      t1=$(cut -d' ' -f1 /proc/uptime)
+                      OFFLINE_SECONDS=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')
+                      echo "TIMING_offline_seconds=$OFFLINE_SECONDS"
+                      echo "OFFLINE_CHECK=PASS seconds=$OFFLINE_SECONDS"
+                    resources:
+                      limits:
+                        memory: 2Gi
+                        cpu: "1"
+              - step:
+                  type: Run
+                  name: install
+                  identifier: install
+                  timeout: 30m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: __INSTALL_IMAGE__
+                    shell: Sh
+                    envVariables:
+                      INSTALL_CMD: "__INSTALL_CMD__"
+                      WARM_CHECK: "__WARM_CHECK__"
+                    command: |-
+                      set -eu
+                      cd "/harness/__FIXTURE_SUBDIR__"
+                      t0=$(cut -d' ' -f1 /proc/uptime)
+                      sh -c "$INSTALL_CMD"
+                      t1=$(cut -d' ' -f1 /proc/uptime)
+                      INSTALL_SECONDS=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')
+                      CACHE_KB=$(du -sk "/harness/$WARM_CHECK" 2>/dev/null | cut -f1 || echo 0)
+                      echo "TIMING_install_seconds=$INSTALL_SECONDS"
+                      echo "CACHE_KB=$CACHE_KB"
+                    resources:
+                      limits:
+                        memory: 2Gi
+                        cpu: "1"
+                    outputVariables:
+                      - name: INSTALL_SECONDS
+                      - name: CACHE_KB
+    - stage:
+        name: invalidate
+        identifier: invalidate
+        type: CI
+        description: Stage variables simulate the cache env that harness-core injects when Cache Intelligence is enabled.
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.variables.scenario> == "invalidate"
+        variables:__STAGE_VARIABLES__
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+            policy: pull
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: __K8S_CONNECTOR__
+              namespace: __K8S_NAMESPACE__
+              automountServiceAccountToken: true
+              nodeSelector: {}
+              os: Linux
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: verify_restore
+                  identifier: verify_restore
+                  timeout: 5m
+                  spec:
+                    connectorRef: __DOCKER_CONNECTOR__
+                    image: alpine:3.20
+                    shell: Sh
+                    envVariables:
+                      EXPECT: cold
+                      WARM_CHECK: "__WARM_CHECK__"
+                      INVALIDATE_FILE: "__INVALIDATE_FILE__"
+                      FIXTURE: <+codebase.repoUrl>@<+codebase.branch> <+codebase.commitSha>
+                    command: |-
+                      set -eu
+                      cd /harness
+                      echo "FIXTURE=$FIXTURE"
+                      echo "KEY_FILE_MD5=$(md5sum "$INVALIDATE_FILE" | cut -d' ' -f1) file=$INVALIDATE_FILE"
+                      env | grep -E '^(__ENV_NAMES__)=' || echo "CACHE_ENV=none"
+                      present=false
+                      if [ -e "$WARM_CHECK" ] && [ -n "$(ls -A "$WARM_CHECK" 2>/dev/null)" ]; then present=true; fi
+                      RESTORED_KB=0
+                      state=cold
+                      if [ "$present" = true ]; then RESTORED_KB=$(du -sk "$WARM_CHECK" | cut -f1); state=warm; fi
+                      echo "CACHE_STATE=$state path=$WARM_CHECK kb=$RESTORED_KB"
+                      if [ "$state" != "$EXPECT" ]; then
+                        echo "REMOTE_ASSERT=FAIL expected $EXPECT but found $state at $WARM_CHECK"
+                        exit 1
+                      fi
+                      echo "REMOTE_ASSERT=PASS"
+                    outputVariables:
+                      - name: RESTORED_KB
