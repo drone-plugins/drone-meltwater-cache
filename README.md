@@ -83,6 +83,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Fastlane** | `Gemfile` (key adds `Gemfile.lock`) | `.bundle/config` `BUNDLE_PATH` | `vendor/bundle` | ✅ Appended. An existing `BUNDLE_PATH` is kept |
 | **CocoaPods** | `Podfile` (key adds `Podfile.lock`) | `CP_CACHE_DIR` / `CP_HOME_DIR` | `Pods`, plus `~/Library/Caches/CocoaPods` and `~/.cocoapods/cache` on macOS | ✅ Read-only |
 | **Swift PM** | `Package.swift` (key adds `Package.resolved`) | None | `.build/checkouts`, `.build/repositories`, plus `~/Library/Caches/org.swift.swiftpm` on macOS | ✅ Read-only |
+| **Cargo** | `Cargo.lock` | required `CARGO_HOME` shared across steps | `.cache/cargo/{registry/index,registry/cache,git/db}` | ✅ Read-only; excludes config and credentials |
 
 #### iOS Build Tool Details
 
@@ -118,6 +119,20 @@ steps:
       rebuild: true
       auto_cache: true
 ```
+
+#### Cargo (Rust) Details
+
+`Cargo.lock` detects Cargo at the repository root or one directory level below.
+The cache key is calculated from the checksum of `Cargo.lock`.
+
+The plugin caches only dependency downloads and index metadata under `CARGO_HOME`:
+- `registry/index` (crates.io index metadata)
+- `registry/cache` (downloaded `.crate` archives)
+- `git/db` (git dependencies mirror)
+
+**Build environment:** Set `CARGO_HOME=/harness/.cache/cargo` (or `<workspace>/.cache/cargo` on non-containerized runners) in restore, build, and save steps so dependency downloads are stored in the shared workspace.
+
+Compiler build artifacts (`target/`), extracted source (`registry/src/`), installed binaries (`bin/`), and credentials/configuration (`credentials.toml`, `config.toml`) are strictly excluded.
 
 #### Python Package Manager Details
 

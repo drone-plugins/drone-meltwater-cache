@@ -177,6 +177,12 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			additionalCacheDirs: spmCacheDirs,
 			additionalHashGlob:  "Package.resolved",
 		},
+		{
+			globToDetect:        "Cargo.lock",
+			tool:                "cargo",
+			preparer:            newCargoPreparer(),
+			additionalCacheDirs: cargoCacheDirs,
+		},
 	}
 
 	var directoriesToCache []string

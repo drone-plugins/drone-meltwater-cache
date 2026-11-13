@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add PHP Composer autodetect caching support using `composer.lock` and `composer.json`.
+- Add Cargo autodetect download caching using `Cargo.lock` and the shared `CARGO_HOME` environment. Cache registry index, crate archives and Git databases only; exclude credentials, configuration, binaries and build output. See README Cargo details.
 
 - [#102](https://github.com/meltwater/drone-cache/pull/102) Implement option to disable cache rebuild if it already exists in storage.
 - [#86](https://github.com/meltwater/drone-cache/pull/86) Add backend operation timeout option that cancels request if they take longer than given duration. `BACKEND_OPERATION_TIMEOUT`, `backend.operation-timeot`. Default value is `3 minutes`.
