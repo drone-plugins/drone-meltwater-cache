@@ -58,6 +58,11 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:     newGradlePreparer(),
 		},
 		{
+			globToDetect: "build.sbt.lock",
+			tool:         "sbt",
+			preparer:     newSbtPreparer(),
+		},
+		{
 			globToDetect: "MODULE.bazel",
 			tool:         "bazel",
 			preparer:     newBzlmodPreparer(),

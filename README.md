@@ -70,6 +70,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 |------------|----------------|----------------|-----------------|-----------------|
 | **Maven** | `pom.xml` | `.mvn/maven.config` | `.m2/repository` | ✅ Appended |
 | **Gradle** | `build.gradle[.kts]` | `gradle.properties` | `.gradle` | ✅ Appended |
+| **sbt** | `build.sbt.lock` | required `COURSIER_CACHE` shared across steps | `.cache/sbt/https` | ✅ Read-only |
 | **Node.js** | `package-lock.json` | existing `npm_config_cache` / `.npmrc` `cache`, or `~/.npm` when that path is already inside the workspace | `.npm` | ✅ Read-only. Does not write `.npmrc` |
 | **Yarn** | `yarn.lock` | `.yarnrc` | `.yarn/cache` | ✅ Appended |
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
@@ -119,6 +120,38 @@ steps:
       rebuild: true
       auto_cache: true
 ```
+
+#### sbt (Coursier) Details
+
+- **Detection/key:** A committed `build.sbt.lock` at the root or one level below
+  contributes its content MD5 (32 lowercase hex characters). There is no
+  `build.sbt` fallback: arbitrary Scala build definitions cannot be fully hashed
+  by this detector. Only the shortest root/one-level match is selected.
+- **Cached path:** Only `<COURSIER_CACHE>/https` (downloaded HTTPS artifacts and
+  resolution metadata). Without the variable, the plugin selects
+  `<workspace>/.cache/sbt/https`; it does not reconfigure sbt. Absolute overrides
+  are honored; relative values resolve from the process working directory.
+- **Required environment:** Until the companion harness-core injection ships,
+  set `COURSIER_CACHE=/harness/.cache/sbt` (or `<workspace>/.cache/sbt`) for
+  restore, build, and save. This moves Coursier downloads for other Coursier
+  clients too, but does not move credentials, configuration or installed binaries.
+  Explicit `csrCacheDirectory` or `sbt.coursier.home` overrides must agree with
+  this variable. No existing configuration is changed.
+- **Excluded/unsupported:** `target`, sbt boot/global state, Ivy repositories,
+  JDK installations and credential files are not selected. Do not embed
+  credentials in repository URLs. HTTP/file repositories, `useCoursier=false`,
+  custom lockfile names, generated lockfiles, deeper discovery and aggregating
+  keys for independent builds are unsupported. Lockfile changes invalidate;
+  changed build/plugin settings can require additional downloads. Existing
+  legacy-only keys are unchanged; mixed repositories newly detecting sbt start cold.
+- **Evidence:** `cache-intel.sh test --all --tool sbt --worker-id w1` passed
+  cold/save/fresh-checkout/warm/offline/invalidation on public
+  [baseledger v0.1.1](https://github.com/baseledger-io/baseledger/tree/v0.1.1)
+  (202 root locked dependencies), using sbt 1.12.9, JDK 17.0.15 on Linux amd64.
+  Offline application resolution uses Coursier `LocalOnly`; sbt launcher and
+  meta-build initialization can still need online bootstrap and are not cached.
+  See generated `REPORT.md` for timings, archive size and gate evidence. Native
+  macOS/Windows execution and remote performance have not been validated.
 
 #### Cargo (Rust) Details
 

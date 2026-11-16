@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [#142](https://github.com/meltwater/drone-cache/issues/142) backend/s3: Add option to assume AWS IAM role
 ### Added
 
+- CI-25880: Add sbt `build.sbt.lock` autodetection and Coursier HTTPS download caching via shared `COURSIER_CACHE`; exclude build output, bootstrap state and credentials. See README sbt details.
+
 - Add PHP Composer autodetect caching support using `composer.lock` and `composer.json`.
 - Add Cargo autodetect download caching using `Cargo.lock` and the shared `CARGO_HOME` environment. Cache registry index, crate archives and Git databases only; exclude credentials, configuration, binaries and build output. See README Cargo details.
 
