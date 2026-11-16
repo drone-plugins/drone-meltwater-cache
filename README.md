@@ -70,7 +70,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 |------------|----------------|----------------|-----------------|-----------------|
 | **Maven** | `pom.xml` | `.mvn/maven.config` | `.m2/repository` | ✅ Appended |
 | **Gradle** | `build.gradle[.kts]` | `gradle.properties` | `.gradle` | ✅ Appended |
-| **sbt** | `build.sbt.lock` | required `COURSIER_CACHE` shared across steps | `.cache/sbt/https` | ✅ Read-only |
+| **sbt** | `build.sbt.lock` / `build.sbt` | required `COURSIER_CACHE` shared across steps | `.cache/sbt/https` | ✅ Read-only |
 | **Node.js** | `package-lock.json` | existing `npm_config_cache` / `.npmrc` `cache`, or `~/.npm` when that path is already inside the workspace | `.npm` | ✅ Read-only. Does not write `.npmrc` |
 | **Yarn** | `yarn.lock` | `.yarnrc` | `.yarn/cache` | ✅ Appended |
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
@@ -123,10 +123,11 @@ steps:
 
 #### sbt (Coursier) Details
 
-- **Detection/key:** A committed `build.sbt.lock` at the root or one level below
-  contributes its content MD5 (32 lowercase hex characters). There is no
-  `build.sbt` fallback: arbitrary Scala build definitions cannot be fully hashed
-  by this detector. Only the shortest root/one-level match is selected.
+- **Detection/key:** Automatically detects `build.sbt.lock` (primary) or `build.sbt`
+  (fallback for projects that do not commit a lockfile). When `build.sbt.lock` is
+  present, its content MD5 determines the key. For projects without a lockfile,
+  the key is computed from `build.sbt` plus `project/build.properties` (if present).
+  Only the shortest root/one-level match is selected.
 - **Cached path:** Only `<COURSIER_CACHE>/https` (downloaded HTTPS artifacts and
   resolution metadata). Without the variable, the plugin selects
   `<workspace>/.cache/sbt/https`; it does not reconfigure sbt. Absolute overrides

@@ -25,7 +25,9 @@ func TestScenario_Sbt_Detection(t *testing.T) {
 		{"root", []string{"build.sbt.lock"}, true},
 		{"nested", []string{"app/build.sbt.lock"}, true},
 		{"deep", []string{"a/b/build.sbt.lock"}, false},
-		{"manifest", []string{"build.sbt"}, false},
+		{"manifest", []string{"build.sbt"}, true},
+		{"manifestNested", []string{"app/build.sbt"}, true},
+		{"manifestDeep", []string{"a/b/build.sbt"}, false},
 		{"customLock", []string{"build.scala-2.13.sbt.lock"}, false},
 		{"rootAndNested", []string{"build.sbt.lock", "app/build.sbt.lock"}, true},
 		{"siblings", []string{"a/build.sbt.lock", "b/build.sbt.lock"}, true},
@@ -94,3 +96,32 @@ func TestScenario_Sbt_Skip(t *testing.T) {
 	test.Equals(t, 0, len(tools))
 	test.Equals(t, "", key)
 }
+
+func TestScenario_Sbt_Manifest_Keys(t *testing.T) {
+	sbtWorkspace(t)
+	sbtWrite(t, "build.sbt", "val cats = \"2.10.0\"")
+	dirs, tools, key1, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Equals(t, []string{"sbt"}, tools)
+	test.Equals(t, 1, len(dirs))
+	test.Equals(t, fmt.Sprintf("%x", md5.Sum([]byte("val cats = \"2.10.0\""))), key1)
+
+	// Changing build.sbt invalidates key
+	sbtWrite(t, "build.sbt", "val cats = \"2.11.0\"")
+	_, _, key2, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Assert(t, key1 != key2, "build.sbt edit must invalidate key")
+
+	// Adding project/build.properties adds its hash to key
+	sbtWrite(t, "project/build.properties", "sbt.version=1.10.7")
+	_, _, key3, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Assert(t, key2 != key3, "project/build.properties must contribute to key")
+
+	// Adding build.sbt.lock takes precedence
+	sbtWrite(t, "build.sbt.lock", "lock-override")
+	_, _, key4, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Equals(t, fmt.Sprintf("%x", md5.Sum([]byte("lock-override"))), key4)
+}
+
