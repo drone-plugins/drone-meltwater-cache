@@ -43,6 +43,7 @@ pipeline:
             spec:
               connectorRef: __K8S_CONNECTOR__
               namespace: __K8S_NAMESPACE__
+              harnessImageConnectorRef: __DOCKER_CONNECTOR__
               automountServiceAccountToken: true
               nodeSelector: {}
               os: Linux
@@ -130,6 +131,7 @@ pipeline:
             spec:
               connectorRef: __K8S_CONNECTOR__
               namespace: __K8S_NAMESPACE__
+              harnessImageConnectorRef: __DOCKER_CONNECTOR__
               automountServiceAccountToken: true
               nodeSelector: {}
               os: Linux
@@ -242,6 +244,7 @@ pipeline:
             spec:
               connectorRef: __K8S_CONNECTOR__
               namespace: __K8S_NAMESPACE__
+              harnessImageConnectorRef: __DOCKER_CONNECTOR__
               automountServiceAccountToken: true
               nodeSelector: {}
               os: Linux
