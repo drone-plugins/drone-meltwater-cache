@@ -70,6 +70,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 |------------|----------------|----------------|-----------------|-----------------|
 | **Maven** | `pom.xml` | `.mvn/maven.config` | `.m2/repository` | ✅ Appended |
 | **Gradle** | `build.gradle[.kts]` | `gradle.properties` | `.gradle` | ✅ Appended |
+| **sbt** | `build.sbt.lock` / `build.sbt` | required `COURSIER_CACHE` shared across steps | `.cache/sbt/https` | ✅ Read-only |
 | **Node.js** | `package-lock.json` | existing `npm_config_cache` / `.npmrc` `cache`, or `~/.npm` when that path is already inside the workspace | `.npm` | ✅ Read-only. Does not write `.npmrc` |
 | **Yarn** | `yarn.lock` | `.yarnrc` | `.yarn/cache` | ✅ Appended |
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
@@ -119,6 +120,18 @@ steps:
       rebuild: true
       auto_cache: true
 ```
+
+#### sbt (Scala) Details
+
+`build.sbt.lock` (primary) or `build.sbt` (fallback when no lockfile is present) detects sbt at the repository root or one directory level below.
+The cache key is calculated from the checksum of `build.sbt.lock` (or `build.sbt` plus `project/build.properties`).
+
+The plugin caches only Coursier dependency downloads under `COURSIER_CACHE`:
+- `.cache/sbt/https` (downloaded HTTPS artifacts and resolution metadata)
+
+**Build environment:** Set `COURSIER_CACHE=/harness/.cache/sbt` (or `<workspace>/.cache/sbt` on non-containerized runners) in restore, build, and save steps so dependency downloads are stored in the shared workspace.
+
+Compiler build artifacts (`target/`), sbt boot and launcher state (`.sbt/`), Ivy repositories (`.ivy2/`), and credentials (`credentials.sbt`) are strictly excluded.
 
 #### Cargo (Rust) Details
 
