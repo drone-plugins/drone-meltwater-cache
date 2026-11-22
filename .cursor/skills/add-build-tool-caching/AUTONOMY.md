@@ -20,7 +20,7 @@ Apply these in order and record the decision instead of asking:
 
 1. Limit scope to the assigned tool and existing engine capabilities.
 2. Prefer a package/download/content-addressed cache that the tool validates.
-3. Exclude build outputs, toolchains, credentials, daemon state, and ABI-coupled content by default. Include an installed tree only when direct lifecycle evidence proves archive fidelity, lockfile invalidation, portability across the claimed support matrix, and clear value over restore/save overhead; otherwise exclude it without asking.
+3. Exclude build outputs, toolchains, credentials, daemon state, and ABI-coupled content by default. Include an installed tree only when direct lifecycle evidence proves archive fidelity, lockfile invalidation, portability across the claimed support matrix, and clear value over restore/save overhead; otherwise exclude it without asking. Dedicated compiler caches (such as ccache and sccache) are an explicitly authorized exception for their content-addressed compiler cache directory (e.g. CCACHE_DIR, .cache/ccache) when assigned that tool; enforce an appropriate size limit (e.g. CCACHE_MAXSIZE=5G) and key on compiler/lockfile/manifest inputs as described in TOOL-PATTERNS.md.
 4. Prefer a committed lockfile as the detection and key input. Use a manifest fallback only for ecosystems where lockless projects are normal.
 5. Preserve existing mapping order. Propose the new entry immediately before the generic fallback it should supersede, otherwise after related tools; characterize mixed-tool key effects.
 6. Honor explicit environment configuration, then existing native project configuration.
@@ -45,7 +45,7 @@ Ask the user only when at least one condition applies:
 - a destructive action, cache deletion, force push, merge, release, deployment, registry publication, or unapproved external write is required;
 - a material limitation must be accepted as supported behavior rather than documented as unsupported.
 
-Batch all current user-owned decisions into one request. Put the recommended option first and include consequences. Do not ask about fixture selection, routine naming, safe cache exclusions, local test strategy, or unavailable remote access.
+Batch all current user-owned decisions into one request. Put the recommended option first and include consequences. Do not ask about fixture selection, routine naming, safe cache exclusions, local test strategy, unavailable remote access, or caching compiler cache stores (ccache, sccache) when assigned that tool.
 
 Native approval dialogs for Harness writes/executions and other protected external actions are unavoidable. Preview the payload once in chat, then rely on the native approval instead of asking twice.
 

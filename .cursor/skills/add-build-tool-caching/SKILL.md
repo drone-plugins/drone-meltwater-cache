@@ -96,7 +96,7 @@ Before any other phase, decide which kind of work this is. It determines how muc
 ## Operating principles
 
 1. **Evidence before design**: inspect official tool behavior and real projects before choosing paths.
-2. **Cache downloads, not fragile state**: prefer package/artifact caches over virtual environments, build outputs, credentials, locks, sockets, or machine-specific files.
+2. **Cache downloads, not fragile state**: prefer package/artifact caches over virtual environments, build outputs, credentials, locks, sockets, or machine-specific files. Dedicated compiler caches (ccache, sccache) under `CCACHE_DIR`/`SCCACHE_DIR` are an explicitly authorized exception when assigned that tool; cap directory growth with `CCACHE_MAXSIZE`.
 3. **Respect user configuration**: environment variables and existing native configuration normally take precedence over generated defaults.
 4. **Prefer repository-local defaults**: CI steps may only share the workspace. Use an external path only when it is explicitly configured and available across steps.
 5. **Detect precisely**: use lockfiles when available. Define precedence and coexistence rules for hybrid repositories.
@@ -208,7 +208,7 @@ Estimated time saved vs. restore/save overhead:
 Decision: cache / exclude / investigate
 ```
 
-Do not cache an environment or output merely because it improves one warm run. For example, Python `.venv` and `venv` directories embed interpreter paths and should be rebuilt from the package-download cache. Default to download caches; treat installed trees, build outputs, and toolchains as separate, explicitly justified decisions.
+Do not cache an environment or output merely because it improves one warm run. For example, Python `.venv` and `venv` directories embed interpreter paths and should be rebuilt from the package-download cache. Default to download caches; treat installed trees, build outputs, and toolchains as separate, explicitly justified decisions. (Compiler caches like ccache and sccache are pre-authorized exceptions for their content-addressed compiler cache directory under `.cache/<tool>`).
 
 Apply the value check in `TOOL-PATTERNS.md`. Recommending that a path *not* be cached is a valid research outcome.
 
