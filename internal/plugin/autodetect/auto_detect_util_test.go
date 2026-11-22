@@ -500,7 +500,7 @@ func TestDetectDirectoriesToCacheNodeFallbackIgnoresOtherPackageManagers(t *test
 			test.Ok(t, err)
 
 			test.Equals(t, buildToolsDetected, []string{jsLockfileTools[lockfile]})
-			test.Assert(t, len(directoriesToCache) == 2, "expected package manager cache paths, got %v", directoriesToCache)
+			test.Equals(t, jsLockfileCacheDirs[lockfile], len(directoriesToCache))
 		})
 	}
 }
@@ -510,6 +510,42 @@ var jsLockfileTools = map[string]string{
 	"pnpm-lock.yaml": "pnpm",
 	"bun.lock":       "bun",
 	"bun.lockb":      "bun",
+}
+
+func TestDropNestedPaths(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "harness")
+	for _, tc := range []struct {
+		name     string
+		paths    []string
+		expected []string
+	}{
+		{name: "nil", paths: nil, expected: nil},
+		{name: "unrelated", paths: []string{root + "/a", root + "/b"}, expected: []string{root + "/a", root + "/b"}},
+		{name: "childAfterParent", paths: []string{root + "/node_modules", root + "/node_modules/.cache/bun"}, expected: []string{root + "/node_modules"}},
+		{name: "childBeforeParent", paths: []string{root + "/node_modules/.cache/bun", root + "/node_modules"}, expected: []string{root + "/node_modules"}},
+		{name: "siblingPrefix", paths: []string{root + "/node_modules", root + "/node_modules2"}, expected: []string{root + "/node_modules", root + "/node_modules2"}},
+		{name: "nestedProjectKept", paths: []string{root + "/node_modules/.cache/bun", root + "/app/node_modules"}, expected: []string{root + "/node_modules/.cache/bun", root + "/app/node_modules"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths, expected []string
+			for _, p := range tc.paths {
+				paths = append(paths, filepath.FromSlash(p))
+			}
+			for _, p := range tc.expected {
+				expected = append(expected, filepath.FromSlash(p))
+			}
+			test.Equals(t, expected, dropNestedPaths(paths))
+		})
+	}
+}
+
+// Bun's default cache lives in node_modules/.cache/bun, inside the cached
+// node_modules, so Bun has a single path.
+var jsLockfileCacheDirs = map[string]int{
+	"yarn.lock":      2,
+	"pnpm-lock.yaml": 2,
+	"bun.lock":       1,
+	"bun.lockb":      1,
 }
 
 func TestDetectDirectoriesToCacheNodeFallbackDoesNotUseNestedPackageJSONWhenRootIsBlocked(t *testing.T) {
@@ -535,7 +571,7 @@ func TestDetectDirectoriesToCacheNodeFallbackDoesNotUseNestedPackageJSONWhenRoot
 			test.Assert(t, !fallback, "expected no package.json fallback when a root lockfile blocks it")
 
 			test.Equals(t, buildToolsDetected, []string{jsLockfileTools[lockfile]})
-			test.Assert(t, len(directoriesToCache) == 2, "expected package manager cache paths, got %v", directoriesToCache)
+			test.Equals(t, jsLockfileCacheDirs[lockfile], len(directoriesToCache))
 		})
 	}
 }

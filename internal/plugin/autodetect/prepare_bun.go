@@ -14,6 +14,10 @@ func newBunPreparer() *bunPreparer { return &bunPreparer{} }
 // BUN_INSTALL_CACHE_DIR (cwd-relative), then [install.cache] dir in
 // bunfig.toml (project-relative), then $BUN_INSTALL/install/cache. The
 // default matches Harness's shared-workspace injection. Nothing is written.
+//
+// The cache holds unpacked packages under their real file names, so it must
+// sit under a node_modules segment: repo-wide `eslint .` and
+// `prettier --check .` skip node_modules but lint any other directory.
 func (*bunPreparer) PrepareRepo(dir string) (string, error) {
 	if value := os.Getenv("BUN_INSTALL_CACHE_DIR"); strings.TrimSpace(value) != "" {
 		cwd, err := os.Getwd()
@@ -39,5 +43,5 @@ func (*bunPreparer) PrepareRepo(dir string) (string, error) {
 		return resolveRepoPath(cwd, filepath.Join(home, "install", "cache"))
 	}
 
-	return resolveRepoPath(workspaceRoot(dir), filepath.Join(".cache", "bun"))
+	return resolveRepoPath(workspaceRoot(dir), filepath.Join("node_modules", ".cache", "bun"))
 }

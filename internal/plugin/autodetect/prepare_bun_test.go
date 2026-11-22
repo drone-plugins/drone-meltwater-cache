@@ -14,12 +14,12 @@ func Test_bunPreparer_CacheResolution(t *testing.T) {
 	for _, tc := range []struct {
 		name, env, install, bunfig, cache string
 	}{
-		{name: "default", cache: ".cache/bun"},
+		{name: "default", cache: "node_modules/.cache/bun"},
 		{name: "env", env: "env-cache", cache: "env-cache"},
 		{name: "envSpaces", env: " bun cache ", cache: " bun cache "},
 		{name: "bunfig", bunfig: "[install.cache]\ndir = \"bunfig-cache\" # pinned\n", cache: "bunfig-cache"},
 		{name: "envBeatsBunfig", env: "env-cache", bunfig: "[install.cache]\ndir = \"bunfig-cache\"\n", cache: "env-cache"},
-		{name: "otherTableIgnored", bunfig: "[install]\ndir = \"nope\"\n", cache: ".cache/bun"},
+		{name: "otherTableIgnored", bunfig: "[install]\ndir = \"nope\"\n", cache: "node_modules/.cache/bun"},
 		{name: "bunInstall", install: "bun-home", cache: "bun-home/install/cache"},
 		{name: "bunfigBeatsBunInstall", install: "bun-home", bunfig: "[install.cache]\ndir = 'bunfig-cache'\n", cache: "bunfig-cache"},
 	} {
@@ -54,14 +54,15 @@ func TestScenario_Bun_Detection(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		files []string
-		dir   string
 		key   string
+		dirs  []string
 	}{
-		{"textLock", []string{"bun.lock"}, ".", "content-0"},
-		{"binaryLock", []string{"bun.lockb"}, ".", "content-0"},
-		{"textWinsOverBinary", []string{"bun.lockb", "bun.lock"}, ".", "content-1"},
-		{"nested", []string{"app/bun.lock"}, "app", "content-0"},
-		{"nestedBinary", []string{"app/bun.lockb"}, "app", "content-0"},
+		{"textLock", []string{"bun.lock"}, "content-0", []string{"node_modules"}},
+		{"binaryLock", []string{"bun.lockb"}, "content-0", []string{"node_modules"}},
+		{"textWinsOverBinary", []string{"bun.lockb", "bun.lock"}, "content-1", []string{"node_modules"}},
+		// The workspace-root cache is outside app/node_modules, so both are cached.
+		{"nested", []string{"app/bun.lock"}, "content-0", []string{"node_modules/.cache/bun", "app/node_modules"}},
+		{"nestedBinary", []string{"app/bun.lockb"}, "content-0", []string{"node_modules/.cache/bun", "app/node_modules"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := jsWorkspace(t)
@@ -72,9 +73,25 @@ func TestScenario_Bun_Detection(t *testing.T) {
 			test.Ok(t, err)
 			test.Equals(t, []string{"bun"}, tools)
 			test.Equals(t, fmt.Sprintf("%x", md5.Sum([]byte(tc.key))), key)
-			test.Equals(t, []string{filepath.Join(root, ".cache", "bun"), filepath.Join(root, tc.dir, "node_modules")}, dirs)
+			var expected []string
+			for _, dir := range tc.dirs {
+				expected = append(expected, filepath.Join(root, dir))
+			}
+			test.Equals(t, expected, dirs)
 		})
 	}
+}
+
+// Harness injects BUN_INSTALL_CACHE_DIR=/harness/node_modules/.cache/bun.
+func TestScenario_Bun_HarnessEnvCacheInsideNodeModules(t *testing.T) {
+	root := jsWorkspace(t)
+	t.Setenv("BUN_INSTALL_CACHE_DIR", filepath.Join(root, "node_modules", ".cache", "bun")+string(filepath.Separator))
+	cargoWrite(t, "bun.lock", "lock")
+
+	dirs, tools, _, err := DetectDirectoriesToCache(false)
+	test.Ok(t, err)
+	test.Equals(t, []string{"bun"}, tools)
+	test.Equals(t, []string{filepath.Join(root, "node_modules")}, dirs)
 }
 
 func TestScenario_Bun_Keys(t *testing.T) {

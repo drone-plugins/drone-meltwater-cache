@@ -27,12 +27,12 @@ func TestScenario_AllJSLockfilesPresent_ClassicYarn(t *testing.T) {
 	// All 4 tools are detected
 	test.Equals(t, []string{"node", "yarn", "pnpm", "bun"}, buildToolsDetected)
 
-	// Dirs to cache include node_modules, .yarn, .cache/pnpm, .cache/bun (deduplicated)
+	// Dirs to cache include node_modules, .yarn, .cache/pnpm (deduplicated). Bun's
+	// cache sits in node_modules/.cache/bun, so the node_modules archive covers it.
 	expectedDirs := []string{
 		filepath.Join(root, "node_modules"),
 		filepath.Join(root, ".yarn"),
 		filepath.Join(root, ".cache", "pnpm"),
-		filepath.Join(root, ".cache", "bun"),
 	}
 	test.Equals(t, expectedDirs, directoriesToCache)
 
@@ -65,7 +65,6 @@ func TestScenario_AllJSLockfilesPresent_YarnBerry(t *testing.T) {
 		filepath.Join(root, ".yarn", "cache"),
 		filepath.Join(root, ".yarn", "install-state.gz"),
 		filepath.Join(root, ".cache", "pnpm"),
-		filepath.Join(root, ".cache", "bun"),
 	}
 	test.Equals(t, expectedDirs, directoriesToCache)
 	test.Equals(t, 224, len(hashes))
@@ -104,10 +103,7 @@ func TestScenario_BunTextAndBinaryBothPresent(t *testing.T) {
 
 	// Only bun is detected once
 	test.Equals(t, []string{"bun"}, buildToolsDetected)
-	test.Equals(t, []string{
-		filepath.Join(root, ".cache", "bun"),
-		filepath.Join(root, "node_modules"),
-	}, directoriesToCache)
+	test.Equals(t, []string{filepath.Join(root, "node_modules")}, directoriesToCache)
 }
 
 func TestScenario_AllBuildToolsPresent(t *testing.T) {

@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [#142](https://github.com/meltwater/drone-cache/issues/142) backend/s3: Add option to assume AWS IAM role
 ### Added
 
-- Add pnpm and Bun autodetect caching using `pnpm-lock.yaml` and `bun.lock` / `bun.lockb`, plus `node_modules`. The store and cache come from the shared `pnpm_config_store_dir` / `npm_config_store_dir` and `BUN_INSTALL_CACHE_DIR` environment; no project config is written. See README JavaScript details.
+- Add pnpm and Bun autodetect caching using `pnpm-lock.yaml` and `bun.lock` / `bun.lockb`, plus `node_modules`. The store and cache come from the shared `pnpm_config_store_dir` / `npm_config_store_dir` and `BUN_INSTALL_CACHE_DIR` environment; no project config is written. Bun's default cache is `node_modules/.cache/bun`, so `eslint .` and `prettier --check .` skip it and it ships inside the `node_modules` archive. See README JavaScript details.
 - Fix Yarn Berry (v2+) caching: cache `.yarn/cache` and `.yarn/install-state.gz` instead of all of `.yarn`, and stop writing `.yarnrc` / `.yarnrc.yaml`, which Berry never read. Requires the shared `YARN_ENABLE_GLOBAL_CACHE=false` environment. Yarn 1 is unchanged.
 - Add sbt autodetect download caching using `build.sbt.lock` (primary) and `build.sbt` (fallback) via the shared `COURSIER_CACHE` environment. Cache Coursier HTTPS downloads only; exclude build output, bootstrap state and credentials. See README sbt details.
 - Add PHP Composer autodetect caching support using `composer.lock` and `composer.json`.

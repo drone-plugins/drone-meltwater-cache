@@ -306,7 +306,27 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 		}
 	}
 
-	return directoriesToCache, buildToolsDetected, hashes, nil
+	return dropNestedPaths(directoriesToCache), buildToolsDetected, hashes, nil
+}
+
+// dropNestedPaths removes paths that sit inside another cached path, such as
+// Bun's cache under node_modules/.cache/bun. The parent archive already
+// contains them, and archiving both would upload the same files twice.
+func dropNestedPaths(paths []string) []string {
+	var kept []string
+	for _, path := range paths {
+		nested := false
+		for _, other := range paths {
+			if other != path && pathWithin(path, other) {
+				nested = true
+				break
+			}
+		}
+		if !nested {
+			kept = append(kept, path)
+		}
+	}
+	return kept
 }
 
 // NpmPackageJSONFallbackDetected reports whether package.json was selected as fallback.
