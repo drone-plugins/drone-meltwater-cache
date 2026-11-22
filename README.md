@@ -85,6 +85,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **CocoaPods** | `Podfile` (key adds `Podfile.lock`) | `CP_CACHE_DIR` / `CP_HOME_DIR` | `Pods`, plus `~/Library/Caches/CocoaPods` and `~/.cocoapods/cache` on macOS | ✅ Read-only |
 | **Swift PM** | `Package.swift` (key adds `Package.resolved`) | None | `.build/checkouts`, `.build/repositories`, plus `~/Library/Caches/org.swift.swiftpm` on macOS | ✅ Read-only |
 | **Cargo** | `Cargo.lock` | required `CARGO_HOME` shared across steps | `.cache/cargo/{registry/index,registry/cache,git/db}` | ✅ Read-only; excludes config and credentials |
+| **ccache** | `ccache.conf`, or a CMake ccache module such as `cmake/ccache.cmake` | required `CCACHE_DIR` shared across steps | `.cache/ccache/{0..f}` | ✅ Read-only; excludes root config and temporary files |
 
 #### iOS Build Tool Details
 
@@ -132,6 +133,42 @@ The plugin caches only Coursier dependency downloads under `COURSIER_CACHE`:
 **Build environment:** Set `COURSIER_CACHE=/harness/.cache/sbt` (or `<workspace>/.cache/sbt` on non-containerized runners) in restore, build, and save steps so dependency downloads are stored in the shared workspace.
 
 Compiler build artifacts (`target/`), sbt boot and launcher state (`.sbt/`), Ivy repositories (`.ivy2/`), and credentials (`credentials.sbt`) are strictly excluded.
+
+#### ccache Compiler Cache Details
+
+- **Detection:** opt-in. Either a `ccache.conf`, or a CMake module whose name ends
+  in `ccache.cmake` in any letter case (`ccache.cmake`, `Ccache.cmake`,
+  `CCache.cmake`, `EnableCcache.cmake`, `FindCCache.cmake`, ...), at the
+  repository root or one directory level below (for example `cmake/`). `sccache`
+  modules are not matched, and `CMakeLists.txt` or a `Makefile` alone does not
+  enable compiler caching. `ccache.conf` wins over a module; otherwise the
+  shortest match is used. Other detected tools coexist.
+- **Cached paths:** the sixteen data shards `0` through `f` below `CCACHE_DIR`
+  (fallback `<workspace>/.cache/ccache`). The root `ccache.conf`, which
+  `ccache --set-config` may fill with remote-storage credentials, and `tmp` are
+  never archived. Missing shards are skipped on save.
+- **Key:** MD5 of the selected detection file only. ccache validates the
+  compiler, flags, sources and headers of every entry itself, so source edits keep
+  the same archive and simply refresh it on save (`override` is on by default).
+- **Build environment:** `CCACHE_DIR` must point at the shared workspace for
+  restore, build and save; harness-core injects `/harness/.cache/ccache` when Cache
+  Intelligence is enabled. ccache's default `max_size` of 5 GiB bounds the cache;
+  set `CCACHE_MAXSIZE` or `max_size` to lower it. The plugin does not install
+  ccache or wrap compilers: the build must use ccache, for example with
+  `-DCMAKE_<LANG>_COMPILER_LAUNCHER=ccache` or the project's own option
+  (`-DENABLE_CCACHE=ON`).
+- **Configuration compatibility:** with `CCACHE_DIR` set, ccache reads its
+  configuration from `$CCACHE_DIR/ccache.conf` unless `CCACHE_CONFIGPATH` is set;
+  keep existing settings with `CCACHE_CONFIGPATH` or `CCACHE_*` variables. A
+  repository `ccache.conf` is a detection signal and is not loaded automatically.
+- **Validation:** Linux, ccache 4.9.1, GCC 13 and CMake 3.28 against
+  herbstluftwm v0.9.5 (`cmake/ccache.cmake`), GEOS 3.13.0 (`cmake/Ccache.cmake`)
+  and fmt 11.1.4 (with a `ccache.conf`): a fresh checkout restored the cache and
+  every compilation was a ccache hit.
+  Native Windows and macOS builds are not validated. Use trusted storage, since
+  the archive holds compiler output.
+
+Native behavior is documented in the [ccache manual](https://ccache.dev/manual/latest.html).
 
 #### Cargo (Rust) Details
 
