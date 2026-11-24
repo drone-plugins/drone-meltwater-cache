@@ -215,6 +215,19 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:            newCcachePreparer(),
 			additionalCacheDirs: ccacheAdditionalDirs,
 		},
+		// Fallback for plain C/C++ repos that already invoke ccache via launcher or PATH without a ccache config/module.
+		{
+			globToDetect:        "CMakeLists.txt",
+			tool:                "ccache",
+			preparer:            newCcachePreparer(),
+			additionalCacheDirs: ccacheAdditionalDirs,
+		},
+		{
+			globToDetect:        "Makefile",
+			tool:                "ccache",
+			preparer:            newCcachePreparer(),
+			additionalCacheDirs: ccacheAdditionalDirs,
+		},
 		{
 			globToDetect:       "vcpkg.json",
 			tool:               "vcpkg",

@@ -28,7 +28,7 @@ func TestScenario_Vcpkg_Detection(t *testing.T) {
 			"vcpkg-configuration.json": `{"default-registry":{"kind":"builtin"}}`,
 		}, true},
 		{"tooDeep", map[string]string{"a/b/vcpkg.json": `{}`}, false},
-		{"plainCmake", map[string]string{"CMakeLists.txt": "project(app)"}, false},
+		{"plainReadme", map[string]string{"README.md": "hello"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := vcpkgWorkspace(t)

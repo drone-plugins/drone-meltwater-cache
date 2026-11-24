@@ -25,7 +25,7 @@ func TestScenario_Conan_Detection(t *testing.T) {
 		{"conanfilePy", map[string]string{"conanfile.py": "from conan import ConanFile\n"}, true},
 		{"nested", map[string]string{"cpp/conanfile.txt": "[requires]\nzlib/1.3.1\n"}, true},
 		{"tooDeep", map[string]string{"a/b/conanfile.txt": "[requires]\n"}, false},
-		{"plainCmake", map[string]string{"CMakeLists.txt": "project(app)"}, false},
+		{"plainReadme", map[string]string{"README.md": "hello"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := conanWorkspace(t)

@@ -85,7 +85,7 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **CocoaPods** | `Podfile` (key adds `Podfile.lock`) | `CP_CACHE_DIR` / `CP_HOME_DIR` | `Pods`, plus `~/Library/Caches/CocoaPods` and `~/.cocoapods/cache` on macOS | ✅ Read-only |
 | **Swift PM** | `Package.swift` (key adds `Package.resolved`) | None | `.build/checkouts`, `.build/repositories`, plus `~/Library/Caches/org.swift.swiftpm` on macOS | ✅ Read-only |
 | **Cargo** | `Cargo.lock` | required `CARGO_HOME` shared across steps | `.cache/cargo/{registry/index,registry/cache,git/db}` | ✅ Read-only; excludes config and credentials |
-| **ccache** | `ccache.conf`, or a CMake ccache module such as `cmake/ccache.cmake` | required `CCACHE_DIR` shared across steps | `.cache/ccache/{0..f}` | ✅ Read-only; excludes root config and temporary files |
+| **ccache** | `ccache.conf`, CMake ccache module (`cmake/ccache.cmake`), or `CMakeLists.txt` / `Makefile` fallback | required `CCACHE_DIR` shared across steps | `.cache/ccache/{0..f}` | ✅ Read-only; excludes root config and temporary files |
 | **vcpkg** | `vcpkg.json` (key adds `vcpkg-configuration.json`) / `vcpkg-configuration.json` | required `VCPKG_DEFAULT_BINARY_CACHE` shared across steps | `.cache/vcpkg` | Creates the binary cache directory on cold runs so vcpkg succeeds |
 | **Conan** | `conan.lock` / `conanfile.txt` / `conanfile.py` | required `CONAN_HOME` shared across steps | `.conan2/p` | ✅ Read-only; excludes `credentials.json`, `global.conf`, `remotes.json`, profiles |
 
@@ -138,22 +138,24 @@ Compiler build artifacts (`target/`), sbt boot and launcher state (`.sbt/`), Ivy
 
 #### ccache Compiler Cache Details
 
-- **Detection:** opt-in. Either a `ccache.conf`, or a CMake module whose name ends
-  in `ccache.cmake` in any letter case (`ccache.cmake`, `Ccache.cmake`,
-  `CCache.cmake`, `EnableCcache.cmake`, `FindCCache.cmake`, ...), at the
-  repository root or one directory level below (for example `cmake/`). `sccache`
-  modules are not matched, and `CMakeLists.txt` or a `Makefile` alone does not
-  enable compiler caching. `ccache.conf` wins over a module; otherwise the
-  shortest match is used. Other detected tools coexist.
+- **Detection:** `ccache.conf`, a CMake module whose name ends in `ccache.cmake`
+  in any letter case (`ccache.cmake`, `Ccache.cmake`, `CCache.cmake`,
+  `EnableCcache.cmake`, `FindCCache.cmake`, ...), or `CMakeLists.txt` /
+  `Makefile` as fallback, at the repository root or one directory level below
+  (for example `cmake/`). `sccache` modules are not matched. `ccache.conf` wins
+  over a CMake ccache module, which wins over `CMakeLists.txt` / `Makefile`.
+  Other detected tools coexist.
 - **Cached paths:** the sixteen data shards `0` through `f` below `CCACHE_DIR`
   (fallback `<workspace>/.cache/ccache`). The root `ccache.conf`, which
   `ccache --set-config` may fill with remote-storage credentials, and `tmp` are
-  never archived. Missing shards are skipped on save.
+  never archived. Missing shards are skipped on save (so plain CMake/Make repos
+  that don't invoke ccache incur no archive overhead).
 - **Key:** MD5 of the selected detection file only. ccache validates the
   compiler, flags, sources and headers of every entry itself, so source edits keep
   the same archive and simply refresh it on save (`override` is on by default).
 - **Build environment:** `CCACHE_DIR` must point at the shared workspace for
-  restore, build and save; harness-core injects `/harness/.cache/ccache` when Cache
+  restore, build and save, and `CCACHE_BASEDIR` normalizes workspace paths;
+  harness-core injects both (`/harness/.cache/ccache` and `/harness`) when Cache
   Intelligence is enabled. ccache's default `max_size` of 5 GiB bounds the cache;
   set `CCACHE_MAXSIZE` or `max_size` to lower it. The plugin does not install
   ccache or wrap compilers: the build must use ccache, for example with
