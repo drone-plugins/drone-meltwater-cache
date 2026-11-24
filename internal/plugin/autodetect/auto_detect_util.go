@@ -66,8 +66,8 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			globToDetect:       "build.sbt",
 			tool:               "sbt",
 			preparer:           newSbtPreparer(),
-			excludeIfExist:      []string{"build.sbt.lock"},
-			additionalHashGlob:  "project/build.properties",
+			excludeIfExist:     []string{"build.sbt.lock"},
+			additionalHashGlob: "project/build.properties",
 		},
 		{
 			globToDetect: "MODULE.bazel",
@@ -194,6 +194,65 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			tool:                "cargo",
 			preparer:            newCargoPreparer(),
 			additionalCacheDirs: cargoCacheDirs,
+		},
+		{
+			globToDetect:        "ccache.conf",
+			tool:                "ccache",
+			preparer:            newCcachePreparer(),
+			additionalCacheDirs: ccacheAdditionalDirs,
+		},
+		// CMake ccache modules, matched case-insensitively: ccache.cmake, Ccache.cmake, CCache.cmake.
+		{
+			globToDetect:        "[cC][cC][aA][cC][hH][eE].cmake",
+			tool:                "ccache",
+			preparer:            newCcachePreparer(),
+			additionalCacheDirs: ccacheAdditionalDirs,
+		},
+		// Prefixed modules such as EnableCcache.cmake or FindCCache.cmake; [^sS] keeps sccache modules out.
+		{
+			globToDetect:        "*[^sS][cC][cC][aA][cC][hH][eE].cmake",
+			tool:                "ccache",
+			preparer:            newCcachePreparer(),
+			additionalCacheDirs: ccacheAdditionalDirs,
+		},
+		// Fallback for plain C/C++ repos that already invoke ccache via launcher or PATH without a ccache config/module.
+		{
+			globToDetect:        "CMakeLists.txt",
+			tool:                "ccache",
+			preparer:            newCcachePreparer(),
+			additionalCacheDirs: ccacheAdditionalDirs,
+		},
+		{
+			globToDetect:        "Makefile",
+			tool:                "ccache",
+			preparer:            newCcachePreparer(),
+			additionalCacheDirs: ccacheAdditionalDirs,
+		},
+		{
+			globToDetect:       "vcpkg.json",
+			tool:               "vcpkg",
+			preparer:           newVcpkgPreparer(),
+			additionalHashGlob: "vcpkg-configuration.json",
+		},
+		{
+			globToDetect: "vcpkg-configuration.json",
+			tool:         "vcpkg",
+			preparer:     newVcpkgPreparer(),
+		},
+		{
+			globToDetect: "conan.lock",
+			tool:         "conan",
+			preparer:     newConanPreparer(),
+		},
+		{
+			globToDetect: "conanfile.txt",
+			tool:         "conan",
+			preparer:     newConanPreparer(),
+		},
+		{
+			globToDetect: "conanfile.py",
+			tool:         "conan",
+			preparer:     newConanPreparer(),
 		},
 	}
 
