@@ -137,6 +137,11 @@ func npmCacheFromEnv() string {
 
 // npmCacheFromNpmrc returns the cache entry from .npmrc.
 func npmCacheFromNpmrc(fileName string) (string, error) {
+	return npmrcValue(fileName, "cache")
+}
+
+// npmrcValue returns the last value set for key in an npmrc file.
+func npmrcValue(fileName, wantKey string) (string, error) {
 	f, err := os.Open(fileName)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -157,7 +162,7 @@ func npmCacheFromNpmrc(fileName string) (string, error) {
 		}
 
 		key, rest, found := strings.Cut(line, "=")
-		if !found || strings.TrimSpace(key) != "cache" {
+		if !found || strings.TrimSpace(key) != wantKey {
 			continue
 		}
 

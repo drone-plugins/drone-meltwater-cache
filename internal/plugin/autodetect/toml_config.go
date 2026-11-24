@@ -86,6 +86,34 @@ func tomlTableHeader(trimmed string) (string, bool) {
 	return "", false
 }
 
+// tomlStringValue reads a string key from one exact TOML table without
+// modifying the file. An empty section targets the document root.
+func tomlStringValue(path, section, key string) (string, error) {
+	content, _, err := readOptionalFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	targetHeader := "[" + section + "]"
+	inTarget := section == ""
+	var value string
+
+	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if header, ok := tomlTableHeader(trimmed); ok {
+			inTarget = header == targetHeader
+			continue
+		}
+
+		if inTarget && tomlKeyMatches(trimmed, key) {
+			_, rest, _ := strings.Cut(trimmed, "=")
+			value = yamlScalar(rest)
+		}
+	}
+
+	return value, nil
+}
+
 func tomlKeyMatches(line, key string) bool {
 	if strings.HasPrefix(line, "#") {
 		return false

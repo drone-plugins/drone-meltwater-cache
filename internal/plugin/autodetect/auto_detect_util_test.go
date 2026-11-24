@@ -373,6 +373,16 @@ func isolateNpmEnv(t *testing.T) {
 	t.Setenv("NPM_CONFIG_CACHE", "")
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("HARNESS_WORKSPACE", "")
+	isolateJSPackageManagerEnv(t)
+}
+
+func isolateJSPackageManagerEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("pnpm_config_store_dir", "")
+	t.Setenv("npm_config_store_dir", "")
+	t.Setenv("BUN_INSTALL_CACHE_DIR", "")
+	t.Setenv("BUN_INSTALL", "")
+	t.Setenv("YARN_CACHE_FOLDER", "")
 }
 
 // they don't decide these tests' assertions for us.
@@ -489,16 +499,53 @@ func TestDetectDirectoriesToCacheNodeFallbackIgnoresOtherPackageManagers(t *test
 			directoriesToCache, buildToolsDetected, _, err := DetectDirectoriesToCache(false)
 			test.Ok(t, err)
 
-			if lockfile == yarnLockFile {
-				test.Equals(t, buildToolsDetected, []string{toolYarn})
-				test.Assert(t, len(directoriesToCache) == 2, "expected yarn cache paths")
-				return
-			}
-
-			test.Assert(t, directoriesToCache == nil, "expected no npm cache paths, got %v", directoriesToCache)
-			test.Assert(t, buildToolsDetected == nil, "expected no detected tools, got %v", buildToolsDetected)
+			test.Equals(t, buildToolsDetected, []string{jsLockfileTools[lockfile]})
+			test.Equals(t, jsLockfileCacheDirs[lockfile], len(directoriesToCache))
 		})
 	}
+}
+
+var jsLockfileTools = map[string]string{
+	"yarn.lock":      toolYarn,
+	"pnpm-lock.yaml": "pnpm",
+	"bun.lock":       "bun",
+	"bun.lockb":      "bun",
+}
+
+func TestDropNestedPaths(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "harness")
+	for _, tc := range []struct {
+		name     string
+		paths    []string
+		expected []string
+	}{
+		{name: "nil", paths: nil, expected: nil},
+		{name: "unrelated", paths: []string{root + "/a", root + "/b"}, expected: []string{root + "/a", root + "/b"}},
+		{name: "childAfterParent", paths: []string{root + "/node_modules", root + "/node_modules/.cache/bun"}, expected: []string{root + "/node_modules"}},
+		{name: "childBeforeParent", paths: []string{root + "/node_modules/.cache/bun", root + "/node_modules"}, expected: []string{root + "/node_modules"}},
+		{name: "siblingPrefix", paths: []string{root + "/node_modules", root + "/node_modules2"}, expected: []string{root + "/node_modules", root + "/node_modules2"}},
+		{name: "nestedProjectKept", paths: []string{root + "/node_modules/.cache/bun", root + "/app/node_modules"}, expected: []string{root + "/node_modules/.cache/bun", root + "/app/node_modules"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths, expected []string
+			for _, p := range tc.paths {
+				paths = append(paths, filepath.FromSlash(p))
+			}
+			for _, p := range tc.expected {
+				expected = append(expected, filepath.FromSlash(p))
+			}
+			test.Equals(t, expected, dropNestedPaths(paths))
+		})
+	}
+}
+
+// Bun's default cache lives in node_modules/.cache/bun, inside the cached
+// node_modules, so Bun has a single path.
+var jsLockfileCacheDirs = map[string]int{
+	"yarn.lock":      2,
+	"pnpm-lock.yaml": 2,
+	"bun.lock":       1,
+	"bun.lockb":      1,
 }
 
 func TestDetectDirectoriesToCacheNodeFallbackDoesNotUseNestedPackageJSONWhenRootIsBlocked(t *testing.T) {
@@ -523,14 +570,8 @@ func TestDetectDirectoriesToCacheNodeFallbackDoesNotUseNestedPackageJSONWhenRoot
 			test.Ok(t, err)
 			test.Assert(t, !fallback, "expected no package.json fallback when a root lockfile blocks it")
 
-			if lockfile == yarnLockFile {
-				test.Equals(t, buildToolsDetected, []string{toolYarn})
-				test.Assert(t, len(directoriesToCache) == 2, "expected yarn cache paths")
-				return
-			}
-
-			test.Assert(t, directoriesToCache == nil, "expected no npm cache paths, got %v", directoriesToCache)
-			test.Assert(t, buildToolsDetected == nil, "expected no detected tools, got %v", buildToolsDetected)
+			test.Equals(t, buildToolsDetected, []string{jsLockfileTools[lockfile]})
+			test.Equals(t, jsLockfileCacheDirs[lockfile], len(directoriesToCache))
 		})
 	}
 }

@@ -72,7 +72,10 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Gradle** | `build.gradle[.kts]` | `gradle.properties` | `.gradle` | ✅ Appended |
 | **sbt** | `build.sbt.lock` / `build.sbt` | required `COURSIER_CACHE` shared across steps | `.cache/sbt/https` | ✅ Read-only |
 | **Node.js** | `package-lock.json` | existing `npm_config_cache` / `.npmrc` `cache`, or `~/.npm` when that path is already inside the workspace | `.npm` | ✅ Read-only. Does not write `.npmrc` |
-| **Yarn** | `yarn.lock` | `.yarnrc` | `.yarn/cache` | ✅ Appended |
+| **Yarn 1** | `yarn.lock` | `.yarnrc` | `.yarn`, `node_modules` | ✅ Appended |
+| **Yarn Berry (v2+)** | `yarn.lock` (Berry when `.yarnrc.yml`, a `__metadata` lockfile or `packageManager: yarn@2+`) | required `YARN_ENABLE_GLOBAL_CACHE=false`; `YARN_CACHE_FOLDER` / `.yarnrc.yml` `cacheFolder` | `.yarn/cache`, `.yarn/install-state.gz`, `node_modules` | ✅ Read-only. Does not write `.yarnrc.yml` |
+| **pnpm** | `pnpm-lock.yaml` (key adds `package.json`) | required `pnpm_config_store_dir` (pnpm 11+) and `npm_config_store_dir` (pnpm ≤10); `pnpm-workspace.yaml` `storeDir` / `.npmrc` `store-dir` | `.cache/pnpm`, `node_modules` | ✅ Read-only |
+| **Bun** | `bun.lock` / `bun.lockb` (key adds `package.json`) | required `BUN_INSTALL_CACHE_DIR`; `bunfig.toml` `[install.cache] dir` | `node_modules` (includes `node_modules/.cache/bun`) | ✅ Read-only |
 | **Go** | `go.mod` | `$GOPATH/pkg/mod` | `vendor` (Go modules) | ✅ Native |
 | **.NET** | `*.csproj/*.vbproj/.fsproj` | Per-project dirs | `bin/obj` | ✅ Native |
 | **Bazel** | `WORKSPACE/MODULE.bazel` | `.bazelrc` | `bazel-cache` | ✅ Appended |
@@ -146,6 +149,20 @@ The plugin caches only dependency downloads and index metadata under `CARGO_HOME
 **Build environment:** Set `CARGO_HOME=/harness/.cache/cargo` (or `<workspace>/.cache/cargo` on non-containerized runners) in restore, build, and save steps so dependency downloads are stored in the shared workspace.
 
 Compiler build artifacts (`target/`), extracted source (`registry/src/`), installed binaries (`bin/`), and credentials/configuration (`credentials.toml`, `config.toml`) are strictly excluded.
+
+#### JavaScript (pnpm, Bun, Yarn Berry) Details
+
+`pnpm-lock.yaml`, `bun.lock` (preferred over `bun.lockb`) and `yarn.lock` detect the
+tool at the repository root or one directory level below. The cache key is the
+checksum of `package.json` plus the checksum of the lockfile. None of these
+preparers writes project config.
+
+**Build environment:** set these in restore, build, and save steps so downloads land in the shared workspace:
+- pnpm: `pnpm_config_store_dir` and `npm_config_store_dir` both set to `/harness/.cache/pnpm`. pnpm 11+ reads only the first and pnpm ≤10 only the second. Keep the path stable across runs, because pnpm rejects a restored `node_modules` built against a different store.
+- Bun: `BUN_INSTALL_CACHE_DIR=/harness/node_modules/.cache/bun`. Bun's cache holds unpacked packages under their real file names, so it has to sit under `node_modules`, which repo-wide `eslint .` and `prettier --check .` skip. In any other folder of the checkout, such as `.cache/bun`, those commands lint it. A cache path inside another cached path is archived only once, as part of the parent.
+- Yarn Berry: `YARN_ENABLE_GLOBAL_CACHE=false`, so Berry uses its per-project `.yarn/cache`. This overrides `enableGlobalCache: true` in `.yarnrc.yml`, and zero-install repos that commit `.yarn/cache` keep working.
+
+A store path configured in `pnpm-workspace.yaml` (`storeDir`) or `.npmrc` (`store-dir`) is cached too, since pnpm ≤10 lets those override the environment. Plug'n'Play projects have no `node_modules`; that path is skipped.
 
 #### Python Package Manager Details
 
