@@ -86,6 +86,8 @@ The plugin automatically detects the presence of lock/manifest files and configu
 | **Swift PM** | `Package.swift` (key adds `Package.resolved`) | None | `.build/checkouts`, `.build/repositories`, plus `~/Library/Caches/org.swift.swiftpm` on macOS | ✅ Read-only |
 | **Cargo** | `Cargo.lock` | required `CARGO_HOME` shared across steps | `.cache/cargo/{registry/index,registry/cache,git/db}` | ✅ Read-only; excludes config and credentials |
 | **ccache** | `ccache.conf`, or a CMake ccache module such as `cmake/ccache.cmake` | required `CCACHE_DIR` shared across steps | `.cache/ccache/{0..f}` | ✅ Read-only; excludes root config and temporary files |
+| **vcpkg** | `vcpkg.json` (key adds `vcpkg-configuration.json`) / `vcpkg-configuration.json` | required `VCPKG_DEFAULT_BINARY_CACHE` shared across steps | `.cache/vcpkg` | Creates the binary cache directory on cold runs so vcpkg succeeds |
+| **Conan** | `conan.lock` / `conanfile.txt` / `conanfile.py` | required `CONAN_HOME` shared across steps | `.conan2/p` | ✅ Read-only; excludes `credentials.json`, `global.conf`, `remotes.json`, profiles |
 
 #### iOS Build Tool Details
 
@@ -169,6 +171,17 @@ Compiler build artifacts (`target/`), sbt boot and launcher state (`.sbt/`), Ivy
   the archive holds compiler output.
 
 Native behavior is documented in the [ccache manual](https://ccache.dev/manual/latest.html).
+
+#### vcpkg & Conan (C/C++) Details
+
+- **vcpkg (`vcpkg`):** Detected from `vcpkg.json` (with `vcpkg-configuration.json`
+  included in the key when present) or standalone `vcpkg-configuration.json`.
+  Caches `VCPKG_DEFAULT_BINARY_CACHE` (fallback `<workspace>/.cache/vcpkg`) and
+  creates the directory on restore if absent so cold runs do not fail.
+- **Conan 2 (`conan`):** Detected from `conan.lock` (primary), `conanfile.txt`,
+  or `conanfile.py`. Caches only `<CONAN_HOME>/p` (fallback
+  `<workspace>/.conan2/p`), excluding `credentials.json`, `global.conf`,
+  `remotes.json` and profiles.
 
 #### Cargo (Rust) Details
 

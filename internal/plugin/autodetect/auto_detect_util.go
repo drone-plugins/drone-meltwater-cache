@@ -215,6 +215,32 @@ func detectDirectoriesToCache(skipPrepare, forceNpmPackageJSON bool) ([]string, 
 			preparer:            newCcachePreparer(),
 			additionalCacheDirs: ccacheAdditionalDirs,
 		},
+		{
+			globToDetect:       "vcpkg.json",
+			tool:               "vcpkg",
+			preparer:           newVcpkgPreparer(),
+			additionalHashGlob: "vcpkg-configuration.json",
+		},
+		{
+			globToDetect: "vcpkg-configuration.json",
+			tool:         "vcpkg",
+			preparer:     newVcpkgPreparer(),
+		},
+		{
+			globToDetect: "conan.lock",
+			tool:         "conan",
+			preparer:     newConanPreparer(),
+		},
+		{
+			globToDetect: "conanfile.txt",
+			tool:         "conan",
+			preparer:     newConanPreparer(),
+		},
+		{
+			globToDetect: "conanfile.py",
+			tool:         "conan",
+			preparer:     newConanPreparer(),
+		},
 	}
 
 	var directoriesToCache []string
